@@ -205,6 +205,8 @@ async function withActiveMediaTurn(
   exercise: (controller: AbortController) => Promise<void>,
 ) {
   // Drive media/closure ordering without charging filesystem setup to the run budget.
+  // The turn-context handoff adds another native request before steering becomes active.
+  fixture.params.timeoutMs = 60_000;
   vi.useFakeTimers();
   const controller = new AbortController();
   const started = createDeferred<void>();
@@ -220,6 +222,7 @@ async function withActiveMediaTurn(
   try {
     // Polling waitFor advances fake time while cold runtime preparation is still loading.
     await started.promise;
+    await run.waitForTurnAccepted();
     expect(harness.requests.some((entry) => entry.method === "turn/start")).toBe(true);
     expect(resolveActiveEmbeddedRunSessionId(fixture.params.sessionKey!)).toBe(
       fixture.params.sessionId,
