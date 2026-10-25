@@ -48,29 +48,59 @@ it("applies a draft over the live skill as an undoable change and deletes the dr
   expect((await viewWorkshopSkill({}, "main", "deploy")).content).toContain("make deploy");
 });
 
-it("creates a new skill from a draft with its support files, skipping files already live", async () => {
-  // A Doctor export: a draft directory with support files and no recorded reason.
-  const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "release-notes-proposal");
-  await fs.mkdir(path.join(draftDir, "templates"), { recursive: true });
+it("applies a multi-file draft as one change that a single undo reverts", async () => {
+  // A Doctor export: a draft directory with a support file and no recorded reason.
+  const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "deploy-proposal-1");
+  await fs.mkdir(path.join(draftDir, "references"), { recursive: true });
+  await fs.writeFile(path.join(draftDir, "SKILL.md"), skillFile("deploy", "Run make ship."));
   await fs.writeFile(
-    path.join(draftDir, "SKILL.md"),
-    skillFile("release-notes", "Group by impact."),
-  );
-  await fs.writeFile(path.join(draftDir, "templates", "notes.md"), "## Fixes\n");
-
-  const changes = await applyWorkshopDraft(ctx, "release-notes-proposal");
-
-  expect(changes.map((change) => change.action)).toEqual(["create", "write_file"]);
-  expect((await viewWorkshopSkill({}, "main", "release-notes", "templates/notes.md")).content).toBe(
-    "## Fixes\n",
+    path.join(draftDir, "references", "rollback.md"),
+    "Roll back with make undo.\n",
   );
 
-  // A draft that matches the live skill changes nothing and still leaves the inbox.
+  expect((await applyWorkshopDraft(ctx, "deploy-proposal-1")).map((c) => c.action)).toEqual([
+    "write_file",
+  ]);
+  expect((await viewWorkshopSkill({}, "main", "deploy")).files).toEqual([
+    "SKILL.md",
+    "references/rollback.md",
+  ]);
+
+  await restoreWorkshopSkill(ctx, { name: "deploy" });
+  const restored = await viewWorkshopSkill({}, "main", "deploy");
+  expect(restored.content).toContain("make deploy");
+  expect(restored.files).toEqual(["SKILL.md"]);
+});
+
+it("refuses a draft with a rejected support file before changing the skill", async () => {
+  const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "deploy-proposal-2");
+  await fs.mkdir(path.join(draftDir, "scripts"), { recursive: true });
+  await fs.writeFile(path.join(draftDir, "SKILL.md"), skillFile("deploy", "Run make ship."));
+  await fs.writeFile(
+    path.join(draftDir, "scripts", "deploy.sh"),
+    `export TOKEN=ghp_${"A".repeat(30)}\n`,
+  );
+
+  await expect(applyWorkshopDraft(ctx, "deploy-proposal-2")).rejects.toThrow(/literal-secret/);
+  expect((await viewWorkshopSkill({}, "main", "deploy")).content).toContain("make deploy");
+  expect(await listWorkshopChanges("main", {})).toHaveLength(1);
+  expect((await listWorkshopDrafts({}, "main")).map((draft) => draft.id)).toEqual([
+    "deploy-proposal-2",
+  ]);
+});
+
+it("creates a new skill from a draft and leaves the inbox when a draft changes nothing", async () => {
+  const created = await saveWorkshopDraft({}, "main", {
+    name: "release-notes",
+    content: skillFile("release-notes", "Group by impact."),
+  });
+  expect((await applyWorkshopDraft(ctx, created)).map((c) => c.action)).toEqual(["create"]);
+  expect((await viewWorkshopSkill({}, "main", "release-notes")).content).toContain("Group by");
+
   const same = await saveWorkshopDraft({}, "main", {
     name: "deploy",
     content: skillFile("deploy", "Run make deploy."),
   });
   expect(await applyWorkshopDraft(ctx, same)).toEqual([]);
   expect(await listWorkshopDrafts({}, "main")).toEqual([]);
-  expect(await listWorkshopChanges("main", {})).toHaveLength(3);
 });

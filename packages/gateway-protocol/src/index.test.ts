@@ -109,6 +109,16 @@ describe("precompiled protocol validators", () => {
       { agentId: "main", runId: "skill-workshop-review:1" },
     ]);
     expectRejected(protocol.validateSkillsWorkshopUndoParams, [{}, { runId: "" }, { name: "x" }]);
+    expectAccepted(protocol.validateSkillsWorkshopDraftParams, [
+      { draftId: "deploy-1a2b3c4d" },
+      { agentId: "main", draftId: "deploy-1a2b3c4d" },
+    ]);
+    // The Control UI keeps the skill name for itself; the Gateway takes only the draft id.
+    expectRejected(protocol.validateSkillsWorkshopDraftParams, [
+      {},
+      { draftId: "" },
+      { draftId: "deploy-1a2b3c4d", name: "deploy" },
+    ]);
   });
 
   it("validates registered Board content through exported checks", () => {

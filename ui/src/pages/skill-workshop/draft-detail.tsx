@@ -122,6 +122,7 @@ function DraftContent(props: { reads: WorkshopReads }) {
                   afterLabel={t("skillWorkshop.drafts.diffDraft")}
                   sameText={t("skillWorkshop.drafts.same")}
                   tooLargeText={t("skillWorkshop.drafts.tooLarge")}
+                  fallbackSide="after"
                 />
               ) : viewer().target.filePath.endsWith(".md") ? (
                 <MarkdownHtml

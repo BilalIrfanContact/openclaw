@@ -389,7 +389,6 @@ it("reviews a draft as a diff against the live skill, applies it, and follows th
   await waitForSolid(() =>
     expect(request).toHaveBeenCalledWith("skills.workshop.applyDraft", {
       agentId: "research",
-      name: SKILL,
       draftId: draft.id,
     }),
   );

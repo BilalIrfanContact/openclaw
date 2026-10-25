@@ -75,7 +75,7 @@ const MAX_DESCRIPTION_BYTES = 1024;
 // New names follow the Agent Skills limit. Earlier releases named learned skills with
 // normalizeSkillIndexName and no length cap, so existing skills are matched by charset and
 // the filesystem's 255-byte name limit only; otherwise they stay loaded but unmanageable.
-const NEW_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export const NEW_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 export const EXISTING_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,254}$/;
 const skillLocks = new KeyedAsyncQueue();
 const log = createSubsystemLogger("skills/workshop");
@@ -285,7 +285,7 @@ async function readRestorableVersion(
   return files;
 }
 
-async function writeSkillFile(paths: MutationPaths, filePath: string, content: string) {
+export async function writeSkillFile(paths: MutationPaths, filePath: string, content: string) {
   await fs.mkdir(paths.root, { recursive: true });
   assertInsideSkillsRoot(paths.root, paths.skillDir, "skill directory");
   await fs.mkdir(paths.skillDir, { recursive: true });
@@ -319,7 +319,7 @@ async function withSkillLocks<T>(keys: readonly string[], run: () => Promise<T>)
 }
 
 /** Serializes one skill's mutation, then refreshes discovery and records the change. */
-async function mutateSkill(
+export async function mutateSkill(
   ctx: WorkshopMutationContext,
   name: string,
   action: WorkshopChangeAction,

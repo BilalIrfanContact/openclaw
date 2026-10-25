@@ -453,6 +453,8 @@ export function Diff(props: {
   afterLabel: string;
   sameText?: string;
   tooLargeText?: string;
+  /** Which side to show when there is no line diff; `before` unless set. */
+  fallbackSide?: "before" | "after";
 }) {
   const lines = createMemo(() => diffLines(props.before, props.after));
   return (
@@ -467,7 +469,9 @@ export function Diff(props: {
           </p>
           <MarkdownHtml
             class="sw-markdown chat-text"
-            markdown={splitFrontmatter(props.before).body}
+            markdown={
+              splitFrontmatter(props.fallbackSide === "after" ? props.after : props.before).body
+            }
             options={{ mode: "document" }}
           />
         </>

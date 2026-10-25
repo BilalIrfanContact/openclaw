@@ -9,17 +9,19 @@ import { assertInsideSkillsRoot } from "../lifecycle/workspace-skill-write.js";
 import { parseSkillFrontmatter } from "../loading/frontmatter.js";
 import type { WorkshopChange } from "./changes.kernel.js";
 import {
-  createWorkshopSkill,
   EXISTING_SKILL_NAME_PATTERN,
   listSkillFiles,
+  mutateSkill,
+  NEW_SKILL_NAME_PATTERN,
   normalizeSkillFilePath,
   readSkillFile,
   SKILL_FILE,
   validateSkillFile,
   WorkshopWriteError,
-  writeWorkshopSkillFile,
+  writeSkillFile,
   type WorkshopMutationContext,
 } from "./library.js";
+import { snapshotSkill } from "./skill-versions.js";
 import { resolveWorkshopDraftsDir, resolveWorkshopSkillsDir } from "./skills-root.js";
 
 // Drafts are proposed skills a background review saved instead of changing live skills.
@@ -176,8 +178,9 @@ export async function discardWorkshopDraft(
 }
 
 /**
- * Makes a draft the live skill through the normal versioned writes (create, or a SKILL.md
- * rewrite that saves the previous version), then deletes the draft.
+ * Makes a draft the live skill in one versioned change, then deletes the draft. Every file is
+ * validated before the first write, and one snapshot precedes them all, so a refused file leaves
+ * the skill untouched and one undo restores the skill as it was before the draft.
  */
 export async function applyWorkshopDraft(
   ctx: WorkshopMutationContext,
@@ -189,27 +192,50 @@ export async function applyWorkshopDraft(
     throw new WorkshopWriteError(`No draft "${id}".`);
   }
   const name = draft.skillName;
-  if (!EXISTING_SKILL_NAME_PATTERN.test(name)) {
+  const skillDir = path.join(resolveWorkshopSkillsDir(ctx.config, ctx.agentId), name);
+  const live =
+    EXISTING_SKILL_NAME_PATTERN.test(name) && (await pathExists(path.join(skillDir, SKILL_FILE)));
+  if (!(live ? EXISTING_SKILL_NAME_PATTERN : NEW_SKILL_NAME_PATTERN).test(name)) {
     throw new WorkshopWriteError(
       `Draft "${id}" names no valid skill; its SKILL.md frontmatter needs a name like "deploy-staging".`,
     );
   }
-  const summary = draft.reason ?? "applied a draft";
-  const skillDir = path.join(resolveWorkshopSkillsDir(ctx.config, ctx.agentId), name);
-  const changes: WorkshopChange[] = [];
-  // SKILL.md first: a new skill must exist before its support files land.
+  const files: Array<[string, string]> = [];
   for (const file of draft.files) {
     const content = (await readSkillFile(draftDir, file)) ?? "";
-    const live = await readSkillFile(skillDir, file).catch(() => null);
-    if (live === content) {
-      continue;
+    validateSkillFile(ctx.config, name, file, content);
+    if ((await readSkillFile(skillDir, file).catch(() => null)) !== content) {
+      files.push([file, content]);
     }
-    changes.push(
-      file === SKILL_FILE && live === null
-        ? await createWorkshopSkill(ctx, { name, content, summary })
-        : await writeWorkshopSkillFile(ctx, { name, filePath: file, content, summary }),
-    );
   }
+  const summary = draft.reason ?? "applied a draft";
+  const changes =
+    files.length === 0
+      ? []
+      : [
+          await mutateSkill(ctx, name, live ? "write_file" : "create", async (paths) => {
+            const exists = await pathExists(
+              live ? path.join(paths.skillDir, SKILL_FILE) : paths.skillDir,
+            );
+            if (exists !== live) {
+              throw new WorkshopWriteError(
+                `Skill "${name}" changed while the draft was being applied; open the draft again.`,
+              );
+            }
+            const versionId = await snapshotSkill(paths, "write_file");
+            try {
+              for (const [file, content] of files) {
+                await writeSkillFile(paths, file, content);
+              }
+            } catch (error) {
+              if (!live) {
+                await fs.rm(paths.skillDir, { recursive: true, force: true });
+              }
+              throw error;
+            }
+            return { summary, ...(versionId ? { versionId } : {}) };
+          }),
+        ];
   await discardWorkshopDraft(ctx.config, ctx.agentId, id, ctx.assertLive);
   return changes;
 }
