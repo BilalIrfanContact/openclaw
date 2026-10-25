@@ -1,6 +1,7 @@
 import type { RetainedWorkerTransactionAdmission } from "../../infra/sqlite-worker-operation-settlement.js";
 import { findOpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
 import { getOpenClawAgentDatabaseIfOpen } from "../../state/openclaw-agent-db.js";
+import type { AgentDatabaseOperations } from "../../state/openclaw-agent-execution-contract.js";
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
 import type {
   ReclamationDatabaseOptions,
@@ -35,6 +36,7 @@ export function runSessionMaintenanceMetadataInWorker(params: {
   if (typeof identity !== "string") {
     throw new Error("Session maintenance requires its captured file database");
   }
+  let preparedResult: AgentDatabaseOperations["session.maintenance.prepare"]["output"];
   return runSessionEntryWorkerMutation<SessionMaintenanceMetadataResult>(
     plan.databaseOptions,
     identity,
@@ -50,7 +52,8 @@ export function runSessionMaintenanceMetadataInWorker(params: {
               },
             }
           : plan;
-      const result = await worker.execute({ type: "session.maintenance.metadata", input });
+      const result =
+        preparedResult ?? (await worker.execute({ type: "session.maintenance.metadata", input }));
       if (params.diagnostics) {
         params.diagnostics.workerThreadId = result.workerThreadId;
       }
@@ -90,7 +93,7 @@ export function runSessionMaintenanceMetadataInWorker(params: {
               },
               async prepare() {
                 const prepared = await execution.runExisting(source, async (worker) => {
-                  await worker.execute(
+                  preparedResult = await worker.execute(
                     {
                       type: "session.maintenance.prepare",
                       input: {

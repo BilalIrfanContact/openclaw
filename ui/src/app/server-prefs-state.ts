@@ -18,6 +18,7 @@ import {
   normalizeChatSendShortcut,
   UI_APPEARANCE_DEFAULTS,
   type ChatSendShortcut,
+  type UiPreferences,
   type UiSettings,
 } from "./settings-contract.ts";
 import type { ThemeMode, ThemeName } from "./theme.ts";
@@ -42,9 +43,9 @@ export function isProfilePref(key: string): boolean {
 type SyncedPrefSpec<T> = {
   configSync?: boolean;
   extract: (value: unknown) => T | undefined;
-  local: (settings: UiSettings) => T | undefined;
+  local: (settings: UiPreferences) => T | undefined;
   write?: (value: T | undefined) => Partial<UiSettings>;
-  canApply?: (value: T, settings: UiSettings) => boolean;
+  canApply?: (value: T, settings: UiPreferences) => boolean;
 };
 
 const prefSpec = <T>(specification: SyncedPrefSpec<T>) => specification;

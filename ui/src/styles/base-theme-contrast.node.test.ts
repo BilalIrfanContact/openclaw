@@ -277,7 +277,6 @@ function readBubbleBackgrounds(rules: Rule[]) {
     readPaint(readRule(rules, selector), "--chat-bubble-background");
   return {
     user: background(USER_BUBBLE_RULE),
-    lightUser: background(LIGHT_USER_BUBBLE_RULE),
     lightUserText: readColorToken(readPaint(readRule(rules, LIGHT_USER_BUBBLE_RULE), "color")),
     senderTint: background(SENDER_TINT_BUBBLE_RULE),
     lightSenderTint: background(LIGHT_SENDER_TINT_BUBBLE_RULE),
@@ -337,7 +336,7 @@ describe("Control UI theme contrast", () => {
   const bubblePaints = (theme: string, tokens: TokenMap) => {
     const light = theme === "light" || theme.endsWith("-light");
     const page = resolveOpaqueColor("var(--bg)", tokens);
-    const user = composite(resolveColor(light ? bubbles.lightUser : bubbles.user, tokens), page);
+    const user = composite(resolveColor(bubbles.user, tokens), page);
     const tinted = (value: string) =>
       Array.from({ length: 360 }, (_, hue) =>
         composite(resolveColor(value, new Map(tokens).set("--chat-sender-hue", String(hue))), page),
@@ -352,6 +351,14 @@ describe("Control UI theme contrast", () => {
   };
 
   const checks = {
+    "native selection text: AA": paletteCases(() => [
+      ["var(--selection-fg)", "var(--selection-bg)", AA_NORMAL_TEXT_MIN],
+    ]),
+    "native selection highlight: distinguishable from page and cards": paletteCases(() => [
+      ["var(--selection-bg)", "var(--bg)", 3],
+      ["var(--selection-bg)", "var(--card)", 3],
+      ["var(--selection-bg)", "var(--panel)", 3],
+    ]),
     "text tokens: AA on every surface, AAA where promised": paletteCases((_theme, _tokens, floor) =>
       TEXT_TOKENS.flatMap((ink) =>
         SURFACE_TOKENS.map((fill) => [`var(${ink})`, `var(${fill})`, floor] as const),
