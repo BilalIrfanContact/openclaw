@@ -229,7 +229,12 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
         : archived().length;
   return (
     <Show
-      when={list().skills.length > 0 || archived().length > 0 || drafts().length > 0}
+      when={
+        list().skills.length > 0 ||
+        archived().length > 0 ||
+        drafts().length > 0 ||
+        props.view().filter === "drafts"
+      }
       fallback={
         <div class="sw-empty oc-settings-group settings-group">
           <span class="sw-empty__icon" aria-hidden="true">

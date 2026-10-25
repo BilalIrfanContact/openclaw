@@ -441,11 +441,14 @@ it("shows a large draft's first files and opens the rest on request", async () =
   await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(12));
 });
 
-it("keeps the Drafts list open after discarding its last draft outside Propose mode", async () => {
+it.each([
+  { label: "with learned skills", skills: [skill], archived: list.archived },
+  { label: "in an otherwise empty Workshop", skills: [], archived: [] },
+])("keeps the Drafts list open after discarding its last draft $label", async (fixture) => {
   const draft = { id: `${SKILL}-1a2b3c4d`, skillName: SKILL, summary: "s", createdAtMs: 1 };
   let drafts = [draft];
   const request = workshopGateway({
-    "skills.workshop.list": () => ({ ...list, drafts }),
+    "skills.workshop.list": () => ({ ...list, ...fixture, drafts }),
     "skills.workshop.read": skillRead,
     "skills.workshop.discardDraft": () => {
       drafts = [];
