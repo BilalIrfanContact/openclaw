@@ -129,9 +129,17 @@ export async function startSetupActivationWizard(params: {
     assertCurrent: params.assertCurrent,
     admit: (create, assertCurrent) =>
       admitSetupActivationSession({ ...params, context }, create, assertCurrent),
-    createSession: (assertCurrent) =>
+    createSession: (assertGrantCurrent) =>
       new WizardSession(
         async (prompter, signal, runnerSession) => {
+          // Like cancellation, the starting grant governs work up to the config commit;
+          // a saved activation then completes as any other committed config write does.
+          let committed = false;
+          const assertCurrent = () => {
+            if (!committed) {
+              assertGrantCurrent();
+            }
+          };
           const result = await activateGatewaySetupInference({
             ...params.activation,
             surface: "gateway",
@@ -151,6 +159,7 @@ export async function startSetupActivationWizard(params: {
             },
             onCommitStarted: () => {
               assertCurrent();
+              committed = true;
               runnerSession.lockCancellation();
             },
           });

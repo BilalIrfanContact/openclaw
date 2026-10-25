@@ -136,7 +136,6 @@ export async function commitSetupInferenceActivation(params: {
   const application = params.deferCompletion
     ? createRuntimeConfigWriteApplication(continuation, {
         prepare: activate,
-        assertCurrent: params.assertCurrent,
         requireImmediateApplication: params.preserveWorkingConnection,
       })
     : undefined;
