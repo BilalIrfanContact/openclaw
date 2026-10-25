@@ -345,3 +345,56 @@ it("optimistically selects a learning mode and restores the owner value after re
     expect(page.textContent).toContain("Mode update refused");
   });
 });
+
+it("reviews a draft as a diff against the live skill, applies it, and follows the skill", async () => {
+  const draft = {
+    id: `${SKILL}-1a2b3c4d`,
+    skillName: SKILL,
+    summary: "match transfers before categorizing",
+    createdAtMs: Date.now() - 60_000,
+  };
+  let drafts = [draft];
+  const request = workshopGateway({
+    "skills.workshop.list": () => ({ ...list, drafts }),
+    "skills.workshop.read": (params: RequestParams & { draftId?: string }) =>
+      params.draftId
+        ? { ...skillRead, content: "Synthetic procedure\nMatch transfers first." }
+        : skillRead,
+    "skills.workshop.applyDraft": () => {
+      drafts = [];
+      return { changes: [] };
+    },
+  });
+  const page = await mount(request, {
+    methods: [
+      ...mutationAccess.methods,
+      "skills.workshop.applyDraft",
+      "skills.workshop.discardDraft",
+    ],
+  });
+  await waitForSolid(() => expect(button(page, "Drafts 1")).toBeDefined());
+  button(page, "Drafts 1")!.click();
+
+  await waitForSolid(() => {
+    expect(page.querySelector(".sw-badge--update")?.textContent).toBe("Update");
+    expect(page.querySelector(".sw-diff__key--remove")?.textContent).toBe("Live skill");
+    expect(page.querySelector(".sw-diff__line--add")?.textContent).toContain(
+      "Match transfers first.",
+    );
+  });
+  expect(page.querySelector(".sw-detail__desc")?.textContent).toBe(draft.summary);
+  button(page, "Apply")!.click();
+
+  await waitForSolid(() =>
+    expect(request).toHaveBeenCalledWith("skills.workshop.applyDraft", {
+      agentId: "research",
+      name: SKILL,
+      draftId: draft.id,
+    }),
+  );
+  await waitForSolid(() => {
+    expect(page.querySelector(".sw-detail__title")?.textContent).toBe(SKILL);
+    expect(page.querySelector(".sw-badge--draft")).toBeNull();
+    expect(button(page, "Active 1")?.getAttribute("aria-pressed")).toBe("true");
+  });
+});

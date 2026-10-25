@@ -9,6 +9,11 @@ import { handleLearnCommand } from "./commands-learn.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
 const undoWorkshopReview = vi.hoisted(() => vi.fn());
+const listWorkshopDrafts = vi.hoisted(() => vi.fn());
+vi.mock("../../skills/workshop/drafts.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../skills/workshop/drafts.js")>()),
+  listWorkshopDrafts,
+}));
 vi.mock("../../skills/workshop/review-undo.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../skills/workshop/review-undo.js")>()),
   undoWorkshopReview,
@@ -138,13 +143,51 @@ describe("learn command", () => {
     expect(result?.shouldContinue).toBe(true);
   });
 
-  it("turns /learn drafts into a review of the waiting drafts", async () => {
-    const params = buildLearnParams("/learn drafts");
+  describe("/learn drafts", () => {
+    const draft = (id: string, skillName: string) => ({ id, skillName, createdAtMs: 1, files: [] });
 
-    const result = await handleLearnCommand(params, true);
+    it("answers without a model turn when no draft matches", async () => {
+      listWorkshopDrafts.mockResolvedValue([]);
+      const params = buildLearnParams("/learn drafts");
 
-    expect(result?.shouldContinue).toBe(true);
-    expect(params.ctx.BodyForAgent).toContain("Review my Skill Workshop drafts.");
+      const result = await handleLearnCommand(params, true);
+
+      expect(result?.shouldContinue).toBe(false);
+      expect(result?.reply?.text).toBe("No Skill Workshop drafts are waiting for review.");
+    });
+
+    it.each([
+      {
+        command: "/learn drafts deploy keep only the rollback step",
+        listed: [{ id: "deploy-1", skill: "deploy" }],
+        focus: "keep only the rollback step",
+      },
+      {
+        command: "/learn drafts; only the deploy one",
+        listed: [
+          { id: "deploy-1", skill: "deploy" },
+          { id: "notes-1", skill: "notes" },
+        ],
+        focus: "only the deploy one",
+      },
+    ])("selects the drafts for $command", async ({ command, listed, focus }) => {
+      listWorkshopDrafts.mockResolvedValue([
+        draft("deploy-1", "deploy"),
+        draft("notes-1", "notes"),
+      ]);
+      const params = buildLearnParams(command);
+
+      const result = await handleLearnCommand(params, true);
+
+      expect(result?.shouldContinue).toBe(true);
+      expect(params.ctx.BodyForAgent).toContain(
+        `Drafts to review (JSON): ${JSON.stringify(listed)}.`,
+      );
+      expect(params.ctx.BodyForAgent).toContain(
+        `User focus (JSON string): ${JSON.stringify(focus)}`,
+      );
+      expect(params.ctx.BodyForAgent).toContain("Do not save anything yet.");
+    });
   });
 
   it("keeps the wildcard sender policy for non-owner WebChat", async () => {

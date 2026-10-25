@@ -17,6 +17,7 @@ import { NonEmptyString, Sha256String } from "./primitives.js";
 import { GitHubSetupHandleSchema } from "./secrets.js";
 import { SessionPermissionModeSchema } from "./sessions-row.js";
 import { SkillsDetailResultSchema } from "./skill-detail.js";
+import { SkillWorkshopDraftSchema } from "./skill-workshop-drafts.js";
 
 export {
   AgentsAvatarGenerateParamsSchema,
@@ -38,6 +39,11 @@ export { AgentsListParamsSchema, type AgentsListParams } from "./agents-list-ses
 
 export { SkillsSearchParamsSchema, SkillsSearchResultSchema } from "./skills-search.js";
 export type { SkillsSearchParams, SkillsSearchResult } from "./skills-search.js";
+export {
+  SkillsWorkshopDraftParamsSchema,
+  SkillWorkshopDraftSchema,
+} from "./skill-workshop-drafts.js";
+export type { SkillsWorkshopDraftParams, SkillWorkshopDraft } from "./skill-workshop-drafts.js";
 
 export {
   ModelChoiceSchema,
@@ -485,6 +491,8 @@ export const SkillsWorkshopListResultSchema = closedObject({
   root: NonEmptyString,
   skills: Type.Array(SkillWorkshopSkillSummarySchema),
   archived: Type.Array(SkillWorkshopArchivedSkillSchema),
+  /** Absent from Gateways that predate drafts. */
+  drafts: Type.Optional(Type.Array(SkillWorkshopDraftSchema)),
 });
 
 /** Pages the Workshop change feed newest first. */
@@ -498,12 +506,16 @@ export const SkillsWorkshopChangesResultSchema = closedObject({
   changes: Type.Array(SkillWorkshopChangeSchema),
 });
 
-/** Reads one file of a live Workshop skill, or of a saved version when `versionId` is set. */
+/**
+ * Reads one file of a live Workshop skill, of a saved version when `versionId` is set, or of a
+ * waiting draft when `draftId` is set.
+ */
 export const SkillsWorkshopReadParamsSchema = closedObject({
   agentId: Type.Optional(NonEmptyString),
   name: NonEmptyString,
   filePath: Type.Optional(NonEmptyString),
   versionId: Type.Optional(NonEmptyString),
+  draftId: Type.Optional(NonEmptyString),
 });
 
 export const SkillsWorkshopReadResultSchema = closedObject({

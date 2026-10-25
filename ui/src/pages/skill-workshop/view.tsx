@@ -1,6 +1,7 @@
 import type {
   SkillsWorkshopListResult,
   SkillWorkshopChange,
+  SkillWorkshopDraft,
   SkillWorkshopSkillSummary,
 } from "@openclaw/gateway-protocol";
 import { createMemo, Errored, For, Loading, Show } from "solid-js";
@@ -24,6 +25,7 @@ import { PluginsHubHeader } from "../plugins/plugins-hub-header.tsx";
 import { PLUGINS_HUB_PANEL_ID } from "../plugins/plugins-hub.ts";
 import { undoMutationFor } from "./api.ts";
 import { Detail } from "./detail.tsx";
+import { DraftDetail } from "./draft-detail.tsx";
 import type { SkillWorkshopMode } from "./mode.ts";
 import {
   lastActivityMs,
@@ -33,6 +35,7 @@ import {
   WorkshopChangeText,
   UNUSED_ARCHIVE_DAYS,
   unusedDays,
+  type WorkshopFilter,
   type WorkshopSort,
   type WorkshopView,
   type WorkshopReads,
@@ -204,14 +207,30 @@ type SkillRowEntry = SkillWorkshopSkillSummary | SkillsWorkshopListResult["archi
 function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
   const list = () => props.view().snapshot!.list;
   const archived = createMemo(() => archivedWorkshopSkills(list()));
+  // Newest first, like an inbox.
+  const drafts = createMemo(() => (list().drafts ?? []).toReversed());
   const rows = createMemo<SkillRowEntry[]>(() =>
     props.view().filter === "active"
       ? sortWorkshopSkills(list().skills, props.view().snapshot!.changes, props.view().sort)
-      : archived(),
+      : props.view().filter === "archived"
+        ? archived()
+        : [],
   );
+  // The Drafts list appears once drafts can exist: in Propose mode, or while any wait.
+  const filters = createMemo<WorkshopFilter[]>(() =>
+    props.view().mode === "propose" || drafts().length > 0
+      ? ["active", "drafts", "archived"]
+      : ["active", "archived"],
+  );
+  const count = (filter: WorkshopFilter) =>
+    filter === "active"
+      ? list().skills.length
+      : filter === "drafts"
+        ? drafts().length
+        : archived().length;
   return (
     <Show
-      when={list().skills.length > 0 || archived().length > 0}
+      when={list().skills.length > 0 || archived().length > 0 || drafts().length > 0}
       fallback={
         <div class="sw-empty oc-settings-group settings-group">
           <span class="sw-empty__icon" aria-hidden="true">
@@ -231,13 +250,18 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
               mode="buttons"
               ariaLabel={t("skillWorkshop.skills.filterAria")}
               value={props.view().filter}
-              options={(["active", "archived"] as const).map((value) => ({
+              options={filters().map((value) => ({
                 value,
                 label: (
                   <>
                     {t(`skillWorkshop.skills.${value}`)}{" "}
-                    <span class="settings-count">
-                      {value === "active" ? list().skills.length : archived().length}
+                    <span
+                      class={[
+                        "settings-count",
+                        { "sw-count--attention": value === "drafts" && count(value) > 0 },
+                      ]}
+                    >
+                      {count(value)}
                     </span>
                   </>
                 ),
@@ -266,18 +290,29 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
             )}
           </div>
           <div class="sw-list__rows">
+            <Show when={props.view().filter === "drafts"}>
+              <For
+                each={drafts()}
+                keyed={(draft) => draft.id}
+                fallback={<SettingsEmpty message={t("skillWorkshop.skills.noneDrafts")} carapace />}
+              >
+                {(draft) => <DraftRow draft={draft()} view={props.view} />}
+              </For>
+            </Show>
             <For
               each={rows()}
               keyed={(skill) => skill.name}
               fallback={
-                <SettingsEmpty
-                  message={t(
-                    props.view().filter === "active"
-                      ? "skillWorkshop.skills.noneActive"
-                      : "skillWorkshop.skills.noneArchived",
-                  )}
-                  carapace
-                />
+                props.view().filter !== "drafts" && (
+                  <SettingsEmpty
+                    message={t(
+                      props.view().filter === "active"
+                        ? "skillWorkshop.skills.noneActive"
+                        : "skillWorkshop.skills.noneArchived",
+                    )}
+                    carapace
+                  />
+                )
               }
             >
               {(skill) => <SkillRow skill={skill()} view={props.view} />}
@@ -289,7 +324,12 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
             when={props.view().viewer}
             fallback={<SettingsEmpty message={t("skillWorkshop.viewer.pick")} carapace />}
           >
-            <Detail view={props.view} reads={props.reads} />
+            <Show
+              when={props.view().viewer?.target.draftId}
+              fallback={<Detail view={props.view} reads={props.reads} />}
+            >
+              <DraftDetail view={props.view} reads={props.reads} />
+            </Show>
           </Show>
         </section>
       </div>
@@ -382,6 +422,35 @@ function SkillRow(props: { skill: SkillRowEntry; view: WorkshopView }) {
           </div>
         )}
       </Show>
+    </div>
+  );
+}
+
+function DraftRow(props: { draft: SkillWorkshopDraft; view: WorkshopView }) {
+  const selected = () => props.view().viewer?.target.draftId === props.draft.id;
+  const live = () =>
+    props.view().snapshot!.list.skills.some((skill) => skill.name === props.draft.skillName);
+  return (
+    <div class={["sw-row", { "sw-row--selected": selected() }]}>
+      <button
+        type="button"
+        class="sw-row__main"
+        aria-current={selected() ? "true" : undefined}
+        onClick={() => props.view().onSelectDraft(props.draft.id)}
+      >
+        <span class="sw-row__top">
+          <span class="sw-row__name">{props.draft.skillName}</span>
+          <span class={["sw-badge", live() ? "sw-badge--update" : "sw-badge--new"]}>
+            {t(live() ? "skillWorkshop.drafts.update" : "skillWorkshop.drafts.newSkill")}
+          </span>
+        </span>
+        {props.draft.summary && <span class="sw-row__desc">{props.draft.summary}</span>}
+        <span class="sw-row__when">
+          {t("skillWorkshop.drafts.proposed", {
+            time: formatRelativeTimestamp(props.draft.createdAtMs),
+          })}
+        </span>
+      </button>
     </div>
   );
 }

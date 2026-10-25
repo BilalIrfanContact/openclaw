@@ -3,11 +3,17 @@ import {
   errorShape,
   validateSkillsWorkshopArchiveParams,
   validateSkillsWorkshopChangesParams,
+  validateSkillsWorkshopDraftParams,
   validateSkillsWorkshopListParams,
   validateSkillsWorkshopReadParams,
   validateSkillsWorkshopRestoreParams,
   validateSkillsWorkshopUndoParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+import {
+  applyWorkshopDraft,
+  discardWorkshopDraft,
+  viewWorkshopDraft,
+} from "../../skills/workshop/drafts.js";
 import {
   archiveWorkshopSkill,
   listWorkshopChanges,
@@ -85,14 +91,24 @@ export const skillsWorkshopHandlers: GatewayRequestHandlers = {
   "skills.workshop.read": defineWorkshopHandler(
     "skills.workshop.read",
     validateSkillsWorkshopReadParams,
-    (params, resolved) =>
-      viewWorkshopSkill(
+    async (params, resolved) => {
+      if (!params.draftId) {
+        return viewWorkshopSkill(
+          resolved.cfg,
+          resolved.agentId,
+          params.name,
+          params.filePath,
+          params.versionId,
+        );
+      }
+      const { draft, filePath, content } = await viewWorkshopDraft(
         resolved.cfg,
         resolved.agentId,
-        params.name,
+        params.draftId,
         params.filePath,
-        params.versionId,
-      ),
+      );
+      return { name: draft.skillName, filePath, content, files: draft.files };
+    },
   ),
   "skills.workshop.archive": defineWorkshopHandler(
     "skills.workshop.archive",
@@ -114,6 +130,22 @@ export const skillsWorkshopHandlers: GatewayRequestHandlers = {
         versionId: params.versionId,
       }),
     }),
+  ),
+  "skills.workshop.applyDraft": defineWorkshopHandler(
+    "skills.workshop.applyDraft",
+    validateSkillsWorkshopDraftParams,
+    async (params, resolved, invocation) => ({
+      changes: await applyWorkshopDraft(workshopWriteContext(resolved, invocation), params.draftId),
+    }),
+  ),
+  "skills.workshop.discardDraft": defineWorkshopHandler(
+    "skills.workshop.discardDraft",
+    validateSkillsWorkshopDraftParams,
+    async (params, resolved, invocation) => {
+      const { config, agentId, assertLive } = workshopWriteContext(resolved, invocation);
+      await discardWorkshopDraft(config, agentId, params.draftId, assertLive);
+      return { changes: [] };
+    },
   ),
   "skills.workshop.undo": defineWorkshopHandler(
     "skills.workshop.undo",

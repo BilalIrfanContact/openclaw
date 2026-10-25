@@ -7,7 +7,9 @@ import { removePathWithinRoot } from "../../infra/fs-safe-remove.js";
 import { pathExists, root } from "../../infra/fs-safe.js";
 import { assertInsideSkillsRoot } from "../lifecycle/workspace-skill-write.js";
 import { parseSkillFrontmatter } from "../loading/frontmatter.js";
+import type { WorkshopChange } from "./changes.kernel.js";
 import {
+  createWorkshopSkill,
   EXISTING_SKILL_NAME_PATTERN,
   listSkillFiles,
   normalizeSkillFilePath,
@@ -15,6 +17,8 @@ import {
   SKILL_FILE,
   validateSkillFile,
   WorkshopWriteError,
+  writeWorkshopSkillFile,
+  type WorkshopMutationContext,
 } from "./library.js";
 import { resolveWorkshopDraftsDir, resolveWorkshopSkillsDir } from "./skills-root.js";
 
@@ -169,4 +173,43 @@ export async function discardWorkshopDraft(
     force: false,
     ...(assertLive ? { assertBeforeMutation: assertLive } : {}),
   });
+}
+
+/**
+ * Makes a draft the live skill through the normal versioned writes (create, or a SKILL.md
+ * rewrite that saves the previous version), then deletes the draft.
+ */
+export async function applyWorkshopDraft(
+  ctx: WorkshopMutationContext,
+  id: string,
+): Promise<WorkshopChange[]> {
+  const draftDir = resolveDraftDir(ctx.config, ctx.agentId, id);
+  const draft = await readDraft(path.dirname(draftDir), id);
+  if (!draft) {
+    throw new WorkshopWriteError(`No draft "${id}".`);
+  }
+  const name = draft.skillName;
+  if (!EXISTING_SKILL_NAME_PATTERN.test(name)) {
+    throw new WorkshopWriteError(
+      `Draft "${id}" names no valid skill; its SKILL.md frontmatter needs a name like "deploy-staging".`,
+    );
+  }
+  const summary = draft.reason ?? "applied a draft";
+  const skillDir = path.join(resolveWorkshopSkillsDir(ctx.config, ctx.agentId), name);
+  const changes: WorkshopChange[] = [];
+  // SKILL.md first: a new skill must exist before its support files land.
+  for (const file of draft.files) {
+    const content = (await readSkillFile(draftDir, file)) ?? "";
+    const live = await readSkillFile(skillDir, file).catch(() => null);
+    if (live === content) {
+      continue;
+    }
+    changes.push(
+      file === SKILL_FILE && live === null
+        ? await createWorkshopSkill(ctx, { name, content, summary })
+        : await writeWorkshopSkillFile(ctx, { name, filePath: file, content, summary }),
+    );
+  }
+  await discardWorkshopDraft(ctx.config, ctx.agentId, id, ctx.assertLive);
+  return changes;
 }

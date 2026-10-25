@@ -51,7 +51,7 @@ Actions: list | view name [file_path] [version] | create name content | patch na
 - file_path: SKILL.md or files under references/, templates/, scripts/, assets/. remove_file deletes one of those support files; archive removes a whole skill.
 - reason: one short line saying what changed; shown to the user.
 - restore without version undoes the last change.
-- draft: saves a proposed SKILL.md for the user to review later; skills stay unchanged. list shows waiting drafts. When reviewing drafts, save the good parts with create/patch, then discard each reviewed draft.
+- draft: saves a proposed SKILL.md for the user to review later; skills stay unchanged. list shows waiting drafts. When reviewing drafts with the user, save approved changes with create/patch, then discard the drafts the user decided on.
 
 ${SKILL_AUTHORING_STANDARDS_PROMPT}`;
 

@@ -526,6 +526,7 @@ export const validateSkillsWorkshopReadParams = compile(S.SkillsWorkshopReadPara
 export const validateSkillsWorkshopArchiveParams = compile(S.SkillsWorkshopArchiveParamsSchema);
 export const validateSkillsWorkshopRestoreParams = compile(S.SkillsWorkshopRestoreParamsSchema);
 export const validateSkillsWorkshopUndoParams = compile(S.SkillsWorkshopUndoParamsSchema);
+export const validateSkillsWorkshopDraftParams = compile(S.SkillsWorkshopDraftParamsSchema);
 export const validateSkillsSecurityVerdictsParams = compile(S.SkillsSecurityVerdictsParamsSchema);
 export const validateSkillsSkillCardParams = compile(S.SkillsSkillCardParamsSchema);
 export const validateSkillsFileGetParams = compile(S.SkillsFileGetParamsSchema);

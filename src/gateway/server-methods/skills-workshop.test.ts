@@ -79,6 +79,7 @@ describe("skills.workshop gateway methods", () => {
         { name: "unused", ...summary },
       ],
       archived,
+      drafts: [],
     });
   });
 
