@@ -1,5 +1,5 @@
 {
-  "startupJsGzipBytes": 294961,
-  "reason": "Startup leaf icons, update classification, and lazy English: matched b5b24cf15c2 build 310773 to 294961 B gzip with 7 JS and 1 CSS request.",
-  "updatedAt": "2026-10-23"
+  "startupJsGzipBytes": 270103,
+  "reason": "Cross-route dependency isolation on d5503615074 removes unrelated route code while leaving Cron source unchanged; same-host final startup is 270103 B gzip, 122 B over base.",
+  "updatedAt": "2026-10-25"
 }
