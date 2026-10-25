@@ -5,9 +5,13 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { ignoreMissingPath } from "../../infra/errno.js";
 import { removePathWithinRoot } from "../../infra/fs-safe-remove.js";
 import { pathExists, root } from "../../infra/fs-safe.js";
-import { assertInsideSkillsRoot } from "../lifecycle/workspace-skill-write.js";
+import {
+  assertInsideSkillsRoot,
+  MAX_WORKSPACE_SKILL_SUPPORT_FILE_BYTES,
+} from "../lifecycle/workspace-skill-write.js";
 import { parseSkillFrontmatter } from "../loading/frontmatter.js";
 import type { WorkshopChange } from "./changes.kernel.js";
+import { resolveSkillWorkshopConfig } from "./config.js";
 import {
   EXISTING_SKILL_NAME_PATTERN,
   listSkillFiles,
@@ -200,11 +204,23 @@ export async function applyWorkshopDraft(
       `Draft "${id}" names no valid skill; its SKILL.md frontmatter needs a name like "deploy-staging".`,
     );
   }
-  const files: Array<[string, string]> = [];
+  // Bytes, not text: support assets such as images must publish exactly as drafted.
+  const draftRoot = await root(draftDir);
+  const files: Array<[string, Buffer]> = [];
   for (const file of draft.files) {
-    const content = (await readSkillFile(draftDir, file)) ?? "";
-    validateSkillFile(ctx.config, name, file, content);
-    if ((await readSkillFile(skillDir, file).catch(() => null)) !== content) {
+    const content = (
+      await draftRoot.read(file, {
+        hardlinks: "reject",
+        symlinks: "reject",
+        maxBytes:
+          file === SKILL_FILE
+            ? resolveSkillWorkshopConfig(ctx.config).maxSkillBytes
+            : MAX_WORKSPACE_SKILL_SUPPORT_FILE_BYTES,
+      })
+    ).buffer;
+    validateSkillFile(ctx.config, name, file, content.toString("utf8"));
+    const liveContent = await fs.readFile(path.join(skillDir, file)).catch(() => null);
+    if (!liveContent?.equals(content)) {
       files.push([file, content]);
     }
   }

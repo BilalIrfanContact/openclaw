@@ -13,7 +13,7 @@ import {
   viewWorkshopSkill,
   writeWorkshopSkillFile,
 } from "./library.js";
-import { resolveWorkshopDraftsDir } from "./skills-root.js";
+import { resolveWorkshopDraftsDir, resolveWorkshopSkillsDir } from "./skills-root.js";
 
 const ctx = { config: {}, agentId: "main", actor: "user" as const };
 const skillFile = (name: string, step: string) =>
@@ -71,6 +71,19 @@ it("applies a multi-file draft as one change that a single undo reverts", async 
   const restored = await viewWorkshopSkill({}, "main", "deploy");
   expect(restored.content).toContain("make deploy");
   expect(restored.files).toEqual(["SKILL.md"]);
+});
+
+it("publishes a binary support asset byte for byte", async () => {
+  const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "deploy-proposal-png");
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x80]);
+  await fs.mkdir(path.join(draftDir, "assets"), { recursive: true });
+  await fs.writeFile(path.join(draftDir, "SKILL.md"), skillFile("deploy", "Run make ship."));
+  await fs.writeFile(path.join(draftDir, "assets", "logo.png"), png);
+
+  await applyWorkshopDraft(ctx, "deploy-proposal-png");
+
+  const live = path.join(resolveWorkshopSkillsDir({}, "main"), "deploy", "assets", "logo.png");
+  expect((await fs.readFile(live)).equals(png)).toBe(true);
 });
 
 it("refuses a draft with a rejected support file before changing the skill", async () => {
