@@ -453,8 +453,9 @@ async function moveEarlierExports(
   config: OpenClawConfig,
   env: NodeJS.ProcessEnv,
   assertCurrent: () => void,
-): Promise<string[]> {
+): Promise<MigrationMessages> {
   const changes: string[] = [];
+  const warnings: string[] = [];
   for (const agentId of listAgentIds(config)) {
     const from = path.join(resolveWorkshopSkillsDir(config, agentId, env), EARLIER_EXPORT_DIR);
     if (isUpdateRehearsalReadOnlyPath(from, env)) {
@@ -473,12 +474,16 @@ async function moveEarlierExports(
     await fs.mkdir(to, { recursive: true });
     let moved = 0;
     // Dot entries are interrupted export staging; an existing draft is never overwritten.
-    for (const entry of entries) {
+    for (const entry of entries.filter((name) => !name.startsWith("."))) {
       assertCurrent();
-      if (!entry.startsWith(".") && !(await pathExists(path.join(to, entry)))) {
-        await fs.rename(path.join(from, entry), path.join(to, entry));
-        moved += 1;
+      if (await pathExists(path.join(to, entry))) {
+        warnings.push(
+          `Kept Skill Workshop proposal export ${path.join(from, entry)}: a draft with the same id already exists in ${to}. Compare the two, keep the one you want in ${to}, and delete the other.`,
+        );
+        continue;
       }
+      await fs.rename(path.join(from, entry), path.join(to, entry));
+      moved += 1;
     }
     await fs.rmdir(from).catch(() => undefined);
     if (moved > 0) {
@@ -487,7 +492,7 @@ async function moveEarlierExports(
       );
     }
   }
-  return changes;
+  return { changes, warnings };
 }
 
 async function retireProposals(params: {
@@ -499,9 +504,19 @@ async function retireProposals(params: {
   const stateDir = resolveStateDir(env);
   const legacyDirExists = await pathExists(path.join(stateDir, LEGACY_PROPOSALS_DIR));
   const inventory = readDatabaseProposals(config, env);
-  const changes = await moveEarlierExports(config, env, assertCurrent);
+  // A kept earlier export is reported, but never holds back retiring the proposal tables.
+  const earlier = await moveEarlierExports(config, env, assertCurrent);
+  const changes = earlier.changes;
+  const withEarlierWarnings = (warnings: string[]): MigrationMessages => {
+    const all = [...warnings, ...earlier.warnings];
+    return {
+      changes,
+      warnings: all,
+      ...(all.length > 0 ? { warningDisposition: "recoverable" as const } : {}),
+    };
+  };
   if (!inventory.hasTables && !legacyDirExists) {
-    return { changes, warnings: [] };
+    return withEarlierWarnings([]);
   }
   if (legacyDirExists) {
     await appendLegacyJsonProposals({ stateDir, inventory, config, env });
@@ -509,11 +524,7 @@ async function retireProposals(params: {
   const warnings = inventory.failures;
   // Any unread or unexported proposal keeps the tables and files for the next Doctor run.
   let blocked = warnings.length > 0;
-  const migrationResult = (): MigrationMessages => ({
-    changes,
-    warnings,
-    ...(warnings.length > 0 ? { warningDisposition: "recoverable" as const } : {}),
-  });
+  const migrationResult = () => withEarlierWarnings(warnings);
   // Dropping the rollbacks forgets what an interrupted apply half-wrote, so undo that first.
   for (const apply of inventory.unfinishedApplies) {
     assertCurrent();

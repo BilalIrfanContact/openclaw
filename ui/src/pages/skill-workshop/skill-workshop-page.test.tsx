@@ -398,3 +398,45 @@ it("reviews a draft as a diff against the live skill, applies it, and follows th
     expect(button(page, "Active 1")?.getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+it("shows only the drafts list on the Drafts tab of an agent with no learned skills", async () => {
+  const draft = {
+    id: "new-skill-1a2b3c4d",
+    skillName: "new-skill",
+    summary: "came up twice",
+    createdAtMs: Date.now() - 60_000,
+  };
+  const request = workshopGateway({
+    "skills.workshop.list": { ...list, skills: [], archived: [], drafts: [draft] },
+    "skills.workshop.read": { ...skillRead, name: "new-skill" },
+  });
+  const page = await mount(request);
+  await waitForSolid(() => expect(button(page, "Drafts 1")).toBeDefined());
+  button(page, "Drafts 1")!.click();
+
+  await waitForSolid(() =>
+    expect(page.querySelector(".sw-badge--new")?.textContent).toBe("New skill"),
+  );
+  expect(page.querySelector(".sw-list__rows")?.textContent).not.toMatch(
+    /Nothing archived|No active skills/,
+  );
+});
+
+it("shows a large draft's first files and opens the rest on request", async () => {
+  const draft = { id: "big-skill-1a2b3c4d", skillName: "big-skill", summary: "s", createdAtMs: 1 };
+  const files = [
+    "SKILL.md",
+    ...Array.from({ length: 11 }, (_, index) => `references/r${index}.md`),
+  ];
+  const request = workshopGateway({
+    "skills.workshop.list": { ...list, drafts: [draft] },
+    "skills.workshop.read": { ...skillRead, name: "big-skill", files },
+  });
+  const page = await mount(request);
+  await waitForSolid(() => expect(button(page, "Drafts 1")).toBeDefined());
+  button(page, "Drafts 1")!.click();
+
+  await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(8));
+  button(page, "+4 more files")!.click();
+  await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(12));
+});

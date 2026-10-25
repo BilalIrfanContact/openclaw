@@ -185,7 +185,10 @@ it("moves drafts an earlier Doctor exported under the archive into the drafts in
     changes: [
       `Moved 1 exported Skill Workshop proposal draft from ${earlier} to ${mainExports}; review them with /learn drafts.`,
     ],
-    warnings: [],
+    warnings: [
+      `Kept Skill Workshop proposal export ${path.join(earlier, "both-procedure-1")}: a draft with the same id already exists in ${mainExports}. Compare the two, keep the one you want in ${mainExports}, and delete the other.`,
+    ],
+    warningDisposition: "recoverable",
   });
   expect(read(mainExports, "moved-procedure-1", "SKILL.md")).toBe("# Earlier\n");
   // An existing draft is never overwritten; the earlier copy stays where it was.

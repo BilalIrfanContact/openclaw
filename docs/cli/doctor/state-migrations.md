@@ -235,7 +235,8 @@ then drops the proposal tables. Drafts are not live skills; review them with
 `/learn drafts`, which saves the ones worth keeping through the normal
 validated, versioned Workshop write. Drafts that an earlier Doctor exported to
 `workshop-skills/.archive/.retired-proposals/` move to `.drafts/` on the next
-run; an existing draft with the same id is never overwritten.
+run. An existing draft with the same id is never overwritten: Doctor keeps that
+export where it is and warns, so you can compare the two and delete one.
 
 Doctor keeps the proposal tables and files, with a recoverable warning, when no
 configured agent owns a proposal, it cannot export a draft, or it finds a

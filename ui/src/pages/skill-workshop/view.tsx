@@ -212,9 +212,7 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
   const rows = createMemo<SkillRowEntry[]>(() =>
     props.view().filter === "active"
       ? sortWorkshopSkills(list().skills, props.view().snapshot!.changes, props.view().sort)
-      : props.view().filter === "archived"
-        ? archived()
-        : [],
+      : archived(),
   );
   // The Drafts list appears once drafts can exist: in Propose mode, or while any wait.
   const filters = createMemo<WorkshopFilter[]>(() =>
@@ -290,7 +288,27 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
             )}
           </div>
           <div class="sw-list__rows">
-            <Show when={props.view().filter === "drafts"}>
+            <Show
+              when={props.view().filter === "drafts"}
+              fallback={
+                <For
+                  each={rows()}
+                  keyed={(skill) => skill.name}
+                  fallback={
+                    <SettingsEmpty
+                      message={t(
+                        props.view().filter === "active"
+                          ? "skillWorkshop.skills.noneActive"
+                          : "skillWorkshop.skills.noneArchived",
+                      )}
+                      carapace
+                    />
+                  }
+                >
+                  {(skill) => <SkillRow skill={skill()} view={props.view} />}
+                </For>
+              }
+            >
               <For
                 each={drafts()}
                 keyed={(draft) => draft.id}
@@ -299,24 +317,6 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
                 {(draft) => <DraftRow draft={draft()} view={props.view} />}
               </For>
             </Show>
-            <For
-              each={rows()}
-              keyed={(skill) => skill.name}
-              fallback={
-                props.view().filter !== "drafts" && (
-                  <SettingsEmpty
-                    message={t(
-                      props.view().filter === "active"
-                        ? "skillWorkshop.skills.noneActive"
-                        : "skillWorkshop.skills.noneArchived",
-                    )}
-                    carapace
-                  />
-                )
-              }
-            >
-              {(skill) => <SkillRow skill={skill()} view={props.view} />}
-            </For>
           </div>
         </section>
         <section class="sw-detail settings-group oc-settings-group">

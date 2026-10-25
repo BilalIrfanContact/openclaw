@@ -53,6 +53,7 @@ const enSkillWorkshop = {
       same: "This draft already matches the live skill. Discard it.",
       tooLarge: "This draft differs too much from the live skill to compare line by line.",
       filesLabel: "Files",
+      moreFiles: "+{count} more files",
       chatHint:
         "Want the agent's judgment first? Send /learn drafts in chat to review all drafts together, or /learn drafts {skill} for this skill only.",
     },

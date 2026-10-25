@@ -1,10 +1,12 @@
-import { createMemo, Errored, For, Loading, Show } from "solid-js";
+import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
 import { Icon } from "../../components/solid/icon.tsx";
 import { MarkdownHtml } from "../../components/solid/markdown-html.tsx";
 import { formatRelativeTimestamp } from "../../lib/format.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { Diff, LoadState, splitFrontmatter } from "./detail.tsx";
 import { MutationButton, type WorkshopReads, type WorkshopView } from "./view-shared.tsx";
+
+const MAX_FILE_CHIPS = 8;
 
 /** A waiting draft: why it was proposed, what it would change, and Apply or Discard. */
 export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads }) {
@@ -18,6 +20,10 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
   );
   // The draft's files come with each read of it.
   const files = () => props.view().viewer?.result?.files ?? [];
+  // A bundle with many support files shows its first few; the rest open on request.
+  const [expandedDraft, setExpandedDraft] = createSignal<string | null>(null);
+  const shownFiles = () =>
+    expandedDraft() === target().draftId ? files() : files().slice(0, MAX_FILE_CHIPS);
   const meta = () => {
     const current = draft();
     if (!current) {
@@ -75,7 +81,7 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
           </header>
           <Show when={files().length > 1}>
             <nav class="sw-draft-files" aria-label={t("skillWorkshop.drafts.filesLabel")}>
-              <For each={files()} keyed>
+              <For each={shownFiles()} keyed>
                 {(file) => (
                   <button
                     type="button"
@@ -93,6 +99,17 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
                   </button>
                 )}
               </For>
+              <Show when={files().length > shownFiles().length}>
+                <button
+                  type="button"
+                  class="sw-link-button"
+                  onClick={() => setExpandedDraft(target().draftId ?? null)}
+                >
+                  {t("skillWorkshop.drafts.moreFiles", {
+                    count: String(files().length - shownFiles().length),
+                  })}
+                </button>
+              </Show>
             </nav>
           </Show>
           <div class="sw-detail__body">

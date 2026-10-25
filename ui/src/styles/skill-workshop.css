@@ -336,6 +336,10 @@
   color: var(--text-strong);
 }
 
+.sw-draft-files .sw-link-button {
+  font-size: var(--control-ui-text-xs);
+}
+
 .sw-draft-files__item:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
