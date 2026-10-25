@@ -87,7 +87,6 @@ export const modelsAuthLoginHandlers: GatewayRequestHandlers = {
       }
       const assertLoginCurrent = () => {
         assertOwner?.();
-        client.connectionSignal?.throwIfAborted();
         if (client.invalidated || !client.connect.scopes?.includes("operator.admin")) {
           throw new Error("Provider login authority is no longer active.");
         }

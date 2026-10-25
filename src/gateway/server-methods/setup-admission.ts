@@ -123,26 +123,6 @@ export async function createAdmittedWizardSession(
   }
 }
 
-const startingWizardIds = new WeakMap<object, Set<string>>();
-
-/** A start may be awaiting admission before its id reaches the session map. */
-export function rejectExistingSetupWizardSession(params: {
-  sessionId: string;
-  context: GatewayRequestOptions["context"];
-  respond: RespondFn;
-}): boolean {
-  const sessions = params.context.wizardSessions;
-  if (!sessions.has(params.sessionId) && !startingWizardIds.get(sessions)?.has(params.sessionId)) {
-    return false;
-  }
-  params.respond(
-    false,
-    undefined,
-    errorShape(ErrorCodes.INVALID_REQUEST, "wizard session already exists"),
-  );
-  return true;
-}
-
 /**
  * Owns every Gateway-started background wizard. The runner outlives its start
  * reply, so the starting operator's grant is retained before that reply and
@@ -153,6 +133,7 @@ export async function startGatewayWizard(params: {
   request: GatewayRequestOptions;
   sessionId: string;
   connectionBound?: boolean;
+  lockSetupTarget?: boolean;
   /** Caller-specific facts that must stay unchanged, such as the selected login. */
   assertCurrent?: () => void;
   admit?: (
@@ -160,34 +141,34 @@ export async function startGatewayWizard(params: {
     assertCurrent: () => void,
   ) => Promise<WizardSession | undefined>;
   createSession: (assertCurrent: () => void) => WizardSession;
+  /** Replaces the default running reply, after the session is registered. */
+  respondStarted?: (session: WizardSession) => Promise<void>;
 }): Promise<void> {
   const { client, context, respond } = params.request;
-  if (rejectExistingSetupWizardSession({ sessionId: params.sessionId, context, respond })) {
+  const reject = (message: string) =>
+    respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, message));
+  if (context.wizardSessions.has(params.sessionId)) {
+    reject("wizard session already exists");
     return;
   }
-  if (params.connectionBound && !client) {
-    respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "Client required"));
+  const connection = params.connectionBound ? client : undefined;
+  if (params.connectionBound && !connection) {
+    reject("Client required");
     return;
   }
-  const sessions = context.wizardSessions;
-  const starting = startingWizardIds.get(sessions) ?? new Set<string>();
-  startingWizardIds.set(sessions, starting);
-  starting.add(params.sessionId);
   let authority: ReturnType<typeof retainGatewayRequestMutationAuthority> | undefined;
   let continuation: Awaited<ReturnType<typeof captureOperatorToolGatewayContinuationContext>>;
-  let session: WizardSession | undefined;
   const release = () => {
     authority?.release();
     continuation?.release();
   };
   const assertCurrent = () => {
-    if (params.connectionBound) {
-      client?.connectionSignal?.throwIfAborted();
-    }
+    connection?.connectionSignal?.throwIfAborted();
     params.assertCurrent?.();
     continuation?.assertCurrent();
     authority?.assertCurrent();
   };
+  let session: WizardSession | undefined;
   try {
     authority = retainGatewayRequestMutationAuthority(params.request);
     continuation = await captureOperatorToolGatewayContinuationContext();
@@ -197,47 +178,45 @@ export async function startGatewayWizard(params: {
       const createSession = () => params.createSession(assertCurrent);
       return continuation ? continuation.run(createSession) : createSession();
     };
-    session = await (params.admit
-      ? params.admit(create, assertCurrent)
-      : createAdmittedWizardSession(create));
+    session = await (params.admit?.(create, assertCurrent) ??
+      createAdmittedWizardSession(create, params.lockSetupTarget));
   } catch (error) {
     release();
     throw error;
-  } finally {
-    starting.delete(params.sessionId);
   }
   if (!session) {
     release();
     respondSetupAdmissionBusy(respond);
     return;
   }
-  void whenAdmittedWizardSessionSettled(session).then(release, release);
+  const started = session;
+  void whenAdmittedWizardSessionSettled(started).then(release, release);
   try {
     assertCurrent();
   } catch {
-    session.close(new Error("Setup is no longer available on this connection."));
-    await whenAdmittedWizardSessionSettled(session);
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, "Setup is no longer available on this connection."),
-    );
+    started.close(new Error("Setup is no longer available on this connection."));
+    await whenAdmittedWizardSessionSettled(started);
+    reject("Setup is no longer available on this connection.");
     return;
   }
-  const signal = params.connectionBound ? client?.connectionSignal : undefined;
-  if (params.connectionBound && client) {
-    bindWizardLoginOwner(session, client);
-    const cancel = () => session.close(new Error("Login connection closed."));
+  if (connection) {
+    bindWizardLoginOwner(started, connection);
+    const signal = connection.connectionSignal;
+    const cancel = () => started.close(new Error("Login connection closed."));
     signal?.addEventListener("abort", cancel, { once: true });
     const settled = () => {
       signal?.removeEventListener("abort", cancel);
-      if (signal?.aborted || client.invalidated) {
+      if (signal?.aborted || connection.invalidated) {
         context.purgeWizardSession(params.sessionId);
       }
     };
-    void whenAdmittedWizardSessionSettled(session).then(settled, settled);
+    void whenAdmittedWizardSessionSettled(started).then(settled, settled);
   }
-  sessions.set(params.sessionId, session);
+  context.wizardSessions.set(params.sessionId, started);
+  if (params.respondStarted) {
+    await params.respondStarted(started);
+    return;
+  }
   // Return ownership before any prompt so cancellation survives a lost start reply.
   respond(true, { sessionId: params.sessionId, done: false, status: "running" }, undefined);
 }

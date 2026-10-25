@@ -75,7 +75,6 @@ export const mcpAuthLoginHandlers: GatewayRequestHandlers = {
     }
     const initialServer = structuredClone(connection.server);
     const assertServerCurrent = () => {
-      client.connectionSignal?.throwIfAborted();
       if (client.invalidated || !client.connect.scopes?.includes("operator.admin")) {
         throw new Error("Sign-in authority is no longer active.");
       }
