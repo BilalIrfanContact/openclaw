@@ -133,6 +133,13 @@ export function createManagedReloadSecretHandlers(options: {
         sourceConfig,
         transactionOwnership,
       );
+      // Deferred writes carry authored SecretRefs, direct writes resolved values.
+      const isThisCandidate = (snapshot: {
+        config: OpenClawConfig;
+        sourceConfig: OpenClawConfig;
+      }) =>
+        isDeepStrictEqual(snapshot.config, nextConfig) ||
+        isDeepStrictEqual(snapshot.sourceConfig, nextSecretsSourceConfig);
       if (
         previousRuntimeMetadata &&
         previousRuntimeSourceConfig &&
@@ -143,7 +150,7 @@ export function createManagedReloadSecretHandlers(options: {
           ...previousSecretsSnapshot,
           sourceConfig: nextSecretsSourceConfig,
         };
-        if (!isDeepStrictEqual(sourceOnlySnapshot.config, nextConfig)) {
+        if (!isThisCandidate(previousSecretsSnapshot)) {
           throw new GatewayConfigReloadSupersededError();
         }
         await transactionOwnership.checkpoint();
@@ -213,7 +220,7 @@ export function createManagedReloadSecretHandlers(options: {
       const preparedSecrets = preparation.snapshot;
       await transactionOwnership.checkpoint();
       assertReloadPublicationCurrent(transactionOwnership.isCurrent(), false);
-      if (!isDeepStrictEqual(preparedSecrets.config, nextConfig)) {
+      if (!isThisCandidate(preparedSecrets)) {
         throw new GatewayConfigReloadSupersededError();
       }
       if (!previousRuntimeSourceConfig || !previousSecretsSnapshot) {
