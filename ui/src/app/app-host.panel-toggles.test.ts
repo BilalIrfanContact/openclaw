@@ -103,15 +103,18 @@ describe("OpenClaw shell panel toggles", () => {
       const chord = (repeat = false) =>
         keyEvent("k", "KeyK", { ctrlKey: true, bubbles: true, repeat });
       target.dispatchEvent(chord());
-      expect(owner.isShellComponentRequested("palette")).toBe(true);
+      expect(owner.pendingShellAction).not.toBeNull();
+      expect(owner.commandPaletteLoading.active()).toBe(true);
       if (phase === "closed") {
         target.dispatchEvent(chord());
-        expect(owner.isShellComponentRequested("palette")).toBe(false);
+        expect(owner.pendingShellAction).toBeNull();
+        expect(owner.commandPaletteLoading.active()).toBe(false);
       }
       const repeated = chord(true);
       target.dispatchEvent(repeated);
       expect(repeated.defaultPrevented).toBe(true);
-      expect(owner.isShellComponentRequested("palette")).toBe(phase === "pending");
+      expect(owner.pendingShellAction !== null).toBe(phase === "pending");
+      expect(owner.commandPaletteLoading.active()).toBe(phase === "pending");
     },
   );
 

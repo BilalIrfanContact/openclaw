@@ -600,17 +600,10 @@ export class CommandPaletteState {
   }
 
   readonly handleGlobalKeydown = (event: Event) => {
-    if (
-      !(event instanceof KeyboardEvent) ||
-      !this.element.isConnected ||
-      event.defaultPrevented ||
-      this.composing ||
-      event.isComposing ||
-      event.keyCode === 229
-    ) {
+    if (!(event instanceof KeyboardEvent) || !this.element.isConnected || this.composing) {
       return;
     }
-    if (isCommandPaletteShortcut(event)) {
+    if (!event.defaultPrevented && isCommandPaletteShortcut(event)) {
       event.preventDefault();
       if (!event.repeat) {
         this.togglePalette();
