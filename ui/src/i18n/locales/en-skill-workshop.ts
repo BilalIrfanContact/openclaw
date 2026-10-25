@@ -35,7 +35,6 @@ const enSkillWorkshop = {
       drafts: "Drafts",
     },
     drafts: {
-      label: "Draft",
       newSkill: "New skill",
       update: "Update",
       proposed: "Proposed {time}",

@@ -50,7 +50,6 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
         <>
           <header class="sw-detail__head">
             <div class="sw-detail__identity">
-              <span class="sw-badge sw-badge--draft">{t("skillWorkshop.drafts.label")}</span>
               <h2 class="sw-detail__title">{target().name}</h2>
               {current().summary && <p class="sw-detail__desc">{current().summary}</p>}
               <p class="sw-detail__meta">{meta()}</p>
@@ -79,45 +78,54 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
               />
             </div>
           </header>
-          <Show when={files().length > 1}>
-            <nav class="sw-draft-files" aria-label={t("skillWorkshop.drafts.filesLabel")}>
-              <For each={shownFiles()} keyed>
-                {(file) => (
-                  <button
-                    type="button"
-                    class={[
-                      "sw-draft-files__item",
-                      { "sw-draft-files__item--active": file === target().filePath },
-                    ]}
-                    aria-current={file === target().filePath ? "true" : undefined}
-                    onClick={() => props.view().onOpen({ ...target(), filePath: file })}
-                  >
-                    <span aria-hidden="true">
-                      <Icon name="fileText" />
-                    </span>
-                    {file}
-                  </button>
-                )}
-              </For>
-              <Show when={files().length > shownFiles().length}>
-                <button
-                  type="button"
-                  class="sw-link-button"
-                  onClick={() => setExpandedDraft(target().draftId ?? null)}
-                >
-                  {t("skillWorkshop.drafts.moreFiles", {
-                    count: String(files().length - shownFiles().length),
-                  })}
-                </button>
-              </Show>
-            </nav>
-          </Show>
-          <div class="sw-detail__body">
-            <DraftContent reads={props.reads} />
-          </div>
-          <p class="sw-draft-hint">
+          <div class="sw-notice">
             {t("skillWorkshop.drafts.chatHint", { skill: target().name })}
-          </p>
+          </div>
+          <div class="sw-detail__body">
+            <Show when={files().length > 1} fallback={<DraftContent reads={props.reads} />}>
+              {/* The same two-column file view as a live skill's Files tab. */}
+              <div class="sw-files">
+                <ul class="sw-files__list" aria-label={t("skillWorkshop.drafts.filesLabel")}>
+                  <For each={shownFiles()} keyed>
+                    {(file) => (
+                      <li>
+                        <button
+                          type="button"
+                          class={[
+                            "sw-files__item",
+                            { "sw-files__item--active": file === target().filePath },
+                          ]}
+                          aria-current={file === target().filePath ? "true" : undefined}
+                          onClick={() => props.view().onOpen({ ...target(), filePath: file })}
+                        >
+                          <span aria-hidden="true">
+                            <Icon name="fileText" />
+                          </span>
+                          <span>{file}</span>
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                  <Show when={files().length > shownFiles().length}>
+                    <li>
+                      <button
+                        type="button"
+                        class="sw-files__item"
+                        onClick={() => setExpandedDraft(target().draftId ?? null)}
+                      >
+                        {t("skillWorkshop.drafts.moreFiles", {
+                          count: String(files().length - shownFiles().length),
+                        })}
+                      </button>
+                    </li>
+                  </Show>
+                </ul>
+                <div class="sw-files__content">
+                  <DraftContent reads={props.reads} />
+                </div>
+              </div>
+            </Show>
+          </div>
         </>
       )}
     </Show>

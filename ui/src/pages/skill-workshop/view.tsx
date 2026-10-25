@@ -167,7 +167,11 @@ function Toolbar(props: { view: WorkshopView }) {
             <div class="sw-learning" title={t(`skillWorkshop.mode.${mode()}Title`)}>
               <span class="sw-learning__label">
                 <span
-                  class={["sw-learning__dot", `sw-learning__dot--${mode()}`]}
+                  class={[
+                    "sw-learning__dot",
+                    // Propose still runs background reviews, so it shows learning as on.
+                    `sw-learning__dot--${mode() === "off" ? "off" : "auto"}`,
+                  ]}
                   aria-hidden="true"
                 />
                 {t("skillWorkshop.mode.label")}
@@ -259,14 +263,7 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
                 label: (
                   <>
                     {t(`skillWorkshop.skills.${value}`)}{" "}
-                    <span
-                      class={[
-                        "settings-count",
-                        { "sw-count--attention": value === "drafts" && count(value) > 0 },
-                      ]}
-                    >
-                      {count(value)}
-                    </span>
+                    <span class="settings-count">{count(value)}</span>
                   </>
                 ),
               }))}
@@ -446,12 +443,12 @@ function DraftRow(props: { draft: SkillWorkshopDraft; view: WorkshopView }) {
       >
         <span class="sw-row__top">
           <span class="sw-row__name">{props.draft.skillName}</span>
-          <span class={["sw-badge", live() ? "sw-badge--update" : "sw-badge--new"]}>
+          <span class="sw-row__uses">
             {t(live() ? "skillWorkshop.drafts.update" : "skillWorkshop.drafts.newSkill")}
           </span>
         </span>
         {props.draft.summary && <span class="sw-row__desc">{props.draft.summary}</span>}
-        <span class="sw-row__when">
+        <span class="sw-row__uses">
           {t("skillWorkshop.drafts.proposed", {
             time: formatRelativeTimestamp(props.draft.createdAtMs),
           })}

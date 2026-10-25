@@ -377,7 +377,7 @@ it("reviews a draft as a diff against the live skill, applies it, and follows th
   button(page, "Drafts 1")!.click();
 
   await waitForSolid(() => {
-    expect(page.querySelector(".sw-badge--update")?.textContent).toBe("Update");
+    expect(page.querySelector(".sw-list__rows .sw-row__uses")?.textContent).toBe("Update");
     expect(page.querySelector(".sw-diff__key--remove")?.textContent).toBe("Live skill");
     expect(page.querySelector(".sw-diff__line--add")?.textContent).toContain(
       "Match transfers first.",
@@ -394,7 +394,7 @@ it("reviews a draft as a diff against the live skill, applies it, and follows th
   );
   await waitForSolid(() => {
     expect(page.querySelector(".sw-detail__title")?.textContent).toBe(SKILL);
-    expect(page.querySelector(".sw-badge--draft")).toBeNull();
+    expect(button(page, "Apply")).toBeUndefined();
     expect(button(page, "Active 1")?.getAttribute("aria-pressed")).toBe("true");
   });
 });
@@ -415,7 +415,7 @@ it("shows only the drafts list on the Drafts tab of an agent with no learned ski
   button(page, "Drafts 1")!.click();
 
   await waitForSolid(() =>
-    expect(page.querySelector(".sw-badge--new")?.textContent).toBe("New skill"),
+    expect(page.querySelector(".sw-list__rows .sw-row__uses")?.textContent).toBe("New skill"),
   );
   expect(page.querySelector(".sw-list__rows")?.textContent).not.toMatch(
     /Nothing archived|No active skills/,
@@ -436,9 +436,10 @@ it("shows a large draft's first files and opens the rest on request", async () =
   await waitForSolid(() => expect(button(page, "Drafts 1")).toBeDefined());
   button(page, "Drafts 1")!.click();
 
-  await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(8));
+  // Eight files plus the "+N more files" row.
+  await waitForSolid(() => expect(page.querySelectorAll(".sw-files__item")).toHaveLength(9));
   button(page, "+4 more files")!.click();
-  await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(12));
+  await waitForSolid(() => expect(page.querySelectorAll(".sw-files__item")).toHaveLength(12));
 });
 
 it.each([
