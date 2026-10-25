@@ -18,7 +18,7 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import * as stateWorker from "../../state/openclaw-state-worker-store.js";
 import { setCanonicalUserPreferences } from "../../state/user-preferences.js";
-import { setUserPreferences } from "../../state/user-preferences.test-support.js";
+import { mergeCanonicalUserProfiles } from "../../state/user-profile-writes.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { requireNativeSqliteDatabase } from "../../test-utils/native-sqlite.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
@@ -643,9 +643,12 @@ it.each(["bulk lifecycle cleanup", "revoked commit"])(
   },
 );
 
-it("keeps personally pinned dashboard children out of automatic archive until the final reference is removed", async () => {
+it("keeps personally pinned dashboard children through worker cleanup until the final reference is removed", async () => {
   const fixture = createPlannerStore(0, undefined, "");
-  const env = { ...process.env, OPENCLAW_STATE_DIR: sessionDirs.make() };
+  const env = {
+    ...process.env,
+    OPENCLAW_STATE_DIR: path.resolve(fixture.storePath, "../../../.."),
+  };
   const options = { env };
   const alice = ensureProfileForEmail("alice@example.test", options).id;
   const bob = ensureProfileForEmail("bob@example.test", options).id;
@@ -654,43 +657,40 @@ it("keeps personally pinned dashboard children out of automatic archive until th
   fixture.set(child, { updatedAt: now - 40 * day, parentSessionKey: fixture.key("parent") });
   fixture.set("global", { updatedAt: now - 40 * day, pinnedAt: now });
   fixture.set("unprotected", { updatedAt: now - 40 * day });
-  for (const profile of [alice, bob]) {
-    setUserPreferences(
-      profile,
-      { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: [`session:${fixture.key(child)}`] },
-      options,
-    );
-  }
-  const maintain = async () => {
-    const preservation = await prepareSessionMaintenancePreservation(fixture.storePath, { env });
-    try {
-      return runOpenClawAgentWriteTransaction(
-        (owner) =>
-          maintenance.applySessionEntryMaintenance(owner, {
-            archiveDirectory: path.join(path.dirname(fixture.database.path), "archives"),
-            storePath: fixture.storePath,
-            preservation: preservation.capture,
-            maintenanceConfig: resolveMaintenanceConfigFromInput(),
-          }),
-        { agentId: "main", path: fixture.database.path },
-      );
-    } finally {
-      preservation.dispose();
-    }
+  const setPins = async (profile: string, pins: string[] | null) => {
+    expect(
+      await setCanonicalUserPreferences(
+        profile,
+        { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: pins },
+        options,
+      ),
+    ).toMatchObject({ ok: true });
   };
-  expect((await maintain()).archivedEntries.map(({ sessionKey }) => sessionKey)).toEqual([
-    fixture.key("unprotected"),
-  ]);
+  await setPins(alice, [`session:${fixture.key(child)}`]);
+  await setPins(bob, [`session-rail:${fixture.key(child)}`]);
+  const maintain = () =>
+    applySessionEntryLifecycleMutation({
+      storePath: fixture.storePath,
+      env,
+      maintenanceOverride: resolveMaintenanceConfigFromInput(),
+    });
+  expect(await maintain()).toMatchObject({ archived: 1 });
+  expectArchived(fixture.load("unprotected"), "age-retention");
   expectUnarchived(fixture.load(child));
-  setUserPreferences(alice, { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: [] }, options);
+  await setPins(alice, []);
   vi.mocked(Date.now).mockReturnValue(now + SESSION_ENTRY_MAINTENANCE_INTERVAL_MS);
-  await maintain();
+  expect(await maintain()).toMatchObject({ archived: 0 });
   expectUnarchived(fixture.load(child));
-  setUserPreferences(bob, { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: null }, options);
+  expect(await mergeCanonicalUserProfiles(alice, bob, options)).toMatchObject({
+    profile: { id: bob },
+  });
   vi.mocked(Date.now).mockReturnValue(now + 2 * SESSION_ENTRY_MAINTENANCE_INTERVAL_MS);
-  expect((await maintain()).archivedEntries.map(({ sessionKey }) => sessionKey)).toEqual([
-    fixture.key(child),
-  ]);
+  expect(await maintain()).toMatchObject({ archived: 0 });
+  expectUnarchived(fixture.load(child));
+  await setPins(bob, null);
+  vi.mocked(Date.now).mockReturnValue(now + 3 * SESSION_ENTRY_MAINTENANCE_INTERVAL_MS);
+  expect(await maintain()).toMatchObject({ archived: 1 });
+  expectArchived(fixture.load(child), "stale-dashboard");
   expectUnarchived(fixture.load("global"));
 });
 

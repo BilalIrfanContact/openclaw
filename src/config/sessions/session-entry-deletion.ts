@@ -31,7 +31,7 @@ export function deleteSessionEntryInWorker(
     agentId: plan.databaseOptions.agentId,
     retainedExecution: execution,
     assertCurrent,
-    assertCandidate: (_candidate, operation) => assertCurrent(operation),
+    assertCandidate: (_candidate, retained) => assertCurrent(retained),
     candidateKind: "session-entry-deletion",
     onCommitted(candidate, _published, identity) {
       onResult?.(candidate.result, identity);

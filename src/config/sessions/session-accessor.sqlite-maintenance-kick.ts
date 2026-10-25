@@ -4,7 +4,6 @@ import {
   assertExistingDatabaseIdentity,
   readDatabasePathIdentitySync,
 } from "../../infra/sqlite-worker-identity.js";
-import type { RetainedWorkerTransactionAdmission } from "../../infra/sqlite-worker-operation-settlement.js";
 import { getChildLogger } from "../../logging/logger.js";
 import {
   GatewayDrainingError,
@@ -493,14 +492,12 @@ async function runPendingMaintenance(
         throw new SqliteReclamationInputsChangedError("SQLite automatic maintenance owner retired");
       }
     };
-    const preparedPreservation = await prepareSessionMaintenancePreservation(owner.storePath, {
-      env: owner.scope.env,
-    });
-    preservation = preparedPreservation;
+    const prepared = await prepareSessionMaintenancePreservation(owner.storePath, owner.scope);
+    preservation = prepared;
     assertInputsCurrent();
-    const capturePreservation = (operation?: RetainedWorkerTransactionAdmission) => {
+    const capturePreservation: typeof prepared.capture = (operation) => {
       try {
-        return preparedPreservation.capture(operation);
+        return prepared.capture(operation);
       } catch (error) {
         planningChanged = true;
         throw error;

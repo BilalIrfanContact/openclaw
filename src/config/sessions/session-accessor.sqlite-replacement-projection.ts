@@ -566,8 +566,8 @@ async function applySqliteSessionEntryReplacementProjection<T, TReplacement>(
               assertCurrent,
               {
                 identityAgentId: resolved.agentId,
-                beforeCommit: (_publication, operation) => {
-                  preparedPreservation?.capture(operation);
+                beforeCommit: (_publication, retained) => {
+                  preparedPreservation?.capture(retained);
                 },
                 onLifecycleCommitted: params.onLifecycleCommitted,
                 afterCommitted: params.afterCommitted

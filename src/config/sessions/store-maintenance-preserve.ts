@@ -6,6 +6,7 @@ import {
   collectSessionControllerTargets,
   collectSessionMutationIdentities,
 } from "../../sessions/session-controller.lifecycle.js";
+import { resolveExplicitIncognitoAgentSqliteTarget } from "../../state/openclaw-agent-db.paths.js";
 import { preparePersonalSessionPins } from "../../state/user-preferences-session-pins.js";
 import { SqliteSessionMutationConflictError } from "./session-mutation-conflict-error.js";
 import {
@@ -68,7 +69,8 @@ export async function prepareSessionMaintenancePreservation(
   storePath: string,
   options: { native?: boolean; env?: NodeJS.ProcessEnv } = {},
 ): Promise<PreparedSessionMaintenancePreservation> {
-  const personalPins = await preparePersonalSessionPins({ env: options.env });
+  const target = resolveExplicitIncognitoAgentSqliteTarget(storePath, { env: options.env });
+  const personalPins = await preparePersonalSessionPins({ env: target?.env ?? options.env });
   const registrations = [...preserveKeysProviders];
   const prepared: PreparedSessionMaintenancePreserveKeys[] = [];
   let disposed = false;

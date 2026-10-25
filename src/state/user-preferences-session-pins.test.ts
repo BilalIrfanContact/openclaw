@@ -3,8 +3,10 @@ import { UI_RAIL_SHORTCUTS_PREFERENCE_KEY } from "../../packages/gateway-protoco
 import type { SqliteWorkerOperationSettlement } from "../infra/sqlite-worker-operation-settlement.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import * as stateReads from "./openclaw-state-db-readonly.js";
-import { closeOpenClawStateDatabaseByPathAsync } from "./openclaw-state-db.js";
-import { openOpenClawStateDatabase } from "./openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabaseByPathAsync,
+  openOpenClawStateDatabase,
+} from "./openclaw-state-db.js";
 import * as stateWorker from "./openclaw-state-worker-store.js";
 import { preparePersonalSessionPins } from "./user-preferences-session-pins.js";
 import { setCanonicalUserPreferences } from "./user-preferences.js";

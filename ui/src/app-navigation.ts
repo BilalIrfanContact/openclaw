@@ -86,7 +86,7 @@ export function parseSidebarEntry(value: unknown): SidebarZoneEntry | null {
     return { type: "person", profileId };
   }
   if (value.startsWith("session-rail:")) {
-    const key = value.slice("session-rail:".length).trim();
+    const key = parseSidebarSessionReference(value);
     return key ? { type: "session", key, rail: true } : null;
   }
   if (value.startsWith("session:")) {

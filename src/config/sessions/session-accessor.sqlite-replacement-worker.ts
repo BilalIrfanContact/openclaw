@@ -35,6 +35,7 @@ import {
 } from "./session-accessor.sqlite-entry-cache.js";
 import { publishCommittedSessionIdentity } from "./session-accessor.sqlite-identity.js";
 import type {
+  SessionEntryWorkerLifecycle,
   SessionEntryReplacementCandidate,
   SessionEntryReplacementCommitted,
 } from "./session-accessor.sqlite-replacement-types.js";
@@ -450,16 +451,7 @@ export async function runSessionEntryWorkerMutation<T>(
   databaseIdentity: string | undefined,
   assertCurrent: () => void,
   run: (worker: AgentDatabaseExecutionScope) => Promise<SessionEntryWorkerMutationResult<T>>,
-  lifecycle: {
-    identityAgentId: string;
-    onResult?: (value: T | undefined) => void;
-    beforeCommit?: (
-      publication: SessionEntryReplacementPublication,
-      operation: RetainedWorkerTransactionAdmission,
-    ) => void;
-    afterCommitted?: (context: SessionEntryCommitContext) => Promise<void>;
-    onLifecycleCommitted?: (pendingArchiveRecovery: boolean) => void;
-  },
+  lifecycle: SessionEntryWorkerLifecycle<T>,
   executionOptions: {
     retainedExecution?: OpenClawAgentDatabaseExecution;
     signal?: AbortSignal;
@@ -618,15 +610,7 @@ export async function commitSessionEntryReplacementsInWorker(
   databaseIdentity: string,
   input: AgentDatabaseOperations["session.entries.replace"]["input"],
   assertCurrent: SessionSourceAssertion,
-  lifecycle: {
-    identityAgentId: string;
-    beforeCommit?: (
-      publication: SessionEntryReplacementPublication,
-      operation: RetainedWorkerTransactionAdmission,
-    ) => void;
-    afterCommitted?: (context: SessionEntryCommitContext) => Promise<void>;
-    onLifecycleCommitted?: (pendingArchiveRecovery: boolean) => void;
-  },
+  lifecycle: Omit<SessionEntryWorkerLifecycle, "onResult">,
   retainedExecution?: OpenClawAgentDatabaseExecution,
   nativeDeletion?: ReturnType<typeof captureNativeSessionWorkerDeletion>,
 ): Promise<SessionEntryReplacementCommitted> {
@@ -652,6 +636,7 @@ export async function commitSessionEntryReplacementsInWorker(
       const { runSessionNativeBindingWorkerOperation } =
         await import("./session-native-binding.js");
       return await runSessionNativeBindingWorkerOperation<
+        SessionEntryWorkerLifecycle,
         SessionEntryReplacementCandidate,
         SessionEntryReplacementCommitted
       >({

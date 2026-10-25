@@ -9,7 +9,7 @@ import {
   closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
 } from "../../state/openclaw-agent-db.js";
-import { setUserPreferences } from "../../state/user-preferences.test-support.js";
+import { setCanonicalUserPreferences } from "../../state/user-preferences.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { requireNativeSqliteDatabase } from "../../test-utils/native-sqlite.js";
 import { measureSessionPhysicalDiskUsage } from "./disk-budget.js";
@@ -110,9 +110,11 @@ describe("SQLite historical session preservation", () => {
       }
       if (protection === "personal") {
         const profile = ensureProfileForEmail("pin@example.test").id;
-        setUserPreferences(profile, {
-          [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: [`session:${recentKey}`],
-        });
+        expect(
+          await setCanonicalUserPreferences(profile, {
+            [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: [`session-rail:${recentKey}`],
+          }),
+        ).toMatchObject({ ok: true });
       }
       const before = await measureSessionPhysicalDiskUsage(storePath);
       const preserveRecentMs = protection === "recent" ? 7 * dayMs : undefined;

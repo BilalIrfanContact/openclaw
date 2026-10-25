@@ -184,10 +184,10 @@ export async function purgeDeletedAgentSessionEntries(
             assertPrepared: () => {
               preservation.capture();
             },
-            assertCandidate: (candidate, operation) =>
+            assertCandidate: (candidate, retained) =>
               assertMaintenancePreservationCompatible(
                 sentPreservation,
-                preservation.capture(operation),
+                preservation.capture(retained),
                 candidate.result.maintenancePlans,
               ),
             candidateKind: "session-agent-purge",
