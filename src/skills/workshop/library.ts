@@ -285,7 +285,7 @@ async function readRestorableVersion(
   return files;
 }
 
-export async function writeSkillFile(paths: MutationPaths, filePath: string, content: string) {
+async function writeSkillFile(paths: MutationPaths, filePath: string, content: string) {
   await fs.mkdir(paths.root, { recursive: true });
   assertInsideSkillsRoot(paths.root, paths.skillDir, "skill directory");
   await fs.mkdir(paths.skillDir, { recursive: true });
@@ -644,42 +644,62 @@ export async function restoreWorkshopSkill(
       target.id,
       path.join(paths.versionsDir, target.id),
     );
-    const staging = path.join(paths.root, ARCHIVE_DIR, `.restore-${randomUUID()}`);
-    const previous = path.join(paths.root, ARCHIVE_DIR, `.restore-previous-${randomUUID()}`);
-    try {
+    const versionId = await publishSkillBundle(paths, "restore", async (staging) => {
       for (const [filePath, content] of files) {
-        const destination = path.join(staging, ...filePath.split("/"));
-        await fs.mkdir(path.dirname(destination), { recursive: true });
-        await fs.writeFile(destination, content, { flag: "wx" });
+        await writeStagedFile(staging, filePath, content);
       }
-      const versionId = await snapshotSkill(paths, "restore");
-      // Swap by rename so a refused or failed publish puts the previous live skill back.
-      const hadLive = await pathExists(paths.skillDir);
-      if (hadLive) {
-        paths.assertLive();
-        await fs.rename(paths.skillDir, previous);
-      }
-      try {
-        paths.assertLive();
-        await fs.rename(staging, paths.skillDir);
-      } catch (error) {
-        if (hadLive) {
-          await fs.rename(previous, paths.skillDir);
-        }
-        throw error;
-      }
-      // Only successful publication may discard the original live copy.
-      await fs.rm(previous, { recursive: true, force: true });
-      const summary =
-        params.summary ??
-        (target.action === "archive"
-          ? "restored from archive"
-          : params.versionId
-            ? `restored version ${target.id}`
-            : `undid ${target.action.replace("_", " ")}`);
-      return { summary, versionId };
-    } finally {
-      await fs.rm(staging, { recursive: true, force: true });
-    }
+    });
+    const summary =
+      params.summary ??
+      (target.action === "archive"
+        ? "restored from archive"
+        : params.versionId
+          ? `restored version ${target.id}`
+          : `undid ${target.action.replace("_", " ")}`);
+    return { summary, versionId };
   });
+}
+
+export async function writeStagedFile(staging: string, filePath: string, content: string | Buffer) {
+  const destination = path.join(staging, ...filePath.split("/"));
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.writeFile(destination, content);
+}
+
+/**
+ * Publishes a whole skill at once: `fill` builds the complete next copy in a staging directory,
+ * the live skill is snapshotted, and the copies swap by rename. A failed fill, refused authority,
+ * or failed rename leaves the previous live skill in place. Returns the snapshot's version id.
+ */
+export async function publishSkillBundle(
+  paths: MutationPaths,
+  action: WorkshopChangeAction,
+  fill: (staging: string) => Promise<void>,
+): Promise<string | undefined> {
+  const staging = path.join(paths.root, ARCHIVE_DIR, `.${action}-${randomUUID()}`);
+  const previous = path.join(paths.root, ARCHIVE_DIR, `.${action}-previous-${randomUUID()}`);
+  try {
+    await fs.mkdir(staging, { recursive: true });
+    await fill(staging);
+    const versionId = await snapshotSkill(paths, action);
+    const hadLive = await pathExists(paths.skillDir);
+    if (hadLive) {
+      paths.assertLive();
+      await fs.rename(paths.skillDir, previous);
+    }
+    try {
+      paths.assertLive();
+      await fs.rename(staging, paths.skillDir);
+    } catch (error) {
+      if (hadLive) {
+        await fs.rename(previous, paths.skillDir);
+      }
+      throw error;
+    }
+    // Only successful publication may discard the original live copy.
+    await fs.rm(previous, { recursive: true, force: true });
+    return versionId;
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true });
+  }
 }

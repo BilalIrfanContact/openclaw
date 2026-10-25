@@ -18,10 +18,10 @@ import {
   SKILL_FILE,
   validateSkillFile,
   WorkshopWriteError,
-  writeSkillFile,
+  publishSkillBundle,
+  writeStagedFile,
   type WorkshopMutationContext,
 } from "./library.js";
-import { snapshotSkill } from "./skill-versions.js";
 import { resolveWorkshopDraftsDir, resolveWorkshopSkillsDir } from "./skills-root.js";
 
 // Drafts are proposed skills a background review saved instead of changing live skills.
@@ -179,8 +179,8 @@ export async function discardWorkshopDraft(
 
 /**
  * Makes a draft the live skill in one versioned change, then deletes the draft. Every file is
- * validated before the first write, and one snapshot precedes them all, so a refused file leaves
- * the skill untouched and one undo restores the skill as it was before the draft.
+ * validated first and the whole next skill is published by one staged swap, so a refused file or
+ * failed write leaves the skill untouched, and one undo restores it as it was before the draft.
  */
 export async function applyWorkshopDraft(
   ctx: WorkshopMutationContext,
@@ -222,17 +222,18 @@ export async function applyWorkshopDraft(
                 `Skill "${name}" changed while the draft was being applied; open the draft again.`,
               );
             }
-            const versionId = await snapshotSkill(paths, "write_file");
-            try {
+            const versionId = await publishSkillBundle(paths, "write_file", async (staging) => {
+              // The live copy carries unchanged files, binary assets included, byte for byte.
+              if (live) {
+                await fs.cp(paths.skillDir, staging, {
+                  recursive: true,
+                  filter: async (source) => !(await fs.lstat(source)).isSymbolicLink(),
+                });
+              }
               for (const [file, content] of files) {
-                await writeSkillFile(paths, file, content);
+                await writeStagedFile(staging, file, content);
               }
-            } catch (error) {
-              if (!live) {
-                await fs.rm(paths.skillDir, { recursive: true, force: true });
-              }
-              throw error;
-            }
+            });
             return { summary, ...(versionId ? { versionId } : {}) };
           }),
         ];

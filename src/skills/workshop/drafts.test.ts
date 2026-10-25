@@ -11,6 +11,7 @@ import {
   listWorkshopChanges,
   restoreWorkshopSkill,
   viewWorkshopSkill,
+  writeWorkshopSkillFile,
 } from "./library.js";
 import { resolveWorkshopDraftsDir } from "./skills-root.js";
 
@@ -87,6 +88,26 @@ it("refuses a draft with a rejected support file before changing the skill", asy
   expect((await listWorkshopDrafts({}, "main")).map((draft) => draft.id)).toEqual([
     "deploy-proposal-2",
   ]);
+});
+
+it("keeps the live skill whole when a later draft file cannot be written", async () => {
+  await writeWorkshopSkillFile(ctx, {
+    name: "deploy",
+    filePath: "references/notes.md",
+    content: "notes\n",
+  });
+  // SKILL.md is valid, but references/notes.md is a file in the live skill, so the nested
+  // support file cannot be written after it.
+  const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "deploy-proposal-3");
+  await fs.mkdir(path.join(draftDir, "references", "notes.md"), { recursive: true });
+  await fs.writeFile(path.join(draftDir, "SKILL.md"), skillFile("deploy", "Run make ship."));
+  await fs.writeFile(path.join(draftDir, "references", "notes.md", "x.md"), "x\n");
+
+  await expect(applyWorkshopDraft(ctx, "deploy-proposal-3")).rejects.toThrow();
+  const live = await viewWorkshopSkill({}, "main", "deploy");
+  expect(live.content).toContain("make deploy");
+  expect(live.files).toEqual(["SKILL.md", "references/notes.md"]);
+  expect(await listWorkshopChanges("main", {})).toHaveLength(2);
 });
 
 it("creates a new skill from a draft and leaves the inbox when a draft changes nothing", async () => {
