@@ -1,5 +1,5 @@
 import type { RetainedWorkerTransactionAdmission } from "../infra/sqlite-worker-operation-settlement.js";
-import { registerOpenClawStateDatabaseLifecycleListener } from "./openclaw-state-db-cache.js";
+import type { OpenClawStateDatabaseReadAdmission } from "./openclaw-state-db-async-lifecycle.js";
 import { executeExistingOpenClawStateRead } from "./openclaw-state-db-readonly.js";
 import { captureOpenClawStateReadWorkerContext } from "./openclaw-state-worker-context.js";
 import {
@@ -8,19 +8,14 @@ import {
 } from "./user-preferences-publication.js";
 
 type PinSnapshot = { sessionKeys: readonly string[]; isCurrent: () => boolean };
-const snapshots = new Map<string, Promise<PinSnapshot>>();
-registerOpenClawStateDatabaseLifecycleListener((event) => {
-  if (event.kind !== "opened" && event.identity) {
-    snapshots.delete(event.identity.key);
-  }
-});
+const snapshots = new WeakMap<OpenClawStateDatabaseReadAdmission, Promise<PinSnapshot>>();
 
-/** One worker-decoded union per preference publication, shared across agent maintenance passes. */
+/** Share a worker-decoded union within its read admission and preference publication. */
 export async function preparePersonalSessionPins(
   options: { path?: string; env?: NodeJS.ProcessEnv } = {},
 ) {
   const context = captureOpenClawStateReadWorkerContext(options);
-  const key = context.admission.identity.key;
+  const key = context.admission;
   for (;;) {
     let pending = snapshots.get(key);
     if (!pending) {

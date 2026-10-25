@@ -76,6 +76,10 @@ it("shares one worker refresh after a preference change and retires a closed rea
   const reopened = await preparePersonalSessionPins(options);
   expect(reopened.sessionKeys).toEqual(["agent:main:second"]);
   expect(read).toHaveBeenCalledTimes(3);
+  await closeOpenClawStateDatabaseByPathAsync(options.path);
+  const reopenedReadOnly = await preparePersonalSessionPins(options);
+  expect(reopenedReadOnly.sessionKeys).toEqual(["agent:main:second"]);
+  expect(read).toHaveBeenCalledTimes(4);
 });
 
 it.each(["completed", "unknown"] as const)(
