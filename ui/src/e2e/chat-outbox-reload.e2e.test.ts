@@ -49,6 +49,17 @@ suite.define(() => {
         await page.locator(".new-session-page__message").fill(retainedText);
         await page.locator(".agent-chat__file-input").setInputFiles(file);
         await page.getByText(file.name, { exact: true }).first().waitFor();
+        const oldAssets = /\/assets\/private-composer-recovery-content-[^/]+\.js(?:\?.*)?$/u;
+        expect(
+          await page.evaluate(() =>
+            performance
+              .getEntriesByType("resource")
+              .some((entry) => entry.name.includes("private-composer-recovery-content-")),
+          ),
+        ).toBe(false);
+        const recoveryReady = page.waitForResponse(
+          (response) => oldAssets.test(response.url()) && response.status() === 200,
+        );
         await gateway.deferNext("sessions.create");
         await page.getByRole("button", { name: "Start session", exact: true }).click();
         const created = await gateway.waitForRequest("sessions.create");
@@ -65,6 +76,11 @@ suite.define(() => {
         const pending = page.locator(".chat-group.user", { hasText: retainedText });
         await pending.getByText("Not sent", { exact: true }).waitFor();
         expect(await readOutboxQueue(page)).toEqual([]);
+        // A replaced build no longer serves unrequested old hashed assets.
+        await (await recoveryReady).finished();
+        await page.route(oldAssets, (route) =>
+          route.fulfill({ status: 404, body: "Old build asset removed" }),
+        );
         expect(
           await page.evaluate(() => {
             sessionStorage.setItem("qa.reload-storage-control", "works");
@@ -81,7 +97,9 @@ suite.define(() => {
         await gateway.setOnline(true);
         await gateway.waitForRequest("connect", { after: previous });
         await page.clock.install();
-        const navigation = page.waitForEvent("domcontentloaded").then(() => "reloaded" as const);
+        const navigation = new Promise<"reloaded">((resolve) => {
+          page.once("domcontentloaded", () => resolve("reloaded"));
+        });
         await gateway.rejectDeferred("connect", {
           code: "UNAVAILABLE",
           message: "protocol mismatch: Control UI updated; reload this page to continue",
@@ -160,6 +178,8 @@ suite.define(() => {
         await pending.waitFor();
         await refresh.click();
         await review.click();
+        // The next document represents the replacement build, whose assets are available.
+        await page.unroute(oldAssets);
         const reloaded = page.waitForEvent("domcontentloaded");
         await dialog
           .getByRole("button", { name: "Discard local copy and refresh", exact: true })

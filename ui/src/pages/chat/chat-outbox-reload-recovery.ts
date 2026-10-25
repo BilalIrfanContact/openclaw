@@ -8,7 +8,10 @@ import type { ChatAttachment, ChatQueueItem } from "../../lib/chat/chat-types.ts
 import { outboxOwnerKey } from "../../lib/chat/outbox-owner-registry.ts";
 import { showToast } from "../../lib/toast.ts";
 import { releaseChatAttachmentPayloads } from "./attachment-payload-store.ts";
-import { reviewPrivateComposerDraft } from "./components/private-composer-recovery-dialog.tsx";
+import {
+  preloadPrivateComposerRecovery,
+  reviewPrivateComposerDraft,
+} from "./components/private-composer-recovery-dialog.tsx";
 
 registerChatComposerEnglish();
 
@@ -37,6 +40,11 @@ export function protectChatOutboxFromReload<T extends { item: ChatQueueItem }>(o
       settings: gateway.connection,
     }) === options.ownerKey();
   const changed = () => {
+    // Defer closed-dialog code during ordinary boot, but prepare it while custody
+    // still has the current build's assets. Module/custom-element owners deduplicate loads.
+    if (options.inputs.size && binding) {
+      void preloadPrivateComposerRecovery().catch(() => undefined);
+    }
     if (active && !active.current()) {
       active.controller.abort();
     }
@@ -123,12 +131,14 @@ export function protectChatOutboxFromReload<T extends { item: ChatQueueItem }>(o
       }
       if (binding?.gateway === next.gateway) {
         binding = next;
+        changed();
         return;
       }
       stopGateway?.();
       active?.controller.abort();
       binding = next;
       stopGateway = next.gateway.subscribe(changed);
+      changed();
     },
     dispose() {
       disposed = true;

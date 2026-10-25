@@ -6,6 +6,14 @@ import {
 } from "../../lib/chat/outbox-payload-store.runtime.ts";
 import type { StoredChatOutboxScope } from "../../lib/chat/outbox-store-scope.ts";
 import { applyStoredChatOutboxScope, type ChatComposerScope } from "../../lib/chat/outbox-store.ts";
+import type { ChatOutboxReloadBinding } from "./chat-outbox-reload-recovery.ts";
+
+export type ChatOutboxHost = ChatComposerScope & {
+  chatQueue: ChatQueueItem[];
+  sessionKey: string;
+  chatQueuedEdit?: { id: string } | null;
+  outboxRecovery?: ChatOutboxReloadBinding;
+};
 
 export type ChatOutboxLiveProjection<Host> = {
   item: ChatQueueItem;

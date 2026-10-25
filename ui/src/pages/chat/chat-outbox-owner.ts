@@ -38,6 +38,7 @@ import {
   locateLocalOutboxItem,
   positionChatOutboxItem,
   type ChatOutboxLiveProjection,
+  type ChatOutboxHost as Host,
   type ChatOutboxHostProjection as HostProjection,
 } from "./chat-outbox-owner.projection.ts";
 import { publishChatOutboxQueue, replaceChatOutboxQueue } from "./chat-outbox-queue.ts";
@@ -46,7 +47,6 @@ import {
   type ChatOutboxReloadBinding,
   type CapturedChatOutboxInput,
 } from "./chat-outbox-reload-recovery.ts";
-import type { ChatHost } from "./chat-send-contract.ts";
 import {
   type StoredChatQueueReplacement,
   admitStoredChatComposerQueueItemResult,
@@ -59,7 +59,6 @@ import {
 } from "./outbox-payloads.ts";
 
 type Composer = ChatComposerScope & { outboxRecovery?: ChatOutboxReloadBinding };
-type Host = Composer & Pick<ChatHost, "chatQueue" | "sessionKey" | "chatQueuedEdit">;
 type LiveProjection = ChatOutboxLiveProjection<Host>;
 type VolatileInput = { scope: Scope; item: ChatQueueItem; owner: Host };
 const LIVE_VERSION_KEYS = ["sendRunId", "sendAttempts", "sendState", "sendError"] as const;

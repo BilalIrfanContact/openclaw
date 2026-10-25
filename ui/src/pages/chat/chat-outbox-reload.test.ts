@@ -23,10 +23,15 @@ import { reviewPrivateComposerDraft } from "./components/private-composer-recove
 import { useChatSendBrowserFixture } from "./outbox-browser.test-support.ts";
 import { beginQueuedMessageEdit, cancelQueuedMessageEdit } from "./queued-message-edit.ts";
 
-vi.mock("./components/private-composer-recovery-dialog.tsx", () => ({
+vi.mock("./components/private-composer-recovery-dialog.tsx", async (original) => ({
+  ...(await original<typeof import("./components/private-composer-recovery-dialog.tsx")>()),
   reviewPrivateComposerDraft: vi.fn(),
+  preloadPrivateComposerRecovery: vi.fn(async () => undefined),
 }));
-vi.mock("../../lib/toast.ts", () => ({ showToast: vi.fn(() => true) }));
+vi.mock("../../lib/toast.ts", async (original) => ({
+  ...(await original<typeof import("../../lib/toast.ts")>()),
+  showToast: vi.fn(() => true),
+}));
 vi.mock("../../app/stale-chunk-reload.ts", async (original) => ({
   ...(await original<typeof import("../../app/stale-chunk-reload.ts")>()),
   retryStaleChunkReloadWhenReachable: vi.fn(async () => true),
