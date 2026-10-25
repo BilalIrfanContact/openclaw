@@ -1,4 +1,7 @@
 import { readOfflineStorageScope } from "../../app/boot-record.ts";
+import { registerControlUiReloadGuard } from "../../app/document-reload-guard.ts";
+import { t } from "../../i18n/index.ts";
+import { registerChatComposerEnglish } from "../../i18n/locales/en-chat-composer.ts";
 import { chatQueueOrderKey, compareChatQueueOrder } from "../../lib/chat/chat-queue-order.ts";
 import type { ChatQueueItem } from "../../lib/chat/chat-types.ts";
 import {
@@ -27,6 +30,7 @@ import {
   type ChatComposerScope as Composer,
 } from "../../lib/chat/outbox-store.ts";
 import { resolveUiConversationIdentity } from "../../lib/sessions/session-key.ts";
+import { showToast } from "../../lib/toast.ts";
 import { getChatAttachmentDataUrl } from "./attachment-payload-store.ts";
 import { ChatOutboxAdmissions } from "./chat-outbox-admissions.ts";
 import {
@@ -47,6 +51,9 @@ import {
   failOutboxPayload,
   prepareOutboxPayload,
 } from "./outbox-payloads.ts";
+
+registerChatComposerEnglish();
+
 type Host = Composer & { chatQueue: ChatQueueItem[]; sessionKey: string };
 type LiveProjection = {
   item: ChatQueueItem;
@@ -65,6 +72,11 @@ class ChatOutboxGatewayOwner {
   private readonly volatile = new Map<string, { scope: Scope; item: ChatQueueItem; owner: Host }>();
   private readonly hydrating = new Set<string>();
   private unsubscribe: (() => void) | null = null;
+  // Custody outlives panes and account switches, so its reload guard must too.
+  private readonly stopReloadGuard = registerControlUiReloadGuard(
+    () => !this.volatile.size,
+    () => showToast({ message: t("chat.queue.memoryOnlyReloadBlocked") }),
+  );
   constructor(readonly ownerGatewayKey: string) {}
   private publishAttention(): void {
     this.attentionRevision += 1;
@@ -134,8 +146,7 @@ class ChatOutboxGatewayOwner {
     if (!captured) {
       return undefined;
     }
-    const { sessionKey, agentId } = captured;
-    const scope = { sessionKey, agentId };
+    const scope = { sessionKey: captured.sessionKey, agentId: captured.agentId };
     const item = this.snapshot(host, scope, outbox?.queue ?? []).find((row) => row.id === id);
     return item ? { item, scope, durable: outbox?.queue.find((row) => row.id === id) } : undefined;
   }
@@ -584,12 +595,7 @@ class ChatOutboxGatewayOwner {
   // Panes share this outbox and its drain while composer state stays per pane, so
   // a pane-local fact that blocks delivery has to be answerable from any of them.
   anyPane(matches: (host: Host) => boolean): boolean {
-    for (const pane of this.panes) {
-      if (matches(pane)) {
-        return true;
-      }
-    }
-    return false;
+    return [...this.panes].some(matches);
   }
   hasPendingSubmission(scope: Scope, item: ChatQueueItem): boolean {
     return Boolean(
@@ -599,19 +605,15 @@ class ChatOutboxGatewayOwner {
   /** Attention reads delivery state, not the reload-safe aliases stored during live work. */
   needsReview(scope: Scope, item: ChatQueueItem): boolean {
     const key = storedChatOutboxScopeKey(scope);
-    if (this.readLive(key, item.id, item)) {
-      return false;
-    }
-    for (const state of this.hosts.values()) {
-      if (
+    return (
+      !this.readLive(key, item.id, item) &&
+      ![...this.hosts.values()].some((state) =>
         state.byScope
           .get(key)
-          ?.queue.some((local) => local.id === item.id && local.sendState === "waiting-model")
-      ) {
-        return false;
-      }
-    }
-    return storedChatOutboxItemNeedsReview(item);
+          ?.queue.some((local) => local.id === item.id && local.sendState === "waiting-model"),
+      ) &&
+      storedChatOutboxItemNeedsReview(item)
+    );
   }
   beginSubmission(
     host: Host,
@@ -703,6 +705,7 @@ class ChatOutboxGatewayOwner {
         ) {
           owners.delete(this.ownerGatewayKey);
           chatOutboxAttentionOwners.delete(this.ownerGatewayKey);
+          this.stopReloadGuard();
         }
       });
     }

@@ -197,6 +197,8 @@ const catalog = {
     queue: {
       reviewEdit: "Review edit",
       reloadBlocked: "Save or cancel your queued message edit before reloading.",
+      memoryOnlyReloadBlocked:
+        "A pending message is only saved in this tab. Keep this tab open until it is sent, or copy it before discarding it and reloading.",
       connectionPending: "Finishing connection recovery. Try sending again when it is ready.",
       editSourceChanged:
         "This queued message changed while you were editing. Your edit is still here. Copy it, cancel the edit, and review the queue before trying again.",
