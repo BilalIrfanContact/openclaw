@@ -440,3 +440,28 @@ it("shows a large draft's first files and opens the rest on request", async () =
   button(page, "+4 more files")!.click();
   await waitForSolid(() => expect(page.querySelectorAll(".sw-draft-files__item")).toHaveLength(12));
 });
+
+it("keeps the Drafts list open after discarding its last draft outside Propose mode", async () => {
+  const draft = { id: `${SKILL}-1a2b3c4d`, skillName: SKILL, summary: "s", createdAtMs: 1 };
+  let drafts = [draft];
+  const request = workshopGateway({
+    "skills.workshop.list": () => ({ ...list, drafts }),
+    "skills.workshop.read": skillRead,
+    "skills.workshop.discardDraft": () => {
+      drafts = [];
+      return { changes: [] };
+    },
+  });
+  const page = await mount(request, {
+    methods: [...mutationAccess.methods, "skills.workshop.discardDraft"],
+  });
+  await waitForSolid(() => expect(button(page, "Drafts 1")).toBeDefined());
+  button(page, "Drafts 1")!.click();
+  await waitForSolid(() => expect(button(page, "Discard")).toBeDefined());
+  button(page, "Discard")!.click();
+
+  await waitForSolid(() => {
+    expect(button(page, "Drafts 0")?.getAttribute("aria-pressed")).toBe("true");
+    expect(page.querySelector(".sw-list__rows")?.textContent).toContain("No drafts waiting.");
+  });
+});

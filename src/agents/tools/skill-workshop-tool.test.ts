@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clearRuntimeConfigSnapshot,
@@ -9,6 +10,7 @@ import {
   listWorkshopArchive,
   listWorkshopChanges,
 } from "../../skills/workshop/library.js";
+import { resolveWorkshopDraftsDir } from "../../skills/workshop/skills-root.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -149,14 +151,27 @@ describe("skill_workshop", () => {
     expect(await foreground("list")).not.toContain("Drafts waiting");
   });
 
-  it("keeps a draft when the discarding run was aborted", async () => {
-    const drafted = await workshop()("draft", {
-      content: "---\nname: deploy\ndescription: Deploy staging\n---\n\n1. Run make ship.\n",
-    });
-    const id = /Saved draft (\S+) for/.exec(drafted)?.[1];
-    const aborted = AbortSignal.abort(new Error("run aborted"));
-    await expect(workshop()("discard", { draft: id }, aborted)).rejects.toThrow("run aborted");
-    expect(await workshop()("list")).toContain(`- ${id} (deploy)`);
+  it("stops draft saves and discards whose run is aborted while they prepare", async () => {
+    const content = "---\nname: deploy\ndescription: Deploy staging\n---\n\n1. Run make ship.\n";
+    const draftsDir = resolveWorkshopDraftsDir({}, "main");
+    const draftIds = async () =>
+      (await fs.readdir(draftsDir).catch(() => [] as string[])).toSorted((a, b) =>
+        a.localeCompare(b),
+      );
+
+    // The call captures the run's authority, then awaits; the abort lands before any file effect.
+    const saving = new AbortController();
+    const save = workshop()("draft", { content }, saving.signal);
+    saving.abort(new Error("run aborted"));
+    await expect(save).rejects.toThrow("run aborted");
+    expect(await draftIds()).toEqual([]);
+
+    const id = /Saved draft (\S+) for/.exec(await workshop()("draft", { content }))?.[1];
+    const discarding = new AbortController();
+    const discard = workshop()("discard", { draft: id }, discarding.signal);
+    discarding.abort(new Error("run aborted"));
+    await expect(discard).rejects.toThrow("run aborted");
+    expect(await draftIds()).toEqual([id]);
   });
 
   it("shows the other learned skills on create so the agent can merge duplicates", async () => {

@@ -214,9 +214,10 @@ function Library(props: { view: WorkshopView; reads: WorkshopReads }) {
       ? sortWorkshopSkills(list().skills, props.view().snapshot!.changes, props.view().sort)
       : archived(),
   );
-  // The Drafts list appears once drafts can exist: in Propose mode, or while any wait.
+  // The Drafts list appears once drafts can exist: in Propose mode, while any wait, or while it
+  // is the open list (discarding its last draft must not leave no list selected).
   const filters = createMemo<WorkshopFilter[]>(() =>
-    props.view().mode === "propose" || drafts().length > 0
+    props.view().mode === "propose" || drafts().length > 0 || props.view().filter === "drafts"
       ? ["active", "drafts", "archived"]
       : ["active", "archived"],
   );
