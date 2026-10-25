@@ -25,6 +25,25 @@ export function candidateApplications(candidate: GatewayConfigReloadCandidate | 
   );
 }
 
+/** Unpublished work needs its invoker and every writer that still awaits activation. */
+export function assertCandidateInvokersCurrent(
+  candidate: GatewayConfigReloadCandidate | null | undefined,
+  assertInvokerCurrent: (() => void) | undefined,
+) {
+  assertInvokerCurrent?.();
+  for (const application of candidateApplications(candidate)) {
+    application.assertCurrent?.();
+  }
+}
+
+export function candidateRequiresActivation(
+  candidate: GatewayConfigReloadCandidate | null | undefined,
+) {
+  return candidateApplications(candidate).some(
+    (application) => application.prepare || application.requireImmediateApplication,
+  );
+}
+
 export function settleCandidateApplications(
   candidate: GatewayConfigReloadCandidate | null | undefined,
   status: RuntimeConfigWriteApplicationStatus,

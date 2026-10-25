@@ -36,7 +36,13 @@ beforeEach(() => {
   mocks.configuredWorkspaces.set("default", state.workspaceDir);
 });
 
-it("the real reloader restores the working connection after failed credential activation", async () => {
+it.each(["preparation fails", "the writer is revoked"] as const)(
+  "the real reloader restores the working connection when %s",
+  (failure) => restoresWorkingConnection(failure),
+);
+
+// Revocation lands after the activation receipt prepared, before runtime publication.
+async function restoresWorkingConnection(failure: "preparation fails" | "the writer is revoked") {
   const { state } = harness;
   const agentDir = state.agentDir("default");
   const previous: OpenClawConfig = {
@@ -88,12 +94,15 @@ it("the real reloader restores the working connection after failed credential ac
     await startWatcher();
     watcher.emit("ready");
   });
+  let revoked = false;
+  const published: unknown[] = [];
   const applyRuntime: Parameters<typeof startGatewayConfigReloader>[0]["onHotReload"] = async (
     plan,
     config,
     ownership,
   ) => {
     await ownership.checkpoint();
+    published.push(resolveAgentModelPrimaryValue(config.agents?.defaults?.model));
     ownership.publishRuntimeEnv();
     ownership.markRuntimeCommitted(config, plan);
     await refreshPreparedModelRuntimeSnapshots(config);
@@ -112,7 +121,10 @@ it("the real reloader restores the working connection after failed credential ac
           promotedCredential,
         );
         promotionObserved = true;
-        throw new Error("fixture candidate runtime preparation failed");
+        if (failure === "preparation fails") {
+          throw new Error("fixture candidate runtime preparation failed");
+        }
+        revoked = true;
       }
       return { runtimeConfig, compareConfig: sourceConfig };
     },
@@ -188,7 +200,11 @@ it("the real reloader restores the working connection after failed credential ac
     };
     await commitSetupInferenceActivation({
       preserveWorkingConnection: true,
-      assertCurrent: () => {},
+      assertCurrent: () => {
+        if (revoked) {
+          throw new Error("fixture writer authority revoked");
+        }
+      },
       activate: () =>
         activateSavedSetupCredential({
           agentDir,
@@ -201,6 +217,7 @@ it("the real reloader restores the working connection after failed credential ac
     });
     await expect((await applied.promise).result).resolves.toBe("failed");
     expect(promotionObserved).toBe(true);
+    expect(published).not.toContain("openai/fixture-verified");
     await expect((await completion.promise)()).rejects.toThrow(
       "did not complete activation (failed)",
     );
@@ -228,4 +245,4 @@ it("the real reloader restores the working connection after failed credential ac
       vi.restoreAllMocks();
     }
   }
-});
+}

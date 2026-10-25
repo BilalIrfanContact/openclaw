@@ -25,6 +25,8 @@ export type RuntimeConfigWriteApplicationClaim = {
   settle: (status: RuntimeConfigWriteApplicationStatus) => void;
   isCarriedBy?: (config: OpenClawConfig) => boolean;
   prepare?: (assertCurrent: () => void) => Promise<void>;
+  /** The writer's authority; the reload rechecks it before the runtime publishes. */
+  assertCurrent?: () => void;
   requireImmediateApplication?: boolean;
   // Re-enter only the originating request root so channel drain excludes the RPC awaiting
   // this receipt; unrelated watcher reloads retain their independent transaction root.
@@ -43,7 +45,10 @@ const runtimeConfigWriteApplications = new WeakMap<object, RuntimeConfigWriteApp
 /** Creates a single-owner receipt for one persisted config write. */
 export function createRuntimeConfigWriteApplication(
   runTransaction?: <T>(run: () => Promise<T>) => Promise<T>,
-  activation?: Pick<RuntimeConfigWriteApplicationClaim, "prepare" | "requireImmediateApplication">,
+  activation?: Pick<
+    RuntimeConfigWriteApplicationClaim,
+    "prepare" | "assertCurrent" | "requireImmediateApplication"
+  >,
 ): RuntimeConfigWriteApplication {
   let claimed = false;
   let settled = false;

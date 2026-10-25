@@ -21,10 +21,10 @@ import {
 import { createWizardSessionTracker } from "../server-wizard-sessions.js";
 import {
   createAdmittedWizardSession,
+  startGatewayWizard,
   whenAdmittedWizardSessionSettled,
 } from "./setup-admission.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
-import { publishWizardLoginSession, startWizardLogin } from "./wizard-login.js";
 import { wizardHandlers } from "./wizard.js";
 
 // mock-isolation: Authority probes exercise the live request scope, not a model runtime.
@@ -196,53 +196,42 @@ it.each(["admission", "publication"])(
       const context = createContext();
       Object.assign(context, createWizardSessionTracker());
       const respond = vi.fn();
-      const createSession = vi.fn(
-        () =>
-          new WizardSession(async (prompter) => {
-            await prompter.confirm({ message: "Continue setup?" });
-          }),
-      );
-      const params = {
-        client,
-        context,
-        sessionId: "disconnected-login",
-        respond,
-        assertCurrent: vi.fn(),
-        createSession,
-      };
+      const createSession = vi.fn(() => {
+        if (phase === "publication") {
+          connection.abort(new Error("Connection closed before publication"));
+        }
+        return new WizardSession(async (prompter) => {
+          await prompter.confirm({ message: "Continue setup?" });
+        });
+      });
       if (phase === "admission") {
         connection.abort(new Error("Connection closed before admission"));
-        try {
-          await expect(startWizardLogin(params)).rejects.toThrow(
-            "Connection closed before admission",
-          );
-        } finally {
-          for (const session of context.wizardSessions.values()) {
-            session.cancel();
-            await whenAdmittedWizardSessionSettled(session);
-          }
-        }
+      }
+      const params = { sessionId: "disconnected-login" };
+      const start = startGatewayWizard({
+        request: {
+          req: { type: "req", id: "login", method: "models.authLogin", params },
+          client,
+          context,
+          respond,
+          isWebchatConnect: () => false,
+        },
+        ...params,
+        connectionBound: true,
+        createSession,
+      });
+      if (phase === "admission") {
+        await expect(start).rejects.toThrow("Connection closed before admission");
         expect(createSession).not.toHaveBeenCalled();
       } else {
-        const session = expectDefined(
-          await createAdmittedWizardSession(createSession),
-          "admitted login session",
+        await start;
+        expect(respond).toHaveBeenCalledWith(
+          false,
+          undefined,
+          expect.objectContaining({
+            message: "Setup is no longer available on this connection.",
+          }),
         );
-        try {
-          connection.abort(new Error("Connection closed before publication"));
-          await publishWizardLoginSession({ ...params, session });
-          expect(session.signal.aborted).toBe(true);
-          expect(respond).toHaveBeenCalledWith(
-            false,
-            undefined,
-            expect.objectContaining({
-              message: "Login is no longer available on this connection.",
-            }),
-          );
-        } finally {
-          session.cancel();
-          await whenAdmittedWizardSessionSettled(session);
-        }
       }
       expect(context.wizardSessions.size).toBe(0);
       const replacement = expectDefined(
@@ -253,3 +242,36 @@ it.each(["admission", "publication"])(
     });
   },
 );
+
+it("publishes a wizard that completed before its start reply", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const client = createOperatorClient({ profileId: "fast-owner", scopes: ["operator.admin"] });
+    const context = createContext();
+    Object.assign(context, createWizardSessionTracker());
+    const respond = vi.fn();
+    const params = { sessionId: "fast-setup" };
+    await startGatewayWizard({
+      request: {
+        req: { type: "req", id: "fast", method: "openclaw.setup.prepare.start", params },
+        client,
+        context,
+        respond,
+        isWebchatConnect: () => false,
+      },
+      ...params,
+      admit: async (create) => {
+        const session = await createAdmittedWizardSession(create);
+        await whenAdmittedWizardSessionSettled(expectDefined(session, "fast session"));
+        return session;
+      },
+      createSession: () => new WizardSession(async () => {}),
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      { sessionId: "fast-setup", done: false, status: "running" },
+      undefined,
+    );
+    const session = expectDefined(context.wizardSessions.get("fast-setup"), "fast session");
+    expect(await session.next()).toMatchObject({ done: true, status: "done" });
+  });
+});

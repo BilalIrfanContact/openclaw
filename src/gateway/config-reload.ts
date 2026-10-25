@@ -48,7 +48,9 @@ import { OpenClawStateLeaseAcquisitionError } from "../state/openclaw-state-leas
 import { createConfigAppliedRevisionTracker } from "./config-applied-revision.js";
 import { diffConfigPaths, diffGatewayReloadPaths } from "./config-diff.js";
 import {
+  assertCandidateInvokersCurrent,
   candidateApplications,
+  candidateRequiresActivation,
   createObservedCandidate,
   isConfigReloadSuperseded,
   settleCandidateApplications,
@@ -307,7 +309,7 @@ export function startGatewayConfigReloader(
     const assertInvokerOwned = () => {
       // Published work must finish its cleanup and receipt even if its invoker closes.
       if (!committedRuntimeConfig) {
-        pluginInvokerGuard?.();
+        assertCandidateInvokersCurrent(candidate, pluginInvokerGuard);
       }
     };
     const assertCurrent = () => {
@@ -534,9 +536,7 @@ export function startGatewayConfigReloader(
         resolveConfigWriteFollowUp(afterWrite).mode === "auto" &&
         !runtimeRefresh?.includeAuthStoreRefs &&
         !runtimeRefresh?.requireImmediateApplication &&
-        !candidateApplications(candidate).some(
-          (claim) => claim.prepare || claim.requireImmediateApplication,
-        )
+        !candidateRequiresActivation(candidate)
       ) {
         // The watcher can publish before the writer's notification arrives. Consume
         // that accepted runtime, not the notification's unresolved SecretRefs.
