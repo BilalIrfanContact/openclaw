@@ -3043,6 +3043,16 @@ td.data-table-key-col {
   --exec-approval-accent: var(--danger);
 }
 
+:is(.exec-approval-card--inline, .exec-approval-card--modal):not(.exec-approval-card--mobile) {
+  background: color-mix(in srgb, var(--exec-approval-accent) 2%, var(--card));
+  border-color: color-mix(in srgb, var(--exec-approval-accent) 12%, var(--border));
+
+  .exec-approval-command {
+    background: color-mix(in srgb, var(--text) 6%, var(--card));
+    border-color: transparent;
+  }
+}
+
 .exec-approval-header {
   display: flex;
   align-items: center;
