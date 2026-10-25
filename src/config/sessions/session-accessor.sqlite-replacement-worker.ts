@@ -636,7 +636,6 @@ export async function commitSessionEntryReplacementsInWorker(
       const { runSessionNativeBindingWorkerOperation } =
         await import("./session-native-binding.js");
       return await runSessionNativeBindingWorkerOperation<
-        SessionEntryWorkerLifecycle,
         SessionEntryReplacementCandidate,
         SessionEntryReplacementCommitted
       >({

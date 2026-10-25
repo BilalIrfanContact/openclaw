@@ -78,36 +78,6 @@ it("shares one worker refresh after a preference change and retires a closed rea
   expect(read).toHaveBeenCalledTimes(3);
 });
 
-it("waits for a pending preference write before preparing cleanup", async () => {
-  const options = stateOptions();
-  const profile = ensureProfileForEmail("pending@example.test", options).id;
-  const entered = createDeferredCore();
-  const release = createDeferredCore();
-  vi.spyOn(stateWorker, "runOpenClawStateWorkerOperation").mockImplementationOnce(async () => {
-    entered.resolve();
-    await release.promise;
-    setUserPreferences(
-      profile,
-      { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: ["session:agent:main:pending"] },
-      options,
-    );
-    return undefined;
-  });
-  const writer = setCanonicalUserPreferences(
-    profile,
-    { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: ["session:agent:main:pending"] },
-    options,
-  );
-  await entered.promise;
-  const read = vi.spyOn(stateReads, "executeExistingOpenClawStateRead");
-  const preparing = preparePersonalSessionPins(options);
-  expect(read).not.toHaveBeenCalled();
-  release.resolve();
-  await writer;
-  const pins = await preparing;
-  expect(pins.sessionKeys).toEqual(["agent:main:pending"]);
-});
-
 it.each(["completed", "unknown"] as const)(
   "keeps a queued pin behind cleanup's %s native outcome",
   async (kind) => {

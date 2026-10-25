@@ -632,9 +632,15 @@ describe("session-share node commands", () => {
         errcode: 11,
       });
       const native = vi.spyOn(githubIdentities, "selectStoredGitHubIdentities");
+      const execute = stateReads.executeExistingOpenClawStateRead;
       const failure = vi
         .spyOn(stateReads, "executeExistingOpenClawStateRead")
-        .mockRejectedValueOnce(corruption);
+        .mockImplementation((...args) => {
+          if (args[1].type === "userProfiles.catalogIdentity") {
+            return Promise.reject(corruption);
+          }
+          return execute(...args);
+        });
       try {
         await expect(fixture.list()).rejects.toBe(corruption);
         expect(native).not.toHaveBeenCalled();

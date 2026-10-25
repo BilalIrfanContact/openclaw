@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { formatErrorMessage } from "@openclaw/normalization-core/error-coercion";
+import { captureRuntimeWorkerGenerationContext } from "../../infra/runtime-worker-generation.js";
 import {
   assertExistingDatabaseIdentity,
   readDatabasePathIdentitySync,
@@ -81,6 +82,7 @@ type SessionEntryMaintenanceOwner = SessionEntryMaintenanceRequest & {
   ageChanges: Map<string, SessionEntryMaintenanceAgeChange>;
   assertCurrent: () => void;
   captureExecution: () => OpenClawAgentDatabaseExecution | undefined;
+  runInRuntimeGeneration: ReturnType<typeof captureRuntimeWorkerGenerationContext>;
   maintenanceResource?: ReturnType<typeof captureOpenClawDatabaseMaintenanceResource>;
   execution?: OpenClawAgentDatabaseExecution;
   active?: Promise<void>;
@@ -182,6 +184,7 @@ export function kickSessionEntryMaintenanceAfterWrite(
     activeSessionKeys: new Set([params.activeSessionKey]),
     ageChanges: new Map(),
     captureExecution,
+    runInRuntimeGeneration: captureRuntimeWorkerGenerationContext(),
     execution: captureExecution(),
     assertCurrent: () => {
       assertAdmitted();
@@ -408,10 +411,7 @@ function scheduleMaintenanceAt(
   owner.running = false;
   owner.timerDeadlineMonotonicMs = performance.now() + delayMs;
   owner.timer = runInDetachedAsyncContext(() =>
-    setTimeout(() => {
-      owner.running = true;
-      startPendingMaintenance(databasePath, owner);
-    }, delayMs),
+    setTimeout(() => startPendingMaintenance(databasePath, owner), delayMs),
   );
   owner.timer.unref();
 }
@@ -428,18 +428,15 @@ function scheduleMaintenanceAfterWriteQuiet(
   owner.retryDelayMs = MAINTENANCE_WRITE_QUIET_MS * 2 ** Math.max(0, owner.rejections - 1);
   owner.timerDeadlineMonotonicMs = performance.now() + owner.retryDelayMs;
   owner.timer = runInDetachedAsyncContext(() =>
-    setTimeout(() => {
-      owner.timer = undefined;
-      owner.retryDelayMs = undefined;
-      owner.running = true;
-      startPendingMaintenance(databasePath, owner);
-    }, owner.retryDelayMs),
+    setTimeout(() => startPendingMaintenance(databasePath, owner), owner.retryDelayMs),
   );
   owner.timer.unref();
 }
 
 function startPendingMaintenance(databasePath: string, owner: SessionEntryMaintenanceOwner): void {
   owner.timer = undefined;
+  owner.retryDelayMs = undefined;
+  owner.running = true;
   owner.timerDeadlineMonotonicMs = undefined;
   // Publish the join before a pass can synchronously retire itself.
   owner.active = Promise.resolve().then(async () => {
@@ -447,7 +444,8 @@ function startPendingMaintenance(databasePath: string, owner: SessionEntryMainte
       return retireMaintenanceOwner(databasePath, owner);
     }
     // Keep command cleanup custody while automatic work uses the runtime worker path.
-    const run = () => runPendingMaintenance(databasePath, owner);
+    const run = () =>
+      owner.runInRuntimeGeneration(() => runPendingMaintenance(databasePath, owner));
     await (owner.maintenanceResource ? owner.maintenanceResource.runWorker(run) : run());
   });
 }

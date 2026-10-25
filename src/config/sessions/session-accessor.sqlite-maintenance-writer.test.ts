@@ -16,7 +16,9 @@ import {
   openOpenClawAgentDatabase,
   runOpenClawAgentWriteTransaction,
 } from "../../state/openclaw-agent-db.js";
+import * as stateReads from "../../state/openclaw-state-db-readonly.js";
 import * as stateWorker from "../../state/openclaw-state-worker-store.js";
+import { preparePersonalSessionPins } from "../../state/user-preferences-session-pins.js";
 import { setCanonicalUserPreferences } from "../../state/user-preferences.js";
 import { mergeCanonicalUserProfiles } from "../../state/user-profile-writes.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
@@ -711,4 +713,32 @@ it("refuses a prepared maintenance snapshot when a pin write starts before commi
     preservation.dispose();
     await writer;
   }
+});
+
+it("waits for a pending preference write before preparing cleanup", async () => {
+  const options = { env: { ...process.env, OPENCLAW_STATE_DIR: sessionDirs.make() } };
+  const profile = ensureProfileForEmail("pending@example.test", options).id;
+  const entered = createDeferredCore();
+  const release = createDeferredCore();
+  const execute = stateWorker.runOpenClawStateWorkerOperation;
+  vi.spyOn(stateWorker, "runOpenClawStateWorkerOperation").mockImplementationOnce(
+    async (...args) => {
+      entered.resolve();
+      await release.promise;
+      return execute(...args);
+    },
+  );
+  const writer = setCanonicalUserPreferences(
+    profile,
+    { [UI_RAIL_SHORTCUTS_PREFERENCE_KEY]: ["session:agent:main:pending"] },
+    options,
+  );
+  await entered.promise;
+  const read = vi.spyOn(stateReads, "executeExistingOpenClawStateRead");
+  const preparing = preparePersonalSessionPins(options);
+  expect(read).not.toHaveBeenCalled();
+  release.resolve();
+  await writer;
+  const pins = await preparing;
+  expect(pins.sessionKeys).toEqual(["agent:main:pending"]);
 });
