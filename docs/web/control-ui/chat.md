@@ -721,8 +721,10 @@ conversation does not restart that recovery; reconnecting checks every saved out
 Memory-only messages retained after a storage failure share that conversation queue
 and remain available when you leave and reopen the conversation in the same tab.
 They also hold automatic update reloads until sent, saved, or discarded. If Refresh
-is blocked, keep the tab open or copy the pending input before discarding it and
-refreshing. Manually closing or reloading the browser tab can still lose memory-only
+is blocked, choose **Review pending input** to copy its text or download its
+attachments, even while the chat is locked for an update. **Keep in this tab**
+leaves the message protected. **Discard local copy and refresh** removes only
+the reviewed copy; other pending input still blocks refreshing. Manually closing or reloading the browser tab can still lose memory-only
 messages.
 
 Files remain in the composer while a submitted message waits for attachment

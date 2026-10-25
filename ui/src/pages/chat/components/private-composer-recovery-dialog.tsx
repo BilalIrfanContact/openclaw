@@ -9,6 +9,7 @@ export type PrivateComposerDraft = {
   pendingReads: number;
   isCurrent: () => boolean;
   signal: AbortSignal;
+  labels?: { title: string; description: string; text: string; discard: string };
 };
 
 const PrivateComposerRecoveryDialog = lazy(

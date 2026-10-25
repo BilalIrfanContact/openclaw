@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, it } from "vitest";
 import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
@@ -23,7 +23,12 @@ const file = {
 suite.define(() => {
   it("holds automatic stale-build recovery for a rejected first turn kept only in memory", async () => {
     await suite.withPage(
-      { locale: "en-US", serviceWorkers: "block", viewport: { width: 1280, height: 900 } },
+      {
+        locale: "en-US",
+        serviceWorkers: "block",
+        viewport: { width: 1280, height: 900 },
+        permissions: ["clipboard-read", "clipboard-write"],
+      },
       async ({ page }) => {
         await page.addInitScript({ content: createControlUiMockSameOriginGatewayScript() });
         await page.addInitScript(() => {
@@ -106,38 +111,62 @@ suite.define(() => {
             return "held" as const;
           })(),
         ]);
-        if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
-          const content =
-            outcome === "held"
-              ? [pending, blocked]
-              : [page.locator(".agent-chat__composer-combobox textarea")];
-          const frame = await takeControlUiScreenshotFrame(
-            page,
-            page.locator("openclaw-app"),
-            content,
-            { animations: "disabled" },
-          );
-          await writeFile(path.join(suite.artifactDir, outcome + ".png"), frame.png);
-        }
         expect(outcome, "automatic document recovery must not drop the only pending copy").toBe(
           "held",
         );
         expect(reloads).toBe(0);
         await pending.getByText(file.name, { exact: true }).first().waitFor();
         expect(await gateway.getRequests("chat.send")).toHaveLength(0);
-        // Update-required mode locks controls; inspect the actual rendered Blob without
-        // changing that policy or claiming an unavailable UI download succeeded.
-        const href = requireString(
-          await pending
-            .getByRole("link", { name: "Download pending-note.txt", exact: true })
-            .getAttribute("href"),
-          "retained attachment URL",
-        );
-        const bytes = await page.evaluate(
-          async (url) => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],
-          href,
-        );
-        expect(Buffer.from(bytes)).toEqual(file.buffer);
+        const review = page.getByRole("button", { name: "Review pending input", exact: true });
+        const dialog = page.locator('openclaw-modal-dialog[label="Unsent pending message"]');
+        await review.press("Enter");
+        await dialog.waitFor();
+        const keep = dialog.getByRole("button", { name: "Keep in this tab", exact: true });
+        await expect
+          .poll(() => keep.evaluate((button) => button === document.activeElement))
+          .toBe(true);
+        await keep.press("Escape");
+        await dialog.waitFor({ state: "detached" });
+        expect(reloads).toBe(0);
+        await pending.waitFor();
+        await refresh.click();
+        await review.click();
+        await dialog.waitFor();
+        expect(
+          await dialog.getByRole("textbox", { name: "Message text", exact: true }).inputValue(),
+        ).toBe(retainedText);
+        await dialog.getByRole("button", { name: "Copy text", exact: true }).click();
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(retainedText);
+        const [download] = await Promise.all([
+          page.waitForEvent("download"),
+          dialog.getByRole("button", { name: "Download pending-note.txt", exact: true }).click(),
+        ]);
+        expect(download.suggestedFilename()).toBe(file.name);
+        expect(
+          await readFile(requireString(await download.path(), "downloaded attachment")),
+        ).toEqual(file.buffer);
+        if (process.env.OPENCLAW_CAPTURE_UI_PROOF === "1") {
+          const frame = await takeControlUiScreenshotFrame(
+            page,
+            dialog.locator("section.exec-approval-card"),
+            [dialog.getByRole("textbox", { name: "Message text", exact: true }), keep],
+            { animations: "disabled" },
+          );
+          await writeFile(path.join(suite.artifactDir, "pending-recovery-after.png"), frame.png);
+        }
+        await keep.click();
+        await dialog.waitFor({ state: "detached" });
+        expect(reloads).toBe(0);
+        await pending.waitFor();
+        await refresh.click();
+        await review.click();
+        const reloaded = page.waitForEvent("domcontentloaded");
+        await dialog
+          .getByRole("button", { name: "Discard local copy and refresh", exact: true })
+          .click();
+        await reloaded;
+        expect(reloads).toBe(1);
+        expect(await pending.count()).toBe(0);
       },
     );
   });

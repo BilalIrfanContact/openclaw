@@ -185,6 +185,30 @@ describe("cross-region Home composer ownership", () => {
     return { context, owner, page: presentation(context, owner, "page", sessionKey) };
   }
 
+  it("derives recovery attachment retention from surviving composer presentations", () => {
+    const { context, owner, page } = home();
+    const peer = presentation(context, owner, "page", "agent:main:peer");
+    const composer = storedAttachment("recovery-composer");
+    const fallback = storedAttachment("recovery-fallback");
+    const otherPane = storedAttachment("recovery-peer");
+    const removed = storedAttachment("recovery-removed");
+    page.current.chatAttachments = [composer];
+    page.current.chatComposerFallbackByScope.saved = composerFallback([fallback]);
+    peer.current.chatAttachments = [otherPane];
+    expect(
+      ChatPaneComposerHandoff.retainedAttachmentIds(context, [
+        composer,
+        fallback,
+        otherPane,
+        removed,
+      ]),
+    ).toEqual(new Set([composer.id, fallback.id, otherPane.id]));
+    peer.handoff.dispose();
+    expect(ChatPaneComposerHandoff.retainedAttachmentIds(context, [otherPane])).not.toContain(
+      otherPane.id,
+    );
+  });
+
   function captureCommand(current: ChatPageHost, attachments: ChatAttachment[] = []) {
     return captureChatCommandComposerRecovery(current, scope(current), {
       previousDraft: "/steer submitted",
