@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import "../test-utils/prepare-compiled-subprocesses.js";
 import { NON_ENV_SECRETREF_MARKER } from "../secrets/provider-credential-values.js";
 import { modelDefinition } from "./model-auth.fixtures.test-support.js";
-import type { ExistingProviderConfig, ProviderModelCatalog } from "./models-config.merge.js";
+import type { ExistingProviderConfig } from "./models-config.merge.js";
 
 let merge: typeof import("./models-config.merge.js");
 beforeAll(async () => {
@@ -86,18 +86,15 @@ describe("models-config merge", () => {
   });
 
   it("merges implicit and explicit provider headers", () => {
-    const catalog = {
-      api: "anthropic-messages",
-      baseUrl: "https://api.example.com",
-      models: [{ id: "model" }],
-    };
-    const merged = merge.mergeProviderModels<ProviderModelCatalog>(
-      { ...catalog, headers: { "User-Agent": "claude-code/0.1.0" } },
-      { ...catalog, headers: { "X-Kimi-Tenant": "tenant-a" } },
+    const catalog = provider();
+    const headers = { "User-Agent": "claude-code/0.1.0", "X-Kimi-Tenant": "tenant-a" };
+    const merged = merge.mergeProviderModels(
+      { ...catalog, headers: { "User-Agent": headers["User-Agent"] } },
+      { ...catalog, headers: { "X-Kimi-Tenant": headers["X-Kimi-Tenant"] } },
     );
     expect(merged).toEqual({
       ...catalog,
-      headers: { "User-Agent": "claude-code/0.1.0", "X-Kimi-Tenant": "tenant-a" },
+      headers,
     });
   });
 
