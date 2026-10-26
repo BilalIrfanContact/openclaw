@@ -2,6 +2,7 @@
 // Drives the production embedding path through the real SSRF guard and loopback
 // sockets, without mocking global fetch, SSRF runtime, or logging redaction.
 import "openclaw/plugin-sdk/compiled-subprocess-testing";
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { buffer as consumeBuffer } from "node:stream/consumers";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -127,19 +128,34 @@ describe("Ollama embedding provider real transport", () => {
         remote: { baseUrl: server.baseUrl, headers: { "X-Proxy-Auth": "fixture-proxy-key" } },
       });
     const first = await create();
+    const legacyIdentity = {
+      provider: "ollama",
+      baseUrl: server.baseUrl,
+      model: "alias",
+      outputDimensionality: undefined,
+      headersHash: createHash("sha256")
+        .update(JSON.stringify([["X-Proxy-Auth", "fixture-proxy-key"]]))
+        .digest("hex"),
+    };
     expect(first.runtime?.cacheKeyData).toMatchObject({
       model: "alias",
       modelDigest: "first-model-digest",
     });
+    expect(first.runtime?.indexIdentityAliases).toEqual([
+      { model: "alias", cacheKeyData: legacyIdentity },
+    ]);
     digest = "second-model-digest";
     const second = await create();
     expect(second.runtime?.cacheKeyData).toEqual({
       ...first.runtime?.cacheKeyData,
       modelDigest: "second-model-digest",
     });
+    expect(second.runtime?.indexIdentityAliases).toEqual(first.runtime?.indexIdentityAliases);
     digest = undefined;
     const embeddingOnly = await create();
     expect(embeddingOnly.runtime?.cacheKeyData).not.toHaveProperty("modelDigest");
+    expect(embeddingOnly.runtime?.cacheKeyData).toEqual(legacyIdentity);
+    expect(embeddingOnly.runtime?.indexIdentityAliases).toBeUndefined();
     if (!embeddingOnly.provider) {
       throw new Error("Expected fixture embedding provider");
     }

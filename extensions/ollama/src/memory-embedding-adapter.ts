@@ -91,19 +91,25 @@ export const ollamaMemoryEmbeddingProviderAdapter: MemoryEmbeddingProviderAdapte
       providerId === "ollama" &&
       client.baseUrl === OLLAMA_DEFAULT_BASE_URL &&
       headersHash === undefined;
+    const legacyCacheKeyData = {
+      provider: providerId,
+      ...(usesLegacyDefaultIdentity ? {} : { baseUrl: client.baseUrl }),
+      model: client.model,
+      outputDimensionality: client.outputDimensionality,
+      ...(headersHash ? { headersHash } : {}),
+    };
     return {
       provider,
       runtime: {
         id: "ollama",
         inlineBatchTimeoutMs: 10 * 60_000,
         cacheKeyData: {
-          provider: providerId,
-          ...(usesLegacyDefaultIdentity ? {} : { baseUrl: client.baseUrl }),
-          model: client.model,
+          ...legacyCacheKeyData,
           ...(modelDigest ? { modelDigest } : {}),
-          outputDimensionality: client.outputDimensionality,
-          ...(headersHash ? { headersHash } : {}),
         },
+        ...(modelDigest
+          ? { indexIdentityAliases: [{ model: client.model, cacheKeyData: legacyCacheKeyData }] }
+          : {}),
       },
     };
   },

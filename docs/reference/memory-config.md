@@ -340,8 +340,11 @@ These prefixes change the embedded text. The separate `inputType`,
 they do not add text prefixes.
 
 Native Ollama checks the model digest from `/api/tags` when the embedding
-provider opens. A changed digest invalidates the index and embedding cache;
-existing indexes built without a digest may need one reindex after upgrading.
+provider opens. A changed digest invalidates the index and embedding cache.
+On upgrade, compatible indexes built without a digest adopt the first observed
+digest and preserve cached vectors. Document-format changes still re-embed.
+The old index cannot establish whether an alias changed before that first
+observation; reset memory before indexing if it did.
 An already-open provider must reopen to detect an alias's new target. If the
 server does not expose tags or a digest, as with some embedding-only proxies,
 OpenClaw retains the configured model and endpoint identity. Run

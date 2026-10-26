@@ -36,7 +36,7 @@ export type EmbeddingProviderCallOptions = {
 export type EmbeddingProviderRuntime = {
   id: string;
   cacheKeyData?: Record<string, unknown>;
-  /** Prior persisted model/cache identities that are equivalent to the current identity. */
+  /** Equivalent prior identities; alias cache reads require matching published index metadata. */
   indexIdentityAliases?: Array<{
     model: string;
     cacheKeyData: Record<string, unknown>;

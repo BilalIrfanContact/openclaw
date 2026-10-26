@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  decodeMemoryEmbedding,
+  encodeMemoryEmbedding,
   hashText,
   MEMORY_CHUNKING_VERSION,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
@@ -9,11 +11,12 @@ import {
   closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
 } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createManagerIndexFixture } from "./manager-index.test-support.js";
 import { MEMORY_INDEX_PROVENANCE_VERSION, type MemoryIndexMeta } from "./manager-reindex-state.js";
 
 const { closeAllMemorySearchManagers, getMemorySearchManager } = await import("./index.js");
+const embeddings = await import("./embeddings.js");
 const fixture = createManagerIndexFixture({ getMemorySearchManager, closeAllMemorySearchManagers });
 const provider = fixture.provider;
 const createConfig = (model = "mock-embed") =>
@@ -233,3 +236,132 @@ it("re-embeds when explicit raw documents replace provider-owned formatting", as
   await closeManager(manager);
   expect(withDatabase(dbPath, readMeta).providerKey).not.toBe(previousKey);
 });
+
+it.each(["chunking upgrade", "content change", "orphan cache"] as const)(
+  "binds legacy embeddings once across %s without reusing them after a digest change",
+  async (mode) => {
+    const cfg = fixture.createConfig({ cacheEnabled: true, vectorEnabled: false });
+    const legacy = { provider: "mock", model: "mock-embed" };
+    const legacyKey = hashText(JSON.stringify(legacy));
+    let digest = "A";
+    const createProvider = embeddings.createEmbeddingProvider;
+    const factory = vi
+      .spyOn(embeddings, "createEmbeddingProvider")
+      .mockImplementation(async (...args) => {
+        const result = await createProvider(...args);
+        const backend = result.provider;
+        if (!backend) {
+          return result;
+        }
+        const modelDigest = digest;
+        return {
+          ...result,
+          provider: {
+            ...backend,
+            embedBatch: async (...input) => {
+              const vectors = await backend.embedBatch(...input);
+              return modelDigest === "B" ? vectors.map(() => [0, 0, 1, 0]) : vectors;
+            },
+          },
+          runtime: {
+            ...result.runtime,
+            id: backend.id,
+            cacheKeyData: { ...legacy, modelDigest },
+            indexIdentityAliases: [{ model: legacy.model, cacheKeyData: legacy }],
+          },
+        };
+      });
+    try {
+      let dbPath: string;
+      if (mode === "orphan cache") {
+        const empty = await fixture.getFreshManager(cfg, "cli");
+        const candidate = empty.status().dbPath;
+        if (!candidate) {
+          throw new Error("fixture database path is missing");
+        }
+        dbPath = candidate;
+        await closeManager(empty);
+        const text = await fs.readFile(path.join(fixture.paths.memory, "2026-01-12.md"), "utf8");
+        // An embedding request can finish before the first index publication.
+        withDatabase(dbPath, (db) => {
+          db.prepare(`INSERT INTO memory_embedding_cache
+            (provider, model, provider_key, hash, embedding, dims, updated_at)
+            VALUES (?, ?, ?, ?, ?, 4, 1)`).run(
+            legacy.provider,
+            legacy.model,
+            legacyKey,
+            hashText(text),
+            encodeMemoryEmbedding([1, 0, 0, 0]),
+          );
+        });
+      } else {
+        dbPath = await publishIndex(cfg);
+        withDatabase(dbPath, (db) => {
+          const meta = readMeta(db);
+          updateMeta(db, {
+            ...meta,
+            providerKey: legacyKey,
+            ...(mode === "chunking upgrade"
+              ? { chunkingVersion: MEMORY_CHUNKING_VERSION - 1 }
+              : {}),
+          });
+          db.prepare("UPDATE memory_embedding_cache SET provider_key = ?").run(legacyKey);
+        });
+        if (mode === "content change") {
+          const search = cfg.memory?.search;
+          if (!search) {
+            throw new Error("fixture memory configuration is missing");
+          }
+          search.extraPaths = [fixture.paths.memory];
+        }
+      }
+      const chunks = () =>
+        withDatabase(dbPath, (db) =>
+          db.prepare("SELECT text, embedding FROM memory_index_chunks ORDER BY id").all(),
+        );
+      const previousChunks = chunks();
+      const previousCalls = provider.embedBatchCalls;
+      const adopted = await fixture.getFreshManager(cfg, "cli");
+      await adopted.sync({ reason: "cli" });
+      await closeManager(adopted);
+      if (mode === "orphan cache") {
+        expect(provider.embedBatchCalls).toBeGreaterThan(previousCalls);
+      } else {
+        expect(provider.embedBatchCalls).toBe(previousCalls);
+        expect(chunks()).toEqual(previousChunks);
+      }
+      const firstKey = withDatabase(dbPath, readMeta).providerKey;
+      expect(firstKey).not.toBe(legacyKey);
+      if (mode === "chunking upgrade") {
+        expect(
+          withDatabase(
+            dbPath,
+            (db) =>
+              db
+                .prepare(
+                  "SELECT count(*) AS count FROM memory_embedding_cache WHERE provider_key = ?",
+                )
+                .get(legacyKey)?.count,
+          ),
+        ).toBe(0);
+      }
+      digest = "B";
+      const adoptedCalls = provider.embedBatchCalls;
+      const changed = await fixture.getFreshManager(cfg, "cli");
+      await changed.sync({ reason: "cli", force: true });
+      await closeManager(changed);
+      expect(provider.embedBatchCalls).toBeGreaterThan(adoptedCalls);
+      expect(withDatabase(dbPath, readMeta).providerKey).not.toBe(firstKey);
+      expect(
+        chunks().map((chunk) => {
+          if (!(chunk.embedding instanceof Uint8Array)) {
+            throw new Error("fixture vector is not binary");
+          }
+          return decodeMemoryEmbedding(chunk.embedding);
+        }),
+      ).toEqual([[0, 0, 1, 0]]);
+    } finally {
+      factory.mockRestore();
+    }
+  },
+);
