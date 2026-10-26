@@ -82,16 +82,13 @@ describe("printClawBanner", () => {
     const animation = frames(chunks);
     expect(animation).toHaveLength(16);
     const openClaws = "•●•.:.        .:.•●•\n:●●●•:        :•●●●:";
-    expect(
-      animation.flatMap((frame, index) =>
-        rows(frame)
-          .slice(0, 2)
-          .map((row) => row.slice(0, 20))
-          .join("\n") === openClaws
-          ? [index]
-          : [],
-      ),
-    ).toEqual([13]);
+    const claws = animation.map((frame) =>
+      rows(frame)
+        .slice(0, 2)
+        .map((row) => row.slice(0, 20))
+        .join("\n"),
+    );
+    expect(claws.flatMap((claw, index) => (claw === openClaws ? [index] : []))).toEqual([13]);
     expect(rows(animation.at(-1) ?? "")).toEqual(staticRows);
   });
 

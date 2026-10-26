@@ -38,10 +38,8 @@ it.each([
 });
 
 it("allows final command metadata to lift no-color after boolean command flags", () => {
-  const argv = cli("doctor --lint --json --no-color");
-
   expect(
-    normalizeRootNoColorArgv(argv, {
+    normalizeRootNoColorArgv(cli("doctor --lint --json --no-color"), {
       shouldPreserveNoColor: ({ remainingArgs, noColorIndex }) =>
         remainingArgs[noColorIndex - 1] === "--message",
     }),
@@ -128,6 +126,5 @@ it.each([
     ["bun", "src/entry.ts", "status"],
   ],
 ] as const)("builds parse argv from raw args: %j", (rawArgs, expected) => {
-  const parsed = buildParseArgv([...rawArgs]);
-  expect(parsed).toEqual([...expected]);
+  expect(buildParseArgv([...rawArgs])).toEqual([...expected]);
 });

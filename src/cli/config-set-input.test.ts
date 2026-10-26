@@ -51,22 +51,13 @@ describe("config set input parsing", () => {
 
   it.each([
     [
-      "both expectation flags",
       { expectCurrentAbsent: true, expectCurrentJson: "null" },
       "choose either --expect-current-absent or --expect-current-json",
     ],
-    [
-      "non-finite expected number",
-      { expectCurrentJson: "1e999" },
-      "--expect-current-json must be valid JSON",
-    ],
-    [
-      "batch mode",
-      { expectCurrentAbsent: true, batchJson: "[]" },
-      "cannot be combined with batch mode",
-    ],
-    ["dry-run", { expectCurrentAbsent: true, dryRun: true }, "cannot be combined with --dry-run"],
-  ] as const)("rejects %s with a current-value expectation", (_name, options, message) => {
+    [{ expectCurrentJson: "1e999" }, "--expect-current-json must be valid JSON"],
+    [{ expectCurrentAbsent: true, batchJson: "[]" }, "cannot be combined with batch mode"],
+    [{ expectCurrentAbsent: true, dryRun: true }, "cannot be combined with --dry-run"],
+  ] as const)("rejects current-value expectation %j", (options, message) => {
     expect(() => parseConfigSetCurrentExpectation(options)).toThrow(message);
   });
 
@@ -77,16 +68,15 @@ describe("config set input parsing", () => {
   });
 
   it.each([
-    ["malformed payload", "{", "Failed to parse --batch-json:"],
-    ["empty batch payload", "[]", "--batch-json must contain at least one config update."],
-    ["non-array payload", '{"path":"p","value":"v"}', "--batch-json must be a JSON array."],
-    ["entry without path", '[{"value":"v"}]', "--batch-json[0].path is required."],
+    ["{", "Failed to parse --batch-json:"],
+    ["[]", "--batch-json must contain at least one config update."],
+    ['{"path":"p","value":"v"}', "--batch-json must be a JSON array."],
+    ['[{"value":"v"}]', "--batch-json[0].path is required."],
     [
-      "entry with multiple mode keys",
       '[{"path":"p","value":"v","provider":{"source":"env"}}]',
       "--batch-json[0] must include exactly one of: value, ref, provider.",
     ],
-  ] as const)("rejects %s", (_name, batchJson, message) => {
+  ] as const)("rejects batch %s", (batchJson, message) => {
     expect(() => parseBatchSource({ batchJson })).toThrow(message);
   });
 
@@ -103,28 +93,25 @@ describe("config set input parsing", () => {
     );
   });
 
-  it.skipIf(process.platform === "win32").each(["--file"] as const)(
-    "rejects a FIFO passed as %s without waiting for a writer",
-    (sourceLabel) => {
-      const fifoPath = path.join(tempDirs.make("openclaw-config-input-fifo-"), "input.pipe");
-      execFileSync("mkfifo", [fifoPath]);
-      const originalOpenSync = fs.openSync;
-      using _ = vi.spyOn(fs, "openSync").mockImplementation((file, flags, mode) => {
-        // Fail instead of hanging the test if a regression opens this FIFO in blocking mode.
-        if (
-          file === fifoPath &&
-          (typeof flags !== "number" || (flags & fs.constants.O_NONBLOCK) === 0)
-        ) {
-          throw new Error("Opening this FIFO would wait for a writer.");
-        }
-        return originalOpenSync(file, flags, mode);
-      });
+  it.skipIf(process.platform === "win32")("rejects a FIFO without waiting for a writer", () => {
+    const fifoPath = path.join(tempDirs.make("openclaw-config-input-fifo-"), "input.pipe");
+    execFileSync("mkfifo", [fifoPath]);
+    const originalOpenSync = fs.openSync;
+    using _ = vi.spyOn(fs, "openSync").mockImplementation((file, flags, mode) => {
+      // Fail instead of hanging the test if a regression opens this FIFO in blocking mode.
+      if (
+        file === fifoPath &&
+        (typeof flags !== "number" || (flags & fs.constants.O_NONBLOCK) === 0)
+      ) {
+        throw new Error("Opening this FIFO would wait for a writer.");
+      }
+      return originalOpenSync(file, flags, mode);
+    });
 
-      expect(() => readConfigMutationFileSync(fifoPath, sourceLabel)).toThrow(
-        `${sourceLabel} must be a regular file: ${fifoPath}. Choose a JSON5 input file and try again.`,
-      );
-    },
-  );
+    expect(() => readConfigMutationFileSync(fifoPath, "--file")).toThrow(
+      `--file must be a regular file: ${fifoPath}. Choose a JSON5 input file and try again.`,
+    );
+  });
 
   it("rejects --batch-file payloads above the config mutation limit", () => {
     const batchFile = writeInput(" ".repeat(8 * 1024 * 1024 + 1));
