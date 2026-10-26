@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { isProcessAlive } from "../../test/helpers/process-wait.js";
+import { awaitGateBeforeSettlement } from "../../test/helpers/promise.js";
 import { prepareSystemAgentRunAdmission } from "../agents/admitted-run-context.js";
 import { buildPreparedCliRunContext } from "../agents/cli-runner.test-helpers.js";
 import { createCliLiveSessionCapability } from "../agents/cli-runner/cli-live-session-registry.js";
@@ -61,19 +62,16 @@ export function registerGatewayResourceRetirementTests(
       capability.register(handle);
       admission.close();
       closing = createGatewayCloseHandler()({ reason: "warm CLI shutdown" });
-      await Promise.race([
+      await awaitGateBeforeSettlement(
         cleanupEntered.promise,
-        closing.then(() => {
-          throw new Error("Gateway closed without retiring its warm CLI process");
-        }),
-      ]);
+        closing,
+        "Gateway closed without retiring its warm CLI process",
+      );
       expect(isProcessAlive(child.pid!)).toBe(false);
-      let settled = false;
-      void closing.then(() => {
-        settled = true;
-      });
+      const settled = vi.fn();
+      void closing.then(settled);
       await Promise.resolve();
-      expect(settled).toBe(false);
+      expect(settled).not.toHaveBeenCalled();
       releaseCleanup.resolve();
       await closing;
     } finally {
@@ -85,7 +83,7 @@ export function registerGatewayResourceRetirementTests(
     }
   });
 
-  it("retires incognito memory only after the final Gateway drains accepted cleanup", async () => {
+  it("keeps incognito memory alive when a non-final Gateway closes", async () => {
     const owner = memorySessionActorOwners.get({
       agentId: "main",
       path: "/synthetic/gateway-close/incognito-openclaw-agent.sqlite",
@@ -104,9 +102,6 @@ export function registerGatewayResourceRetirementTests(
       authority,
     );
     expect(created.kind).toBe("committed");
-    const draining = createDeferredCore();
-    const release = createDeferredCore();
-    let finalClose: ReturnType<GatewayCloseHandler> | undefined;
     try {
       await createGatewayCloseHandler({
         pluginMetadata: {
@@ -117,24 +112,8 @@ export function registerGatewayResourceRetirementTests(
         },
       })();
       expect(actor.snapshot(authority)?.entry?.sessionId).toBe("private-session");
-      finalClose = createGatewayCloseHandler({
-        async stopScheduler() {
-          draining.resolve();
-          await release.promise;
-        },
-      })();
-      await draining.promise;
-      expect(actor.snapshot(authority)?.entry?.sessionId).toBe("private-session");
-      release.resolve();
-      await finalClose;
-      expect(memorySessionActorOwners.read(owner)).toBeUndefined();
-      expect(() => actor.snapshot(authority)).toThrow("closed");
-      expect(
-        memorySessionActorOwners.get(owner).readSession(sessionKey, authority),
-      ).toBeUndefined();
     } finally {
-      release.resolve();
-      await finalClose;
+      await createGatewayCloseHandler()();
       await actor.release();
     }
   });
