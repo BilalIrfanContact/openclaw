@@ -1,3 +1,4 @@
+import type { ScheduledToolTargets } from "../cron/execution-context-registry.js";
 import { isCronSessionKey } from "../sessions/session-key-utils.js";
 import { listFinishedSessions, listRunningSessions } from "./bash-process-registry.js";
 import { resolveProcessToolScopeKey } from "./bash-process-scope.js";
@@ -8,8 +9,20 @@ import type {
   SessionsYieldRuntimeClaim,
 } from "./tools/sessions-yield-tool.js";
 
-const ISOLATED_AUTOMATION_YIELD_UNSUPPORTED_ERROR =
-  "Isolated automation turns cannot use sessions_yield because no requester continuation is available. Finish this turn so the scheduler can handle child output under the job's delivery policy.";
+const AUTOMATION_YIELD_UNSUPPORTED_ERROR =
+  "Automation turns cannot use sessions_yield because no requester continuation is available. Finish this turn so the scheduler can handle child output under the job's delivery policy.";
+
+type ScheduledPlacement = NonNullable<ScheduledToolTargets["placement"]>;
+
+// Requester settlement never resumes a scheduled occurrence, whatever its
+// placement: a `session:` run is refused like an isolated one. Runs without an
+// execution context fall back to the cron session-key shape.
+function isScheduledYieldRequester(
+  requesterSessionKey: string | undefined,
+  placement: ScheduledPlacement | undefined,
+): boolean {
+  return placement !== undefined || isCronSessionKey(requesterSessionKey);
+}
 
 const SWARM_COLLECTOR_YIELD_UNSUPPORTED_ERROR =
   "Collector runs cannot use sessions_yield because their results are collected explicitly instead of announced. Finish this turn so the collected result is recorded for whoever waits on this run.";
@@ -18,8 +31,9 @@ const SWARM_COLLECTOR_YIELD_UNSUPPORTED_ERROR =
 export function filterRequesterYieldTools<T extends { name: string }>(
   tools: T[],
   requesterSessionKey: string | undefined,
+  scheduledPlacement?: ScheduledPlacement,
 ): T[] {
-  return isCronSessionKey(requesterSessionKey)
+  return isScheduledYieldRequester(requesterSessionKey, scheduledPlacement)
     ? tools.filter((tool) => tool.name !== "sessions_yield")
     : tools;
 }
@@ -34,11 +48,14 @@ export function createRequesterYieldCallback(params: {
   requesterTurnRunId?: string;
   processScopeKey?: string;
   swarmCollector?: boolean;
+  scheduledToolTargets?: Pick<ScheduledToolTargets, "placement">;
   claimYieldCompletion?: () => SessionsYieldRuntimeClaim | Promise<SessionsYieldRuntimeClaim>;
 }): YieldCompletionClaim | undefined {
-  // Requester settlement never resumes cron. Reject before checking claims or writing yield intent.
-  if (isCronSessionKey(params.requesterSessionKey)) {
-    return () => ({ error: ISOLATED_AUTOMATION_YIELD_UNSUPPORTED_ERROR });
+  // Reject before checking claims or writing yield intent.
+  if (
+    isScheduledYieldRequester(params.requesterSessionKey, params.scheduledToolTargets?.placement)
+  ) {
+    return () => ({ error: AUTOMATION_YIELD_UNSUPPORTED_ERROR });
   }
   // A collector result is read by an explicit wait, never delivered by a requester
   // continuation, so a collector yield can only park the run its waiter is blocked
