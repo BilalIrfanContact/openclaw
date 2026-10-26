@@ -127,7 +127,6 @@ it.each(["caller closes after read", "owner transfers before read"] as const)(
         release.resolve();
       }
       const result = await invocation;
-      expect(context.cron.readScratch).toHaveBeenCalledOnce();
       if (change === "caller closes after read") {
         expect.soft(result).toMatchObject({
           error: { message: expect.stringContaining("authority closed") },

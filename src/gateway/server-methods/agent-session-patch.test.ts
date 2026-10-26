@@ -112,35 +112,30 @@ it.each([
   }
 });
 
-it("does not name an existing session", async () => {
-  const entry: SessionEntry = {
-    sessionId: "existing",
-    updatedAt: 1_000,
-    displayName: "Existing display name",
-  };
-  const result = await buildCreationPatch({
-    explicitSessionKey: "agent:main:incident-42",
-    freshEntry: entry,
-  });
-
-  expect(mergeSessionEntry(entry, result.patch).displayName).toBe(entry.displayName);
-});
-
 it.each([
+  {
+    name: "existing session",
+    key: "agent:main:incident-42",
+    displayName: "Existing",
+    entry: { sessionId: "existing", updatedAt: 1_000, displayName: "Existing" },
+  },
   { name: "explicit key", key: "agent:main:incident-42", displayName: "incident-42" },
   { name: "defaulted main", key: "agent:main:main", defaulted: true },
   { name: "invisible run", key: "agent:main:internal:probe", invisible: true },
   { name: "subagent", key: "agent:main:subagent:worker-1" },
   { name: "ACP", key: "agent:main:acp:thread-1" },
-])("derives the display name for $name", async ({ key, displayName, defaulted, invisible }) => {
-  const { patch } = await buildCreationPatch({
-    canonicalSessionKey: displayName ? `${key} ` : key,
-    explicitSessionKey: defaulted ? undefined : key,
-    visibleRequest: !invisible,
-  });
-  if (displayName) {
-    expect(patch.displayName).toBe(displayName);
-  } else {
-    expect(patch).not.toHaveProperty("displayName");
-  }
-});
+])(
+  "derives the display name for $name",
+  async ({ key, displayName, defaulted, invisible, entry }) => {
+    const { patch } = await buildCreationPatch({
+      canonicalSessionKey: displayName && !entry ? `${key} ` : key,
+      explicitSessionKey: defaulted ? undefined : key,
+      visibleRequest: !invisible,
+      freshEntry: entry,
+    });
+    expect(mergeSessionEntry(entry, patch).displayName).toBe(displayName);
+    if (!displayName) {
+      expect(patch).not.toHaveProperty("displayName");
+    }
+  },
+);

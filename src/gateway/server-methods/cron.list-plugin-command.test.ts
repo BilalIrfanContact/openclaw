@@ -18,13 +18,7 @@ const nowMs = Date.parse("2026-10-22T12:00:00.000Z");
 function storedJob(id: string, overrides: Partial<CronStoredJob> = {}): CronStoredJob {
   return createCronJob({
     id,
-    name: id,
-    agentId: "main",
-    createdAtMs: nowMs,
-    updatedAtMs: nowMs,
-    schedule: { kind: "every", everyMs: 600_000, anchorMs: nowMs },
     payload: { kind: "agentTurn", message: "Summarize the inbox." },
-    state: { nextRunAtMs: nowMs + 600_000 },
     ...overrides,
   });
 }
