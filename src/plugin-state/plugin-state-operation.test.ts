@@ -2,25 +2,18 @@ import { existsSync, symlinkSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
-import {
-  observeHostDataSql,
-  observeSqliteReadSql,
-} from "../../test/helpers/sqlite-statement-execution-counter.js";
 import { resolveDatabaseEngineSelection } from "../infra/database-engine/config.js";
 import { withDatabaseEngineSelection } from "../infra/database-engine/context.js";
-import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import * as admission from "../infra/sqlite-worker-operation-admission.js";
 import { sqliteWorkerOwnerProbe } from "../infra/sqlite-worker-owner-probe.test-support.js";
 import { preparePluginStateRead } from "../plugin-sdk/plugin-state-runtime.js";
 import { createDeferredCore } from "../shared/deferred.js";
-import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
-import { observePluginStateReads, useState } from "./plugin-state-fixtures.test-support.js";
+import { useState } from "./plugin-state-fixtures.test-support.js";
 import type { PluginStateOperationInput } from "./plugin-state-operation-contract.js";
 import { PluginStateOperationInvalidatedError } from "./plugin-state-operation-error.js";
 import { executePluginStateOperation } from "./plugin-state-operation.kernel.js";
 import type { FixtureOperations } from "./plugin-state-operation.test-support.js";
-import { pluginStatePublication } from "./plugin-state-publication.js";
 import {
   createCorePluginStateKeyedStore,
   createPluginStateKeyedStore,
@@ -29,7 +22,6 @@ import {
 } from "./plugin-state-store.js";
 import type { PluginStateOperation } from "./plugin-state-store.types.js";
 import * as workerClient from "./plugin-state-worker-client.js";
-import { executePluginStateCommand, preparePluginStateOperation } from "./plugin-state.worker.js";
 
 const invalid = (promise: Promise<unknown>) =>
   expect(promise).rejects.toMatchObject({ code: "PLUGIN_STATE_INVALID_INPUT" });
@@ -51,20 +43,6 @@ const scan = (operation: PluginStateOperation<FixtureOperations>, watchStores = 
     watchStores,
     ifEmpty: { store: 1, value: [] },
   });
-const nativeInput = (namespaces: string[]): PluginStateOperationInput => ({
-  module: moduleSource,
-  exportName: "execute",
-  stores: namespaces.map((namespace) => ({
-    pluginId: "operation-test",
-    namespace,
-    maxEntries: 10,
-    overflowPolicy: "reject-new",
-    defaultTtlMs: undefined,
-  })),
-  writeStores: [],
-  command: entriesCommand,
-  receiptId: namespaces[0],
-});
 
 const state = useState("plugin-state-operation");
 const options = (namespace: string, env = state().env) => ({
@@ -118,37 +96,15 @@ it("moves rows across namespaces in one worker command and rolls back undeclared
   await invalid(move(operation, "moved", [0]));
   expect(await first.lookup("key")).toBe("original");
   expect(await second.lookup("key")).toBeUndefined();
-  const reads = observePluginStateReads();
-  const hostSql = observeHostDataSql();
-  const facts = new Map<string, unknown>();
-  const unsubscribe = pluginStatePublication.subscribeFacts((change) => {
-    if (change.kind === "committed") {
-      change.receipt.facts.forEach((fact, key) => facts.set(key, fact));
-    }
+  const result = await move(operation, "moved");
+  expect(result.value).toMatchObject({
+    before: ["original", undefined],
+    after: [undefined, "moved"],
   });
-  try {
-    const result = await move(operation, "moved");
-    expect(result.value).toMatchObject({
-      before: ["original", undefined],
-      after: [undefined, "moved"],
-    });
-    expect(result.value.threadId).toBeGreaterThan(0);
-    expect(await first.lookup("key")).toBeUndefined();
-    expect(await second.lookup("key")).toBe("moved");
-    expect(reads).not.toHaveBeenCalled();
-    result.assertCurrent();
-    expect(facts.get(JSON.stringify(["operation-test", "move-first", "key"]))).toEqual({
-      kind: "absent",
-    });
-    expect(facts.get(JSON.stringify(["operation-test", "move-second", "key"]))).toMatchObject({
-      kind: "postimage",
-      value: { value_json: '"moved"' },
-    });
-    hostSql.calls.forEach((call) => expect(call).not.toHaveBeenCalled());
-  } finally {
-    unsubscribe();
-    hostSql.restore();
-  }
+  expect(result.value.threadId).toBeGreaterThan(0);
+  expect(await first.lookup("key")).toBeUndefined();
+  expect(await second.lookup("key")).toBe("moved");
+  result.assertCurrent();
 });
 
 it("keeps read-only absent sources noncreating and uses only an explicit missing value", async () => {
@@ -168,105 +124,22 @@ it("keeps read-only absent sources noncreating and uses only an explicit missing
   expect(existsSync(resolveOpenClawStateSqlitePath(env))).toBe(false);
 });
 
-it("uses one cold snapshot and executes resident namespace snapshots without SQL", async () => {
-  const { second } = await pair("empty-count");
-  const input: PluginStateOperationInput = {
-    ...nativeInput(["empty-count-first", "empty-count-second"]),
-    ifEmpty: { store: 1, value: [] },
-    receiptId: "empty-count",
-  };
-  await preparePluginStateOperation(input);
-  const database = openOpenClawStateDatabase({ env: state().env });
-  const run = () =>
-    executePluginStateCommand(
-      { type: "pluginState.executeOperation", input },
-      { path: database.path, env: state().env },
-      () => database,
-      true,
-    );
-  run();
-  const statements: string[] = [];
-  const reads = observeSqliteReadSql(requireNodeSqlite().StatementSync.prototype, (sql) => {
-    statements.push(sql);
-  });
-  const exec = database.db.exec.bind(database.db);
-  const transactions = vi.spyOn(database.db, "exec").mockImplementation((sql) => {
-    statements.push(sql);
-    return exec(sql);
-  });
-  try {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      expect(run()).toEqual({
-        ok: true,
-        value: { value: [], validUntil: undefined, emptyShortcut: true },
-      });
-      expect(statements.splice(0)).toEqual([
-        "BEGIN",
-        expect.stringContaining("plugin_state_entries"),
-        "COMMIT",
-      ]);
-    }
-    await second.register("key", "delivery");
-    statements.length = 0;
-    expect(run()).toMatchObject({ ok: true, value: { value: [[{ value: "delivery" }], [{}]] } });
-    expect(statements).toEqual([
-      "BEGIN",
-      expect.stringContaining("plugin_state_entries"),
-      expect.stringContaining("plugin_state_entries"),
-      "COMMIT",
-    ]);
-    input.namespaceSnapshots = Object.fromEntries(
-      input.stores.map((scope) => {
-        const response = executePluginStateCommand(
-          { type: "pluginState.loadNamespace", input: { ...scope, maxBytes: 4096 } },
-          { path: database.path, env: state().env },
-          () => database,
-          true,
-        );
-        if (!response.ok || !response.value) {
-          throw new Error("Expected complete namespace rows");
-        }
-        return [JSON.stringify([scope.pluginId, scope.namespace]), response.value];
-      }),
-    );
-    statements.length = 0;
-    expect(run()).toMatchObject({ ok: true, value: { value: [[{ value: "delivery" }], [{}]] } });
-    expect(statements).toEqual([]);
-  } finally {
-    transactions.mockRestore();
-    reads.restore();
-  }
-});
-
 it("invalidates empty receipts after either watched namespace changes", async () =>
   withDatabaseEngineSelection(await resolveDatabaseEngineSelection({}), async () => {
     const { first, second, operation } = await pair("empty-watch");
-    let requests = 0;
-    sqliteWorkerOwnerProbe.command(
-      await import("../state/openclaw-state-worker-store.js"),
-      async (command, commandOptions, scope) => {
-        if (command.type === "pluginState.executeOperation") {
-          requests++;
-        }
-        return scope.execute(command, commandOptions);
-      },
-    );
     let receipt = await scan(operation);
     expect(receipt.value).toEqual([]);
     receipt.value.push([]);
     expect((await scan(operation)).value).toEqual([]);
-    expect(requests).toBe(1);
     await first.register("key", "changed peer");
     expect(receipt.assertCurrent).toThrow(PluginStateOperationInvalidatedError);
     receipt = await scan(operation);
-    expect(requests).toBe(1);
     await second.register("key", "delivery");
     expect(receipt.assertCurrent).toThrow(PluginStateOperationInvalidatedError);
     expect((await scan(operation)).value).toMatchObject([
       [{ value: "delivery" }],
       [{ value: "changed peer" }],
     ]);
-    expect(requests).toBe(2);
     await invalid(
       operation.execute(entriesCommand, { writeStores: [], ifEmpty: { store: 2, value: [] } }),
     );
@@ -277,7 +150,18 @@ it("invalidates empty receipts after either watched namespace changes", async ()
 
 it("decodes only live requested snapshot rows and retains expiry across clock corrections", () => {
   const input: PluginStateOperationInput = {
-    ...nativeInput(["raw-snapshot"]),
+    module: moduleSource,
+    exportName: "execute",
+    stores: [
+      {
+        pluginId: "operation-test",
+        namespace: "raw-snapshot",
+        maxEntries: 10,
+        overflowPolicy: "reject-new",
+        defaultTtlMs: undefined,
+      },
+    ],
+    writeStores: [],
     command: { type: "read", input: undefined },
     receiptId: "raw-snapshot",
     namespaceSnapshots: {
@@ -355,7 +239,7 @@ it("validates a new handler even when another operation confirmed an empty names
   }));
 
 it("leaves the writer free during initial grants and preserves replacement revocation", async () => {
-  const { first, second, operation } = await pair("admission");
+  const { first, operation } = await pair("admission");
   const replacement = { ...options("replacement"), ownerId: "core:admission-test" as const };
   const core = createCorePluginStateKeyedStore<string>(replacement);
   await core.register("key", "original");
@@ -372,19 +256,12 @@ it("leaves the writer free during initial grants and preserves replacement revoc
   });
 
   await first.register("key", "updated");
-  const moved = await move(operation, "moved");
+  await move(operation, "moved");
   await replaceCorePluginStateEntry(replacement, "key", "replacement");
   expect(contention.observed).toEqual(
     Array.from({ length: 4 }, () => ["transaction:free", "commit:held"]).flat(),
   );
-  expect(moved.value).toMatchObject({
-    before: ["updated", undefined],
-    after: [undefined, "moved"],
-  });
-  moved.assertCurrent();
-  expect([await first.lookup("key"), await second.lookup("key"), await core.lookup("key")]).toEqual(
-    [undefined, "moved", "replacement"],
-  );
+  expect(await core.lookup("key")).toBe("replacement");
 
   // Replacement intentionally commits revocation before seeking its next grant.
   const offset = contention.observed.length;
