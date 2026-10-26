@@ -142,7 +142,7 @@ describe("memory reindex state", () => {
         aliases: [alias],
         documentPrefix: "title: none | text: ",
       }),
-    ).toEqual(identities);
+    ).not.toEqual(identities);
     expect(
       resolveMemoryIndexProviderIdentities({ provider, aliases: [alias], documentPrefix: "" }),
     ).not.toEqual(identities);
@@ -167,7 +167,9 @@ describe("memory reindex state", () => {
         provider: { id: "local", model: "other" },
         documentPrefix: "",
       }),
-    ).toEqual(resolveMemoryIndexProviderIdentities({ provider: { id: "local", model: "other" } }));
+    ).not.toEqual(
+      resolveMemoryIndexProviderIdentities({ provider: { id: "local", model: "other" } }),
+    );
   });
   it("invalidates indexes with missing provenance version as OpenClaw-owned", () => {
     expect(identity({ meta: createMeta({ provenanceVersion: undefined }) })).toEqual({

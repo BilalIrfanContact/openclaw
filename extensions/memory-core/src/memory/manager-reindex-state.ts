@@ -1,7 +1,4 @@
-import {
-  formatEmbeddingModelInput,
-  resolveEmbeddingInputFormatVersion,
-} from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
+import { resolveEmbeddingInputFormatVersion } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
 import {
   hashText,
   MEMORY_CHUNKING_VERSION,
@@ -55,11 +52,8 @@ export function resolveMemoryIndexProviderIdentities(params: {
     ...(params.provider ? (params.aliases ?? []) : []),
   ];
   const embeddingInputFormatVersion = resolveEmbeddingInputFormatVersion(provider.model);
-  const documentPrefix =
-    params.provider &&
-    params.documentPrefix !== formatEmbeddingModelInput("", provider.model, "document")
-      ? params.documentPrefix
-      : undefined;
+  // Explicit formatting also disables provider-owned templates, including an empty prefix.
+  const documentPrefix = params.provider ? params.documentPrefix : undefined;
   const seen = new Set<string>();
   const identities: MemoryIndexProviderIdentity[] = [];
   for (const [index, candidate] of candidates.entries()) {

@@ -211,3 +211,25 @@ it("re-embeds cached documents after an alias format change but reuses them for 
   expect(provider.embeddedBatchTexts).toEqual([expect.stringMatching(/^document: /)]);
   expect(manager.status().custom?.indexIdentity).toEqual({ status: "valid" });
 });
+
+it("re-embeds when explicit raw documents replace provider-owned formatting", async () => {
+  const cfg = fixture.createConfig({
+    model: "gemini-embedding-2",
+    cacheEnabled: true,
+    vectorEnabled: false,
+  });
+  const dbPath = await publishIndex(cfg);
+  const previousKey = withDatabase(dbPath, readMeta).providerKey;
+  const previousBatches = provider.embedBatchCalls;
+  const search = cfg.memory?.search;
+  if (!search) {
+    throw new Error("fixture memory search configuration is missing");
+  }
+  search.inputFormat = { query: "", document: "" };
+  const manager = await fixture.getFreshManager(cfg);
+  await manager.sync({ reason: "cli", force: true });
+  expect(provider.embedBatchCalls).toBeGreaterThan(previousBatches);
+  expect(manager.status().custom?.indexIdentity).toEqual({ status: "valid" });
+  await closeManager(manager);
+  expect(withDatabase(dbPath, readMeta).providerKey).not.toBe(previousKey);
+});

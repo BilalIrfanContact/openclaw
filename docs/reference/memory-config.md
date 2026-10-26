@@ -329,8 +329,8 @@ disables automatic formatting for that side. A non-empty `queryInstruction`
 still takes precedence over `inputFormat.query`. A per-agent `inputFormat`
 replaces the complete inherited pair.
 
-Changing the effective document prefix changes the index and embedding-cache
-identity. Existing indexes pause semantic search until you run
+Setting or changing the explicit document prefix changes the index and embedding-cache
+identity, including an empty prefix that disables provider formatting. Existing indexes pause semantic search until you run
 `openclaw memory index --force`; vectors from the previous format are not reused.
 Built-in model-format upgrades rebuild affected indexes automatically once.
 Changing only the query prefix does not require reindexing.
