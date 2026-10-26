@@ -19,13 +19,11 @@ Use Gateway-hosted execution (`gateway_exec` in Codex), with protected egress
 enabled and both bindings allowing `hotfix-ledger.openclaw.ai`. Its injected
 variables are opaque sentinels, not plaintext; pass them unchanged in headers.
 Native shell, sandbox, and remote-node commands do not inherit these bindings.
-Without bindings, use an authorized provider from the operator's task context or
-private instructions (`$release-private` / `$one-password` when available);
-do not assume 1Password access or search arbitrary credential files. Keep values
-out of model context, logs, and artifacts. If provider fields contain complete
-`Header-Name: value` strings, strip the matching prefix and whitespace inside
-the loader; do not alter managed sentinels. If neither credential path is
-available, use the local fallback.
+Without bindings, use hotfix ledger credentials from the local credential
+manager. Keep values out of model context, logs, and artifacts. If stored as
+`Header-Name: value`, strip the matching prefix and whitespace inside the loader;
+do not alter managed sentinels. If credentials are unavailable, use the local
+fallback.
 
 Send `Accept: application/json` and an identifying User-Agent, e.g.
 `OpenClaw-Release/1.0`. Authenticated `/v1/health`, `/v1/capabilities`, and
