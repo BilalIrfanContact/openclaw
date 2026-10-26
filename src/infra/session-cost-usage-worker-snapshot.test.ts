@@ -12,10 +12,14 @@ import {
   createUsageRollupEntry,
   createUsageTranscriptEntry,
 } from "./session-cost-usage-fixtures.test-support.js";
-import { partitionUsageCostRollup } from "./session-cost-usage-partitions.js";
+import {
+  partitionUsageCostRollup,
+  USAGE_COST_PARTITION_SCOPE,
+  usageCostPartitionKey,
+} from "./session-cost-usage-partitions.js";
+import { USAGE_COST_QUARTER_SCOPE } from "./session-cost-usage-quarters.js";
 import {
   decodeUsageCostRollupEnvelope,
-  encodeUsageCostRollup,
   USAGE_COST_ROLLUP_SCOPE,
   type UsageCostRollupEntry,
 } from "./session-cost-usage-rollup-codec.js";
@@ -273,27 +277,37 @@ it("spends the shared decoded budget on complete reports after preparing the sna
   expect(await read(second)).toBeNull();
 });
 
-it("ends the cache snapshot before projection awaits and preserves a concurrent write", async ({
+it("reads the report snapshot after discovery and keeps it closed across awaits", async ({
   signal,
 }) => {
   const db = cacheDatabase();
   const file = reportFile("/synthetic/report.jsonl", 2);
-  const write = (connection: DatabaseSync, tokens: number) => {
-    const encoded = encodeUsageCostRollup(reportEntry(file, tokens));
-    connection
-      .prepare(`INSERT INTO cache_entries (scope, key, value_json, blob, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT (scope, key) DO UPDATE SET
-          value_json = excluded.value_json, blob = excluded.blob, updated_at = excluded.updated_at`)
-      .run(USAGE_COST_ROLLUP_SCOPE, file.filePath, encoded.valueJson, encoded.blob, timestamp);
+  const upsert = db.prepare(`INSERT INTO cache_entries (scope, key, value_json, blob, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (scope, key) DO UPDATE SET
+      value_json = excluded.value_json, blob = excluded.blob, updated_at = excluded.updated_at`);
+  const write = (tokens: number) => {
+    const { valueJson, blob, partitions } = partitionUsageCostRollup(reportEntry(file, tokens));
+    upsert.run(USAGE_COST_ROLLUP_SCOPE, file.filePath, valueJson, blob, timestamp);
+    for (const partition of partitions) {
+      const key = usageCostPartitionKey(file.filePath, partition.date);
+      upsert.run(USAGE_COST_PARTITION_SCOPE, key, partition.valueJson, partition.blob, timestamp);
+      upsert.run(
+        USAGE_COST_QUARTER_SCOPE,
+        key,
+        partition.quarters!.valueJson,
+        partition.quarters!.blob,
+        timestamp,
+      );
+    }
   };
-  write(db, 3);
-  // Borrow one native connection so an independent job can use it while projection waits.
+  write(3);
+  // Borrow one native connection so an independent job can use it while discovery waits.
   borrowDatabase(db);
-  const projecting = createDeferredCore();
+  const discovering = createDeferredCore();
   const resume = createDeferredCore();
   fixture.inventory.mockImplementationOnce(async () => {
-    projecting.resolve();
+    discovering.resolve();
     await resume.promise;
     return [file];
   });
@@ -303,24 +317,20 @@ it("ends the cache snapshot before projection awaits and preserves a concurrent 
       kind: "summary",
       pricingFingerprint,
       startMs: timestamp,
-      endMs: timestamp,
+      endMs: timestamp + 15 * 60 * 1000 - 1,
       dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
     });
   const pending = report();
   try {
     await withinTest(
-      awaitGateBeforeSettlement(projecting.promise, pending, "Report did not reach projection"),
+      awaitGateBeforeSettlement(discovering.promise, pending, "Report did not reach discovery"),
       signal,
     );
     const insideReportSnapshot = db.isTransaction;
-    write(db, 7);
+    write(7);
     resume.resolve();
     expect(insideReportSnapshot).toBe(false);
     expect(await pending).toMatchObject({
-      kind: "summary",
-      summary: { totals: { totalTokens: 3, totalCost: 0.3 } },
-    });
-    expect(await report()).toMatchObject({
       kind: "summary",
       summary: { totals: { totalTokens: 7, totalCost: 0.7 } },
     });

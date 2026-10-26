@@ -5892,3 +5892,33 @@ to disappear (`PGCENSUS_EXPECT_COUNT_STATEMENTS=0` enforces this). Request windo
 and worker events use the same monotonic nanosecond clock, including submillisecond
 searches. Wall samples include instrumentation and incidental background work;
 this small workload does not establish latency or relevance at scale.
+
+## Usage overview totals and latency
+
+`usage-overview-fixture.ts` seeds an isolated state directory with synthetic
+team-shaped transcripts over the last 30 days and stores the exact expected
+totals per UTC quarter. `usage-overview-measure.ts` starts an isolated Gateway
+on that state, waits until the usage cache reports every session, and then
+times the Usage page overview request (`sessions.usage`, `projection:
+"overview"`, all agents, family grouping, `Asia/Kolkata`) over the real WS
+protocol. Warm reads alternate `Asia/Kolkata` and `Asia/Calcutta` and edit a
+session label first, so neither the result cache nor the session snapshot
+answers them; cold reads start a new Gateway for each sample.
+
+```sh
+node --import ./scripts/tsx.mjs scripts/perf/usage-overview-fixture.ts \
+  --state-dir /path/to/new-state --sessions 12000
+node --import ./scripts/tsx.mjs scripts/perf/usage-overview-measure.ts \
+  --state-dir /path/to/new-state --entry dist/entry.js --label candidate \
+  --warm 10 --cold 5 [--cpu-prof-dir /path/to/profiles]
+```
+
+`result.json` records wall time per read, whether tokens, cost and per-day
+tokens equal the fixture truth, and the cache status. The
+`usage-overview-counts.mjs` preload counts SQL statements, zstd decodes,
+sha256 digests, JSON parses (and those that decode usage buckets), worker
+messages, and CPU and event-loop active time separately for the main thread
+and the worker threads. `--cpu-prof-dir` writes CPU profiles of every busy
+thread for the warm window and each cold read only. Run base and candidate
+alternately on the same state directory; the fixture is not a model or
+channel workload.

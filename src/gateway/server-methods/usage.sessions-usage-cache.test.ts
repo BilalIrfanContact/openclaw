@@ -25,11 +25,19 @@ vi.mock("../../infra/session-cost-usage.js", async () => ({
   )),
   discoverAllSessions: mocks.discoverAllSessions,
   loadSessionCostSummariesFromCache: mocks.loadSessionCostSummariesFromCache,
+  loadSessionUsageOverviewFromCache: vi.fn(
+    async (params: Parameters<typeof overviewFromSessionSummaries>[0]) =>
+      (await import("./usage.test-support.js")).overviewFromSessionSummaries(
+        params,
+        mocks.loadSessionCostSummariesFromCache,
+      ),
+  ),
 }));
 
 import {
   freshUsageBatch,
   invokeUsage,
+  type overviewFromSessionSummaries,
   usageClient,
   usageReply,
   usageRoleConfig,

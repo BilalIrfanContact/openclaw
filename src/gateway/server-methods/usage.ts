@@ -57,10 +57,18 @@ import {
   type DateRange,
 } from "./usage-date-range.js";
 import {
+  createUsageOverviewReporter,
+  withVisibleUsageOverviewRows,
+} from "./usage-overview-report.js";
+import {
   loadCostUsageSummaryCached,
   loadSessionsUsageSnapshotCached,
 } from "./usage-result-cache.js";
-import { loadUsageSessionSummaries, withUsageRequestBudget } from "./usage-session-loading.js";
+import {
+  loadUsageOverviewSummaries,
+  loadUsageSessionSummaries,
+  withUsageRequestBudget,
+} from "./usage-session-loading.js";
 import {
   loadUsageSessionContext,
   projectUsageCreator,
@@ -289,7 +297,7 @@ export const usageHandlers: GatewayRequestHandlers = {
         creatorKey,
         // Paging, sorting, and usage filters derive from the same source snapshot.
         overview: overviewOptions !== undefined,
-        committedOnly: p.projection === "overview",
+        projection: p.projection === "overview" ? "overview" : "detail",
         includeAllContext,
         ...(visibilityIdentity ? { visibilityIdentity } : {}),
         load: async () => {
@@ -307,6 +315,7 @@ export const usageHandlers: GatewayRequestHandlers = {
                 startMs,
                 endMs,
                 visibilityFilter,
+                ...(p.projection === "overview" ? { statistics: false as const } : {}),
               }),
             () => [],
           );
@@ -332,16 +341,28 @@ export const usageHandlers: GatewayRequestHandlers = {
             );
           }
           const sessions: SessionUsageEntry[] = [];
-          const { summaries, computing, cacheStatus } = await loadUsageSessionSummaries({
+          const summaryParams = {
             entries: mergedEntries,
-            committedOnly: p.projection === "overview",
             read: budget.read,
             config,
             startMs,
             endMs,
             includeUntimestamped,
             dayBucket,
-          });
+          };
+          const overviewSummaries =
+            p.projection === "overview"
+              ? await loadUsageOverviewSummaries(summaryParams)
+              : undefined;
+          const { summaries, computing, cacheStatus } =
+            overviewSummaries ?? (await loadUsageSessionSummaries(summaryParams));
+          // Unsummarized instances (refresh or upgrade backfill) make every total a lower bound.
+          const summarizing: SessionsUsageResult["partial"] = overviewSummaries?.summarizing
+            ? {
+                reason: "summarizing",
+                message: `Usage is still being summarized for ${overviewSummaries.summarizing} of ${overviewSummaries.instances} sessions; totals are incomplete and update automatically.`,
+              }
+            : undefined;
 
           const usageByEntry = new Map(
             mergedEntries.map((entry, index) => [
@@ -375,7 +396,8 @@ export const usageHandlers: GatewayRequestHandlers = {
               modelProvider: merged.storeEntry?.modelProvider,
               model: merged.storeEntry?.model,
               usage,
-              ...(!usage || loaded?.computing ? { computing: true } : {}),
+              // Overview loads mark rows without packed usage as computing themselves.
+              ...((!usage && !overviewSummaries) || loaded?.computing ? { computing: true } : {}),
               hasContextWeight: Boolean(merged.contextWeight),
               contextWeight: includeContextWeight ? (merged.contextWeight ?? null) : undefined,
             });
@@ -395,8 +417,11 @@ export const usageHandlers: GatewayRequestHandlers = {
               : cacheStatus,
             ...(budget.exhausted()
               ? { partial: { reason: "time-budget" as const, message: budget.hint } }
-              : {}),
+              : summarizing
+                ? { partial: summarizing }
+                : {}),
             sources: visibleEntries,
+            ...(overviewSummaries ? { overviewUsage: overviewSummaries.usage } : {}),
             accessRevision: loadedAccessRevision,
             sessionRevision: loadedSessionRevision,
           };
@@ -516,21 +541,31 @@ export const usageHandlers: GatewayRequestHandlers = {
             : [session];
         });
       };
+      const selectRows = (rows: SessionUsageEntry[]) =>
+        rows.filter((row) => !creatorKey || row.creatorKey === creatorKey);
+      const reportDayBucket = resolveUsageCostWorkerDayBucket(dayBucket);
+      // Overview projections aggregate packed usage off the Gateway thread.
+      const reportFor = createUsageOverviewReporter({
+        usage: overviewOptions && result.overviewUsage,
+        options: overviewOptions,
+        dayBucket: reportDayBucket,
+      });
       // Refill once after an access change. Continued churn may shorten the page, never extend the scan.
       let visible: SessionUsageEntry[] | undefined;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         await budget.read(prepareUnavailableSources, () => undefined);
         visible = readVisibleRows();
-        const selected = visible.filter((row) => !creatorKey || row.creatorKey === creatorKey);
-        const pageSources = (
-          overviewOptions
+        const selected = selectRows(visible);
+        const page = reportFor
+          ? (await reportFor(selected)).sessions
+          : overviewOptions
             ? selectUsageOverviewPage({
                 rows: selected,
                 options: overviewOptions,
-                dayBucket: resolveUsageCostWorkerDayBucket(dayBucket),
+                dayBucket: reportDayBucket,
               })
-            : selected.slice(0, limit)
-        ).flatMap((row) => {
+            : selected.slice(0, limit);
+        const pageSources = page.flatMap((row) => {
           const source = sourceFor(row);
           return source && !hydratedSources.has(source) ? [source] : [];
         });
@@ -574,23 +609,26 @@ export const usageHandlers: GatewayRequestHandlers = {
           creatorOptions.set(row.creatorKey, { key: row.creatorKey, actor: row.createdActor });
         }
       }
-      const selected = visible.filter((row) => !creatorKey || row.creatorKey === creatorKey);
+      const selected = selectRows(visible);
       const accumulator = createUsageAggregateAccumulator();
       if (!overviewOptions) {
         selected.forEach((row) => accumulator.add(row));
       }
-      const slice = overviewOptions
-        ? buildUsageOverview({
-            rows: selected,
-            options: overviewOptions,
-            dayBucket: resolveUsageCostWorkerDayBucket(dayBucket),
-            compact: p.projection === "overview",
-          })
-        : {
-            sessions: selected.slice(0, limit),
-            totals: accumulator.totals,
-            aggregates: accumulator.finish(),
-          };
+      // Reports always cover exactly the final visible rows.
+      const slice = reportFor
+        ? withVisibleUsageOverviewRows(await reportFor(selected), visible)
+        : overviewOptions
+          ? buildUsageOverview({
+              rows: selected,
+              options: overviewOptions,
+              dayBucket: reportDayBucket,
+              compact: p.projection === "overview",
+            })
+          : {
+              sessions: selected.slice(0, limit),
+              totals: accumulator.totals,
+              aggregates: accumulator.finish(),
+            };
       const partial = budget.exhausted()
         ? { reason: "time-budget" as const, message: budget.hint }
         : (result.partial ?? result.cacheStatus?.partial);
