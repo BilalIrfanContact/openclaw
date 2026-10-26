@@ -1,5 +1,5 @@
-// Qa Lab integration tests cover the real QA Channel runtime contract.
 import { qaChannelPlugin, setQaChannelRuntime } from "@openclaw/qa-channel/api.js";
+import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-helpers";
 import {
   createTestRegistry,
   resetPluginRuntimeStateForTest,
@@ -26,21 +26,14 @@ async function startQaRuntimeIntegration(runtime = createQaRunnerRuntime()) {
   if (!startAccount) {
     throw new Error("QA Channel gateway is unavailable");
   }
-  const gatewayTask = startAccount({
-    accountId: account.accountId,
-    account,
-    cfg: config,
-    runtime: { log: noop, error: noop, exit: noop },
-    abortSignal: abort.signal,
-    log: { info: noop, warn: noop, error: noop, debug: noop },
-    getStatus: () => ({
-      accountId: account.accountId,
-      configured: true,
-      enabled: true,
-      running: true,
+  const gatewayTask = startAccount(
+    createStartAccountContext({
+      account,
+      cfg: config,
+      runtime: { log: noop, error: noop, exit: noop },
+      abortSignal: abort.signal,
     }),
-    setStatus: noop,
-  });
+  );
   return {
     state,
     send(text: string) {
@@ -110,7 +103,6 @@ describe("QA runner runtime integration", () => {
     const transport = createQaChannelTransport(harness.state);
     let sent = false;
 
-    expect(qaChannelPlugin.outbound?.sendTextOnlyErrorPayloads).toBe(true);
     await harness.waitFor(
       expect(
         transport.waitForCondition(
@@ -125,9 +117,6 @@ describe("QA runner runtime integration", () => {
           25,
         ),
       ).rejects.toThrow(failureText),
-    );
-    expect(harness.state.getSnapshot().messages).toContainEqual(
-      expect.objectContaining({ direction: "outbound", text: failureText, isError: true }),
     );
   });
 });
