@@ -1,7 +1,14 @@
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
+import type {
+  SessionTranscriptReadScope,
+  recordSessionParticipant,
+  listSessionParticipantsReadOnly,
+} from "../../config/sessions/session-accessor.js";
 import type { ResetSessionEntryLifecycleMutation } from "../../config/sessions/session-accessor.lifecycle-types.js";
+import type { resetSessionEntryLifecycle } from "../../config/sessions/session-accessor.lifecycle.js";
+import type { stageSessionPendingInput } from "../../config/sessions/session-accessor.pending-inputs.js";
+import type { readTranscriptMutationStateInTransaction } from "../../config/sessions/session-accessor.sqlite-transcript-state.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
-import type { getAgentTestMocks } from "./agent.mocks.test-utils.js";
 import { getAgentTestStorePath } from "./agent.user-turn-recorder.test-support.js";
 
 type SessionStoreFixture = Record<string, Record<string, unknown>>;
@@ -38,19 +45,22 @@ function selectFreshestTargetFixtureEntry(
   return freshest;
 }
 
-type SessionAccessorMocks = Pick<
-  ReturnType<typeof getAgentTestMocks>,
-  | "stageSessionPendingInput"
-  | "recordSessionParticipant"
-  | "listSessionParticipantsReadOnly"
-  | "hasSessionTranscriptEventsSync"
-  | "readTranscriptMutationStateSync"
-  | "applySessionEntryReplacements"
-  | "persistSessionTranscriptTurn"
-  | "resetSessionEntryLifecycle"
-  | "patchSessionEntryTarget"
-  | "updateSessionStore"
->;
+type SessionAccessorMocks = {
+  stageSessionPendingInput: Mock<typeof stageSessionPendingInput>;
+  recordSessionParticipant: Mock<typeof recordSessionParticipant>;
+  listSessionParticipantsReadOnly: Mock<typeof listSessionParticipantsReadOnly>;
+  hasSessionTranscriptEventsSync: Mock<(scope: SessionTranscriptReadScope) => boolean>;
+  readTranscriptMutationStateSync: Mock<
+    (
+      scope: SessionTranscriptReadScope,
+    ) => ReturnType<typeof readTranscriptMutationStateInTransaction>
+  >;
+  applySessionEntryReplacements: Mock;
+  persistSessionTranscriptTurn: Mock;
+  resetSessionEntryLifecycle: Mock<typeof resetSessionEntryLifecycle>;
+  patchSessionEntryTarget: Mock;
+  updateSessionStore: Mock;
+};
 
 export function createSessionAccessorMockReset(mocks: SessionAccessorMocks) {
   return () => {
