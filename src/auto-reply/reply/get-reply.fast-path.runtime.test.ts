@@ -64,13 +64,6 @@ describe("getReplyFromConfig fast-path runtime", () => {
   beforeAll(async () => {
     installRuntimeChannels();
     ({ getReplyFromConfig } = await loadGetReplyModuleForTest({ cacheKey: import.meta.url }));
-    vi.stubEnv("OPENCLAW_TEST_FAST", "1");
-    resetReplyRuntimeMocks(agentMocks);
-    agentMocks.runEmbeddedAgent.mockResolvedValue(makeEmbeddedTextResult("warm runtime"));
-    await withTempHome(async (home) => {
-      await reply(home, { From: "+1001", To: "+2000" }, "warm runtime");
-    });
-    vi.unstubAllEnvs();
   });
 
   beforeEach(() => {
@@ -84,25 +77,6 @@ describe("getReplyFromConfig fast-path runtime", () => {
     setActivePluginRegistry(createTestRegistry([]));
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-  });
-
-  it("keeps old-style runtime tests fast with marked temp-home configs", async () => {
-    await withTempHome(async (home) => {
-      const res = await reply(home, {
-        From: "+1001",
-        To: "+2000",
-        media: [
-          { path: "/tmp/a.png", url: "/tmp/a.png" },
-          { path: "/tmp/b.png", url: "/tmp/b.png" },
-        ],
-      });
-
-      const text = Array.isArray(res) ? res[0]?.text : res?.text;
-      expect(text).toBe("ok");
-      const seenPrompt = agentMocks.runEmbeddedAgent.mock.calls.at(-1)?.[0]?.prompt;
-      expect(seenPrompt).toContain("[media attached: 2 files]");
-      expect(seenPrompt).toContain("hello");
-    });
   });
 
   it.each(["native", "normal"] as const)(

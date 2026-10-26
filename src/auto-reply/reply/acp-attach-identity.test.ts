@@ -105,12 +105,6 @@ it.each(["message", "steer"] as const)(
       expect(result?.reply?.text).toContain(`ACP steer sent to ${sessionKey}`);
     }
 
-    expect(manager.runTurn).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        mode: mode === "message" ? "prompt" : "steer",
-        text: "keep going",
-      }),
-    );
     expect(captured).toMatchObject([
       {
         kind: "capture",

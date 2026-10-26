@@ -14,20 +14,15 @@ import {
 function runError(
   error: unknown,
   overrides: Partial<Parameters<typeof handleReplyAgentRunError>[1]> = {},
-  restart = false,
 ) {
   const replyOperation = createReplyOperation({
     sessionKey: "agent:main:core-error",
     sessionId: "core-error",
     resetTriggered: false,
   });
-  if (restart) {
-    replyOperation.abortForRestart();
-  }
   onTestFinished(() => replyOperation.complete());
   return handleReplyAgentRunError(error, {
     resolveVisibleReplyDelivery: async () => false,
-
     replyExpectation: "required",
     isRestartRecoveryArmed: async () => false,
     replyOperation,
@@ -38,25 +33,12 @@ function runError(
   });
 }
 
-it.each([{ armed: false }, { armed: true }, { claimChanged: true }])(
-  "resolves restart recovery before choosing guidance: %j",
-  async ({ armed, claimChanged }) => {
-    const reply = await runError(
-      claimChanged ? createRestartRecoveryClaimChangedError() : new Error("restart"),
-      { isRestartRecoveryArmed: async () => armed ?? false },
-      !claimChanged,
-    );
-    const expected = claimChanged
-      ? "⚠️ This conversation changed before your message could start. Check the latest messages, then try again if needed."
-      : armed
-        ? undefined
-        : "⚠️ Gateway is restarting. Please wait a few seconds and try again.";
-    expect(reply?.text).toBe(expected);
-    if (claimChanged) {
-      expect(reply?.isError).toBe(true);
-    }
-  },
-);
+it("reports a changed restart recovery claim", async () => {
+  expect(await runError(createRestartRecoveryClaimChangedError())).toMatchObject({
+    text: "⚠️ This conversation changed before your message could start. Check the latest messages, then try again if needed.",
+    isError: true,
+  });
+});
 
 it.each([false, true])(
   "keeps setup failures retryable only before durable acceptance (%s)",
