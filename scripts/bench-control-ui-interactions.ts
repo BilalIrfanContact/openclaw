@@ -370,6 +370,7 @@ type Result = {
   projectionFixture?: ProjectionFixtureFacts;
   projectionCoverageArtifact?: string;
   functionCoverageArtifact?: string;
+  functionCoveragePreparationArtifact?: string;
   projectionScreenshotArtifact?: string;
   measurementClass?:
     | "production-interaction"
@@ -606,7 +607,7 @@ try {
           : "untraced CDP metrics",
         metricTimeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
         functionCounts: values["function-counts"]
-          ? "Precise function/block counts during the interaction; diagnostic overhead, not timing evidence."
+          ? "Precise coverage starts before navigation and resets after preparation; diagnostic overhead, not timing evidence."
           : false,
         cpuThrottle,
         retainedHeap: values["retained-heap"]
@@ -828,6 +829,12 @@ try {
           try {
             cdp = await context.newCDPSession(page);
             await cdp.send("Emulation.setCPUThrottlingRate", { rate: cpuThrottle });
+            if (values["function-counts"]) {
+              // Starting after warmup can miss calls in already optimized functions.
+              await cdp.send("Profiler.enable");
+              await cdp.send("Profiler.startPreciseCoverage", { callCount: true, detailed: true });
+              preciseCoverage = true;
+            }
             if (
               nativeVisibility &&
               (scenario.fixture?.boardFrameResources ||
@@ -1090,10 +1097,14 @@ try {
               return { durations, observer };
             });
             const before = await metrics(cdp);
-            if (
-              values["function-counts"] ||
-              (scenario.projectionFamily && values["projection-counts"])
-            ) {
+            if (values["function-counts"]) {
+              const artifact = `${artifactPrefix}.preparation-function-coverage.json`;
+              await writeFile(
+                path.join(artifactDir, artifact),
+                JSON.stringify(await cdp.send("Profiler.takePreciseCoverage")),
+              );
+              result.functionCoveragePreparationArtifact = artifact;
+            } else if (scenario.projectionFamily && values["projection-counts"]) {
               await cdp.send("Profiler.enable");
               await cdp.send("Profiler.startPreciseCoverage", { callCount: true, detailed: true });
               preciseCoverage = true;
