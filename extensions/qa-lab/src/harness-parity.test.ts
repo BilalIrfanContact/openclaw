@@ -12,12 +12,7 @@ const TEXT = '{"message":{"role":"assistant","content":"same"}}\n';
 const FLAT_TEXT = '{"role":"assistant","content":"same"}\n';
 
 const BASE_PROMPT_REPORT = {
-  systemPrompt: {
-    chars: 100,
-    projectContextChars: 40,
-    nonProjectContextChars: 60,
-    hash: "system-a",
-  },
+  systemPrompt: { chars: 100, hash: "system-a" },
   skills: { promptChars: 12, hash: "skills-a" },
   tools: {
     schemaChars: 20,
@@ -26,9 +21,7 @@ const BASE_PROMPT_REPORT = {
         name: "read",
         summaryChars: 8,
         summaryHash: "summary-a",
-        schemaChars: 20,
         schemaHash: "schema-a",
-        propertiesCount: 1,
       },
     ],
   },
@@ -72,16 +65,8 @@ function toolReport(overrides: Partial<(typeof BASE_PROMPT_REPORT.tools.entries)
 describe("harness parity", () => {
   it("classifies prompt and tool surface drift before behavioral drift", () => {
     for (const [drift, right] of [
-      [
-        "system-prompt",
-        promptReport({
-          systemPrompt: { chars: 101, projectContextChars: 40, nonProjectContextChars: 61 },
-        }),
-      ],
-      [
-        "system-prompt",
-        promptReport({ systemPrompt: { ...BASE_PROMPT_REPORT.systemPrompt, hash: "system-b" } }),
-      ],
+      ["system-prompt", promptReport({ systemPrompt: { chars: 101, hash: "system-a" } })],
+      ["system-prompt", promptReport({ systemPrompt: { chars: 100, hash: "system-b" } })],
       ["system-prompt", promptReport({ skills: { promptChars: 12, hash: "skills-b" } })],
       ["tool-description", toolReport({ summaryHash: "summary-b" })],
       ["tool-description", toolReport({ summaryChars: 10 })],
@@ -90,7 +75,7 @@ describe("harness parity", () => {
         promptReport({
           tools: {
             schemaChars: 20,
-            entries: [{ name: "read", summaryChars: 9, schemaChars: 20, propertiesCount: 1 }],
+            entries: [{ name: "read", summaryChars: 9 }],
           },
         }),
       ],

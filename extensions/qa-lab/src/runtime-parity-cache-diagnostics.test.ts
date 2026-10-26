@@ -1,18 +1,16 @@
-import path from "node:path";
 import { resetPluginStateStoreForTests } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { closeQaRuntimeStores } from "openclaw/plugin-sdk/qa-runtime";
-import { resolveStorePath, upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { appendSessionTranscriptMessageByIdentity } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { formatSqliteSessionFileMarker as sessionMarker } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, expect, it } from "vitest";
 import { buildRuntimeParityCacheDiagnostics } from "./runtime-parity-cache-diagnostics.js";
 import {
   captureRuntimeParityCell as captureCell,
   type RuntimeParityUsage,
 } from "./runtime-parity.js";
+import { createRuntimeParityTranscriptHarness } from "./runtime-parity.test-helper.js";
 import { createTempDirHarness } from "./temp-dir.test-helper.js";
 
 const tempDirs = createTempDirHarness({ beforeCleanup: closeQaRuntimeStores });
+const { seedRuntimeParityTranscript } = createRuntimeParityTranscriptHarness();
 
 afterEach(() => resetPluginStateStoreForTests({ closeDatabase: false }));
 afterAll(() => tempDirs.cleanup());
@@ -22,26 +20,15 @@ async function captureCacheTranscript(
   runtime: "openclaw" | "codex" = "openclaw",
 ) {
   const tempRoot = await tempDirs.makeTempDir("openclaw-qa-runtime-parity-cache-");
-  const agentId = "qa";
-  const sessionId = "runtime-parity-cache-miss";
-  const sessionKey = "agent:qa:runtime-parity-cache-miss";
-  const env = { ...process.env, OPENCLAW_STATE_DIR: path.join(tempRoot, "state") };
-  const storePath = resolveStorePath(undefined, { agentId, env });
-  const identity = { agentId, env, sessionKey, storePath };
-  const sessionFile = sessionMarker({ agentId, sessionId, storePath });
-  await upsertSessionEntry({ ...identity, entry: { sessionId, sessionFile, updatedAt: 100 } });
-  const messages = turns.flatMap((turn) => [
-    { role: "user", content: "Continue." },
-    { role: "assistant", content: "done", ...turn },
-  ]);
-  for (const [index, message] of messages.entries()) {
-    await appendSessionTranscriptMessageByIdentity({
-      ...identity,
-      sessionId,
-      now: index + 1,
-      message: message as never,
-    });
-  }
+  await seedRuntimeParityTranscript({
+    tempRoot,
+    sessionId: "runtime-parity-cache-miss",
+    sessionKey: "agent:qa:runtime-parity-cache-miss",
+    messages: turns.flatMap((turn) => [
+      { role: "user", content: "Continue." },
+      { role: "assistant", content: "done", ...turn },
+    ]),
+  });
   return captureCell({
     runtime,
     gateway: { tempRoot },
