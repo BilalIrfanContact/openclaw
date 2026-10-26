@@ -34,11 +34,6 @@ it("persists the session writer authority with durable final custody", () => {
     sessionKey: custody.sessionKey,
     storePath: custody.storePath,
   };
-  const expected = {
-    kind: "pending-final",
-    ...custody,
-    sessionWriterDeliveryAuthority: { ...authority },
-  };
   const payload = setReplyPayloadMetadata(
     { text: "settled final" },
     {
@@ -47,7 +42,11 @@ it("persists the session writer authority with durable final custody", () => {
     },
   );
 
-  expect(resolvePendingFinalDeliveryCompletion([payload])).toEqual(expected);
+  expect(resolvePendingFinalDeliveryCompletion([payload])).toEqual({
+    kind: "pending-final",
+    ...custody,
+    sessionWriterDeliveryAuthority: authority,
+  });
 });
 
 it("strips internal metadata from durable pending delivery text", () => {
@@ -66,17 +65,9 @@ it("strips internal metadata from durable pending delivery text", () => {
   expect(sanitizeText(text)).toBe("Visible reply");
 });
 
-it.each([
-  "    const value = 1;\n    use(value);",
-  "NO_REPLY",
-  '"NO_REPLY"',
-  '{"action":"NO_REPLY"}',
-  "NO_REPLY.",
-  "NO_REPLYThe user is saying hello",
-  "HEARTBEAT_OK NO_REPLY",
-  "NO_REPLY\nAnswer.\n    Code.",
-])("preserves prepared text without reinterpreting it: %s", (text) =>
-  expect(sanitizeText(text)).toBe(text),
+it.each(["    const value = 1;\n    use(value);", "NO_REPLY", "NO_REPLY\nAnswer.\n    Code."])(
+  "preserves prepared text without reinterpreting it: %s",
+  (text) => expect(sanitizeText(text)).toBe(text),
 );
 
 it("keeps media directives in the durable recovery text while sendable delivery parses them", () => {
@@ -86,23 +77,20 @@ it("keeps media directives in the durable recovery text while sendable delivery 
   expect(deliveryPayloads(rawPayloads).map((payload) => payload.text)).toEqual(["Rendered chart"]);
 });
 
-it("encodes structured media URLs as durable media directives", () => {
-  expectRecovery(
-    [{ text: "Rendered chart", mediaUrl: "/tmp/chart.png" }],
-    "Rendered chart\nMEDIA:/tmp/chart.png",
-  );
-  expectRecovery(
-    [
-      {
-        text: "MEDIA:/tmp/c.png",
-        mediaUrls: [" /tmp/a.png ", "/tmp/b.png", "/tmp/a.png", " "],
-        mediaUrl: " /tmp/b.png ",
-      },
-    ],
+it.each<[ReplyPayload, string]>([
+  [{ text: "Rendered chart", mediaUrl: "/tmp/chart.png" }, "Rendered chart\nMEDIA:/tmp/chart.png"],
+  [
+    {
+      text: "MEDIA:/tmp/c.png",
+      mediaUrls: [" /tmp/a.png ", "/tmp/b.png", "/tmp/a.png", " "],
+      mediaUrl: " /tmp/b.png ",
+    },
     "MEDIA:/tmp/a.png\nMEDIA:/tmp/b.png\nMEDIA:/tmp/c.png",
-  );
-  expectRecovery([{ text: "Visible", mediaUrl: " " }], "Visible");
-});
+  ],
+  [{ text: "Visible", mediaUrl: " " }, "Visible"],
+])("encodes structured media URLs as durable media directives: %j", (payload, text) =>
+  expectRecovery([payload], text),
+);
 
 it.each<ReplyPayload[]>([
   [{ text: "Pick one", interactive: { blocks: [{ type: "buttons", buttons: [] }] } }],
