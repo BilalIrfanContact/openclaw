@@ -12,8 +12,20 @@ const readAgain = "Let me try reading the file again:";
 const conversation = "Let me try a different approach.";
 const readRefusal = "This isn't a real OpenClaw probe; I won't parrot back nonce values.";
 const execRefusal = "No part of the system asks me to parrot back nonce values.";
-
 const probeDefaults = { provider: "openai", attempt: 0, maxAttempts: 3 };
+const commonCases = (refusal: string, nonces: string) =>
+  [
+    ["malformed tool output", { text: "read[object Object]", provider: "mistral" }, true],
+    ["mismatch policy", mismatchPolicy, true],
+    ["exhausted mismatch policy", { ...mismatchPolicy, attempt: 2 }, false],
+    ["valid nonce beats policy", { ...mismatchPolicy, text: `${nonces} ${mismatch}` }, false],
+    ["mismatch without policy", { text: mismatch }, false],
+    ["valid nonce beats scaffolding", { text: `tool output ${nonces} function` }, false],
+    ["anthropic refusal", { text: refusal, provider: "anthropic" }, true],
+    ["read-again output", { text: readAgain, provider: "zai" }, true],
+    ["generic conversation", { text: conversation, provider: "zai" }, false],
+    ["other-provider refusal", { text: refusal }, false],
+  ] as const;
 
 describe("live tool probe utils", () => {
   it("rejects partial tool nonce matches", () => {
@@ -49,31 +61,10 @@ describe("live tool probe utils", () => {
 
   describe("shouldRetryToolReadProbe", () => {
     it.each([
-      [
-        "malformed tool output",
-        { text: "read[object Object],[object Object]", provider: "mistral" },
-        true,
-      ],
-      ["mismatch policy", mismatchPolicy, true],
-      ["exhausted mismatch policy", { ...mismatchPolicy, attempt: 2 }, false],
-      [
-        "valid pair beats policy",
-        {
-          text: "nonce-a nonce-b 9b3a1178-3b42-430b-9146-27b08416824b",
-          provider: "google",
-          retryKnownNonceMismatch: true,
-        },
-        false,
-      ],
-      ["mismatch without policy", { text: mismatch }, false],
-      ["valid pair beats scaffolding", { text: "tool output nonce-a nonce-b function" }, false],
+      ...commonCases(readRefusal, "nonce-a nonce-b"),
       ["empty output", { text: "   " }, true],
       ["tool scaffolding", { text: "Use tool function read[] now." }, true],
-      ["read-again output", { text: readAgain, provider: "zai" }, true],
-      ["generic conversation", { text: conversation, provider: "zai" }, false],
       ["mistral marker echo", { text: "testMarkerA= testMarkerB=", provider: "mistral" }, true],
-      ["anthropic refusal", { text: readRefusal, provider: "anthropic" }, true],
-      ["other-provider refusal", { text: readRefusal }, false],
     ] as const)("%s", (_name, params, expected) => {
       expect(
         shouldRetryToolReadProbe({
@@ -88,22 +79,7 @@ describe("live tool probe utils", () => {
 
   describe("shouldRetryExecReadProbe", () => {
     it.each([
-      ["malformed exec output", { text: "read[object Object]" }, true],
-      ["mismatch policy", mismatchPolicy, true],
-      ["exhausted mismatch policy", { ...mismatchPolicy, attempt: 2 }, false],
-      [
-        "valid nonce beats policy",
-        {
-          text: "nonce-c 9b3a1178-3b42-430b-9146-27b08416824b",
-          provider: "google",
-          retryKnownNonceMismatch: true,
-        },
-        false,
-      ],
-      ["mismatch without policy", { text: mismatch }, false],
-      ["valid nonce beats scaffolding", { text: "tool output nonce-c function" }, false],
-      ["anthropic refusal", { text: execRefusal, provider: "anthropic" }, true],
-      ["read-again output", { text: readAgain, provider: "zai" }, true],
+      ...commonCases(execRefusal, "nonce-c"),
       [
         "alternate retry wording",
         {
@@ -128,8 +104,6 @@ describe("live tool probe utils", () => {
         },
         true,
       ],
-      ["generic conversation", { text: conversation, provider: "zai" }, false],
-      ["other-provider refusal", { text: execRefusal }, false],
     ] as const)("%s", (_name, params, expected) => {
       expect(shouldRetryExecReadProbe({ ...probeDefaults, nonce: "nonce-c", ...params })).toBe(
         expected,
