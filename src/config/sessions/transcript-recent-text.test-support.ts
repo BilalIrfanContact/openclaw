@@ -25,6 +25,8 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
   const read = (
     options: Omit<Parameters<typeof readRecent>[0], "agentId" | "sessionKey" | "storePath"> = {},
   ) => readRecent({ ...scope(), ...options });
+  const persist = (messages: Parameters<typeof persistSessionTranscriptTurn>[1]["messages"]) =>
+    persistSessionTranscriptTurn(scope(), { updateMode: "none", messages });
   it("restores only confirmed final message-tool replies when requested", async () => {
     await writeTranscriptStore();
     const mirrors = [
@@ -51,10 +53,8 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
 
   it("reads recent context only from the active transcript branch", async () => {
     await writeTranscriptStore();
-    const target = scope();
-    await persistSessionTranscriptTurn(target, {
-      updateMode: "none",
-      messages: (
+    await persist(
+      (
         [
           ["root-user", null, "user", "keep this branch", 1_000],
           ["active-reply", "root-user", "assistant", "active answer", 2_000],
@@ -63,8 +63,8 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
       ).map(([id, parentId, role, content, timestamp]) =>
         transcriptMessage(id, parentId, { role, content, timestamp }),
       ),
-    });
-    await appendTranscriptEvent(target, {
+    );
+    await appendTranscriptEvent(scope(), {
       type: "leaf",
       id: "active-leaf",
       parentId: "abandoned-reply",
@@ -87,22 +87,20 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
       parentId: index === 0 ? "active-reply" : `future-${index - 1}`,
       message: { role: "user" as const, content: `future ${index}`, timestamp: 10_000 + index },
     }));
-    await persistSessionTranscriptTurn(target, { updateMode: "none", messages: futureMessages });
+    await persist(futureMessages);
     await expect(read({ beforeTimestampMs: 2_500, limit: 2 })).resolves.toEqual(expected);
   });
 
   it("keeps recent user context on one snapshot while a reply is appended", async () => {
     await writeTranscriptStore();
-    const transcriptScope = scope();
-    await persistSessionTranscriptTurn(transcriptScope, {
-      updateMode: "none",
-      messages: Array.from({ length: 300 }, (_, index) =>
+    await persist(
+      Array.from({ length: 300 }, (_, index) =>
         transcriptMessage(`snapshot-${index}`, index === 0 ? null : `snapshot-${index - 1}`, {
           role: index === 0 || index === 50 ? "user" : "assistant",
           content: `context ${index}`,
         }),
       ),
-    });
+    );
     const readPage = historyWorkerRuntime.readSessionHistoryPageInWorker;
     let appended = false;
     const reader = vi.spyOn(historyWorkerRuntime, "readSessionHistoryPageInWorker");
@@ -110,15 +108,12 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
       const page = await readPage(request, signal);
       if (!appended) {
         appended = true;
-        await persistSessionTranscriptTurn(transcriptScope, {
-          updateMode: "none",
-          messages: [
-            transcriptMessage("appended-reply", "snapshot-299", {
-              role: "assistant",
-              content: "reply appended after the read snapshot",
-            }),
-          ],
-        });
+        await persist([
+          transcriptMessage("appended-reply", "snapshot-299", {
+            role: "assistant",
+            content: "reply appended after the read snapshot",
+          }),
+        ]);
       }
       return page;
     });

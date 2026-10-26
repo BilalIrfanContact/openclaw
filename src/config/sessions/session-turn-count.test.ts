@@ -36,6 +36,15 @@ describe("transcript turn work budget", () => {
       const resolved = resolveSqliteTranscriptScope(scope);
       const databaseOptions = toDatabaseOptions(resolved);
       const database = openOpenClawAgentDatabase(databaseOptions);
+      const select = (columns: string) =>
+        database.db
+          .prepare(`SELECT ${columns} FROM session_windows WHERE session_id = ?`)
+          .get(scope.sessionId);
+      const fresh = Array.from({ length: count }, (_, index) => ({
+        eventId: `fresh-${index}`,
+        parentId: index ? `fresh-${index - 1}` : "seed",
+        message: { role: index % 2 ? "assistant" : "user", content: `Message ${index}` },
+      }));
       const kernel = createSessionTranscriptTurnKernel(resolved, {
         expectedSessionId: scope.sessionId,
         sessionFile: scope.sessionKey,
@@ -70,38 +79,22 @@ describe("transcript turn work budget", () => {
       events.subscribe(observe);
       let result;
       try {
-        result = commit(
-          Array.from({ length: count }, (_, index) => ({
-            eventId: `fresh-${index}`,
-            message: { role: index % 2 ? "assistant" : "user", content: `Message ${index}` },
-          })),
-        );
+        result = commit(fresh.map(({ eventId, message }) => ({ eventId, message })));
       } finally {
         events.unsubscribe(observe);
       }
-      expect(
-        result.appendedMessages.map((message) => ({
-          id: message.messageId,
-          appended: message.appended,
-          parent: message.effectiveParentId,
-        })),
-      ).toEqual(
-        Array.from({ length: count }, (_, index) => ({
-          id: `fresh-${index}`,
+      expect(result.appendedMessages).toMatchObject(
+        fresh.map(({ eventId, parentId }) => ({
+          messageId: eventId,
           appended: true,
-          parent: index ? `fresh-${index - 1}` : "seed",
+          effectiveParentId: parentId,
         })),
       );
-      expect(
-        database.db
-          .prepare(
-            "SELECT transcript_updated_at, transcript_observed_at FROM session_windows WHERE session_id = ?",
-          )
-          .get(scope.sessionId),
-      ).toEqual({ transcript_updated_at: 20000 + count, transcript_observed_at: 20000 });
-      const window = database.db
-        .prepare("SELECT row_transcript_json FROM session_windows WHERE session_id = ?")
-        .get(scope.sessionId) as { row_transcript_json: string };
+      expect(select("transcript_updated_at, transcript_observed_at")).toEqual({
+        transcript_updated_at: 20000 + count,
+        transcript_observed_at: 20000,
+      });
+      const window = select("row_transcript_json") as { row_transcript_json: string };
       expect(JSON.parse(window.row_transcript_json).lastAssistantMessage).toEqual(
         count % 2 ? "unchanged" : { text: `Message ${count - 1}`, timestamp: 5000 },
       );
@@ -118,10 +111,7 @@ describe("transcript turn work budget", () => {
           .all(scope.sessionId),
       ).toEqual([
         { event_id: "seed", parent_id: null },
-        ...Array.from({ length: count }, (_, index) => ({
-          event_id: `fresh-${index}`,
-          parent_id: index ? `fresh-${index - 1}` : "seed",
-        })),
+        ...fresh.map(({ eventId, parentId }) => ({ event_id: eventId, parent_id: parentId })),
       ]);
       // Budget is the real writer's SQL, including its required transaction envelope.
       expect(statements).toBeGreaterThan(0);

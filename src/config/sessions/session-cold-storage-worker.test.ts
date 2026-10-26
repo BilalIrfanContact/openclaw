@@ -46,9 +46,9 @@ afterAll(async () => {
   await state.cleanup();
 });
 
-function prepare() {
+function prepare(options = fixture.options) {
   return prepareSessionColdBatchInWorker({
-    databaseOptions: fixture.options,
+    databaseOptions: options,
     admissionIdentities: [],
     liveSessionKeys: [],
     cooledSessionIds: [],
@@ -56,6 +56,12 @@ function prepare() {
     maxTranscripts: 128,
     maxBytes: 4096,
   });
+}
+
+function largestEventBytes(events: typeof fixture.original.events) {
+  return events
+    .filter((event) => event.session_id === historicalId)
+    .reduce((bytes, event) => Math.max(bytes, Buffer.byteLength(event.event_json)), 0);
 }
 
 it("rejects oversized raw event bytes without preparing a transcript snapshot", async () => {
@@ -72,9 +78,7 @@ it("rejects oversized raw event bytes without preparing a transcript snapshot", 
   expect(batch.oversizedTranscripts).toEqual([
     {
       sessionId: historicalId,
-      lowerBoundBytes: fixture.original.events
-        .filter((event) => event.session_id === historicalId)
-        .reduce((bytes, event) => Math.max(bytes, Buffer.byteLength(event.event_json)), 0),
+      lowerBoundBytes: largestEventBytes(fixture.original.events),
     },
   ]);
   expect(batch.envelopeBytes).toBe(0);
@@ -82,31 +86,18 @@ it("rejects oversized raw event bytes without preparing a transcript snapshot", 
 
 it("bounds UTF-16 stores by UTF-8 bytes instead of stored UTF-16 bytes", async () => {
   const storePath = state.statePath("oversized-utf16.sqlite");
-  const seed = new DatabaseSync(storePath);
-  try {
+  {
+    using seed = new DatabaseSync(storePath);
     seed.exec(
       "PRAGMA encoding='UTF-16le'; CREATE TABLE encoding_probe(value TEXT); DROP TABLE encoding_probe;",
     );
-  } finally {
-    seed.close();
   }
   const utf16 = await createSessionColdStorageFixture(storePath);
-  const batch = await prepareSessionColdBatchInWorker({
-    databaseOptions: utf16.options,
-    admissionIdentities: [],
-    liveSessionKeys: [],
-    cooledSessionIds: [],
-    beforeMs: 100,
-    maxTranscripts: 128,
-    maxBytes: 4096,
-  });
-  const utf8Bytes = utf16.original.events
-    .filter((event) => event.session_id === historicalId)
-    .reduce((bytes, event) => Math.max(bytes, Buffer.byteLength(event.event_json)), 0);
+  const batch = await prepare(utf16.options);
   const [oversized] = batch.oversizedTranscripts;
   expect(oversized?.sessionId).toBe(historicalId);
   // Stored UTF-16 bytes double ASCII text; a larger "lower bound" would skip archivable windows.
-  expect(oversized?.lowerBoundBytes).toBeLessThanOrEqual(utf8Bytes);
+  expect(oversized?.lowerBoundBytes).toBeLessThanOrEqual(largestEventBytes(utf16.original.events));
 });
 
 it("archives the next eligible window in the same pass after an oversized window", async () => {
