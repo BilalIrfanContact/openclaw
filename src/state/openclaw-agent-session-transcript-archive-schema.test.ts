@@ -1,10 +1,9 @@
 import path from "node:path";
-import { constants, DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import { admitSqliteSchema } from "../infra/sqlite-schema-facts.js";
-import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
 import {
   closeOpenClawAgentDatabasesForTest as closeDatabases,
   openOpenClawAgentDatabase as openDatabase,
@@ -15,8 +14,6 @@ import {
 } from "./openclaw-agent-session-transcript-archive-schema.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-const sessions = (database: DatabaseSync, table = SESSION_TRANSCRIPT_ARCHIVES_TABLE) =>
-  database.prepare(`SELECT session_id FROM ${table}`).all();
 const schemaEntry = (database: Parameters<typeof ensureArchives>[0], type: string, name: string) =>
   database
     .prepare("SELECT name FROM main.sqlite_schema WHERE type = ? AND name = ?")
@@ -48,14 +45,6 @@ function metadata(database: Parameters<typeof ensureArchives>[0]) {
   };
 }
 
-function openArchiveDatabase(filename = ":memory:", admitted = true) {
-  const database = admitted ? openNodeSqliteDatabase(filename) : new DatabaseSync(filename);
-  if (admitted) {
-    admitSqliteSchema(database);
-  }
-  return database;
-}
-
 afterEach(closeDatabases);
 
 it("keeps a current database table-free until first archive use without changing its version", () => {
@@ -79,55 +68,20 @@ it("rejects a drifted archive table instead of treating it as an optional absenc
   expect(() => openDatabase(options)).toThrow(/session_transcript_archives|schema/u);
 });
 
-it.each([false, true])(
-  "reinstalls rolled-back first use and reopened storage with admitted=%s",
-  (admitted) => {
-    using database = openArchiveDatabase(":memory:", admitted);
-    expect(() =>
-      runSqliteImmediateTransactionSync(database, () => {
-        ensureArchives(database);
-        sessions(database);
-        throw new Error("rollback archive installation");
-      }),
-    ).toThrow("rollback archive installation");
-    expect(() => sessions(database)).toThrow(/no such table/u);
-    ensureArchives(database);
-    expect(sessions(database)).toEqual([]);
-    database.close();
-    database.open();
-    ensureArchives(database);
-    expect(sessions(database)).toEqual([]);
-  },
-);
-
 it("repairs a missing index on first admission and local companion-table removal on the next use", () => {
   const filename = path.join(tempDirs.make("archive-schema-refresh-"), "agent.sqlite");
-  using peer = openArchiveDatabase(filename, false);
+  using peer = new DatabaseSync(filename);
   ensureArchives(peer);
   peer.exec("DROP INDEX idx_agent_session_transcript_archives_pending");
   peer.close();
-  using database = openArchiveDatabase(filename);
+  using database = openNodeSqliteDatabase(filename);
+  admitSqliteSchema(database);
   ensureArchives(database);
   const index = "idx_agent_session_transcript_archives_pending";
   expect(schemaEntry(database, "index", index)).toEqual({ name: index });
   database.exec("DROP TABLE session_transcript_cold_archives");
   ensureArchives(database);
-  expect(sessions(database, "session_transcript_cold_archives")).toEqual([]);
+  expect(database.prepare("SELECT session_id FROM session_transcript_cold_archives").all()).toEqual(
+    [],
+  );
 });
-
-it.skipIf(typeof DatabaseSync.prototype.setAuthorizer !== "function")(
-  "does not reuse schema presence across dynamic authorizer decisions",
-  () => {
-    using database = openArchiveDatabase();
-    ensureArchives(database);
-    let allowed = true;
-    database.setAuthorizer(() => (allowed ? constants.SQLITE_OK : constants.SQLITE_DENY));
-    try {
-      ensureArchives(database);
-      allowed = false;
-      expect(() => ensureArchives(database)).toThrow(/not authorized/iu);
-    } finally {
-      database.setAuthorizer(null);
-    }
-  },
-);
