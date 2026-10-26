@@ -10,6 +10,7 @@ import {
 import { CodexAppServerClient as Client } from "./client.js";
 import {
   maybeCompactCodexAppServerSession as compact,
+  compactionParams,
   writeCompactionTestBinding as writeBinding,
 } from "./compact.test-support.js";
 import { codexNativeSubagentMonitorRuntime } from "./native-subagent-monitor.js";
@@ -71,16 +72,9 @@ async function exerciseRetention({ tempRoot }: { tempRoot: string }) {
       await Promise.all(pendingNotifications.splice(0));
     };
     expect(await retainThread(client, "thread-1")).toBe(true);
-    const result = await compact(
-      {
-        sessionId: "session-1",
-        sessionKey: "agent:main:session-1",
-        sessionFile: await writeBinding(tempRoot),
-        workspaceDir: tempRoot,
-        trigger: "manual",
-      },
-      { clientFactory: async () => client },
-    );
+    const result = await compact(compactionParams(tempRoot, await writeBinding(tempRoot)), {
+      clientFactory: async () => client,
+    });
     expect(result).toMatchObject({ ok: true, compacted: true });
     expect(await retainThread(client, "parent-thread")).toBe(true);
     const parent = await codexNativeSubagentMonitorRuntime.register({

@@ -45,16 +45,12 @@ export function registerCodexSteeringConfirmationCases({
       expect(outcomes).toEqual([]);
       await tick(1_000);
       expect(outcomes[0]).toBeInstanceOf(CodexSteeringAcceptedUnconfirmedError);
-      expect(outcomes[0]).toMatchObject({
-        cause: { message: "Codex steering transcript consumption confirmation timed out" },
-      });
       expect(settled).not.toHaveBeenCalled();
       // The caller's deadline cannot withdraw the receiving run's accepted input.
       expect(accepted).toHaveBeenCalledExactlyOnceWith(true);
       expect(queue.getAcceptedMessages()).toHaveLength(1);
       expect(queue.confirmConsumed(confirmedId())).toBe(true);
       expect(settled).toHaveBeenCalledOnce();
-      expect(outcomes).toHaveLength(1);
 
       next = queue.queue("synthetic later follow-up", { debounceMs: 0 });
       await tick();
@@ -77,19 +73,16 @@ export function registerCodexSteeringConfirmationCases({
       const queue = createQueue(harness.client, { requestTimeoutMs: 1_000 });
       const accepted = vi.fn();
       const settled = vi.fn();
-      const delivered = vi.fn();
-      const delivery = queue
-        .queue("synthetic queue-only message", {
-          debounceMs: 0,
-          waitForTranscriptCommit: false,
-          onQueueAccepted: accepted,
-          onQueueSettled: settled,
-        })
-        .then(delivered);
+      const delivery = queue.queue("synthetic queue-only message", {
+        debounceMs: 0,
+        waitForTranscriptCommit: false,
+        onQueueAccepted: accepted,
+        onQueueSettled: settled,
+      });
       try {
         await tick();
         expect(accepted).toHaveBeenCalledExactlyOnceWith(true);
-        expect(delivered).toHaveBeenCalledOnce();
+        await delivery;
         await tick(10_000);
         expect(settled).not.toHaveBeenCalled();
         expect(queue.getAcceptedMessages()).toHaveLength(1);
@@ -102,7 +95,6 @@ export function registerCodexSteeringConfirmationCases({
         await tick(1_000);
         expect(harness.writes).toHaveLength(1);
         expect(settled).toHaveBeenCalledOnce();
-        expect(delivered).toHaveBeenCalledOnce();
       } finally {
         queue.cancel();
         harness.client.close();

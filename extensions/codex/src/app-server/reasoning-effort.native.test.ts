@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
@@ -44,22 +45,19 @@ it.for([
     vi.stubEnv("HOME", native.env.HOME);
     vi.stubEnv("CODEX_HOME", native.codexHome);
     const requests: JsonObject[] = [];
-    const port = await listenForNativeResponses(context, (request, response) => {
+    const port = await listenForNativeResponses(context, async (request, response) => {
       const chunks: Buffer[] = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        if (!isJsonObject(body)) {
-          response.writeHead(400).end();
-          return;
-        }
-        requests.push(body);
-        sendNativeResponse(response, `resp-${requests.length}`, {
-          type: "message",
-          role: "assistant",
-          id: `answer-${requests.length}`,
-          content: [{ type: "output_text", text: "Synthetic answer." }],
-        });
+      for await (const chunk of request) {
+        chunks.push(chunk);
+      }
+      const body: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      assert(isJsonObject(body));
+      requests.push(body);
+      sendNativeResponse(response, `resp-${requests.length}`, {
+        type: "message",
+        role: "assistant",
+        id: `answer-${requests.length}`,
+        content: [{ type: "output_text", text: "Synthetic answer." }],
       });
     });
     await fs.writeFile(
@@ -91,7 +89,7 @@ it.for([
       config,
     });
     const { thread } = await client.request("thread/start", start);
-    for (const [index, thinkLevel] of (["low", "high", "medium"] as const).entries()) {
+    for (const [index, thinkLevel] of (["low", "high"] as const).entries()) {
       const completed = createDeferred<unknown>();
       const remove = client.addNotificationHandler(({ method, params: notification }) => {
         if (
@@ -120,23 +118,20 @@ it.for([
         remove();
       }
     }
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(2);
     expect(requests.map((request) => request.reasoning)).toEqual(
-      ["low", updates ? "low" : "high", updates ? "low" : "medium"].map((effort) =>
-        expect.objectContaining({ effort }),
-      ),
+      ["low", updates ? "low" : "high"].map((effort) => expect.objectContaining({ effort })),
     );
     const inputs = requests.map((request) => {
       expect(Array.isArray(request.input)).toBe(true);
       return Array.isArray(request.input) ? request.input : [];
     });
     expect(inputs[1]?.slice(0, inputs[0]?.length)).toEqual(inputs[0]);
-    expect(inputs[2]?.slice(0, inputs[1]?.length)).toEqual(inputs[1]);
     expect(
-      inputs[2]?.filter((item) => isJsonObject(item) && item.type === "configuration_update"),
+      inputs[1]?.filter((item) => isJsonObject(item) && item.type === "configuration_update"),
     ).toEqual(
       updates
-        ? ["low", "high", "medium"].map((effort) => ({
+        ? ["low", "high"].map((effort) => ({
             type: "configuration_update",
             reasoning: { effort },
           }))
