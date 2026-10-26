@@ -1493,13 +1493,22 @@ async function settingsSection(
 }
 
 async function prepareModelPicker(page: Page) {
-  await prepareChat(page);
-  await page.locator(`${activePane} .agent-chat__input textarea`).first().click();
+  await prepareFirstModelPicker(page);
   const trigger = page.locator(`${activePane} [data-chat-model-select]`);
-  await trigger.waitFor({ state: "visible" });
   await trigger.click();
   await page.locator("[data-chat-model-search]").waitFor();
   await trigger.click();
+}
+
+async function prepareFirstModelPicker(page: Page) {
+  await prepareChat(page);
+  await page.locator(`${activePane} .agent-chat__input textarea`).first().click();
+  await page
+    .locator(`${activePane} [data-chat-model-select][aria-disabled="false"][aria-busy="false"]`)
+    .waitFor();
+  if (await page.locator(".chat-controls__model-menu, [data-chat-model-search]").count()) {
+    throw new Error("First-open measurement requires an unopened picker");
+  }
 }
 
 async function searchModels(page: Page) {
@@ -2326,6 +2335,31 @@ export const interactionScenarios: readonly InteractionScenario[] = [
       if ((await gateway.getRequests("config.schema")).length !== schemaReads) {
         throw new Error("Warm Settings tabs must retain the loaded config schema");
       }
+    },
+  },
+  {
+    id: "model-picker-first-open-search",
+    route: controlUiSessionPath(sessionKeys[0]),
+    expected: "The unopened 1,000-model picker focuses search and filters to Warm model 0999.",
+    prepare: prepareFirstModelPicker,
+    run: async (page) => {
+      const started = await page.evaluate(() => performance.now());
+      const trigger = page.locator(`${activePane} [data-chat-model-select]`);
+      if ((page.viewportSize()?.width ?? 1440) < 600) {
+        await trigger.tap();
+      } else {
+        await trigger.click();
+      }
+      await page.locator("[data-chat-model-search]").waitFor();
+      await page.waitForFunction(
+        () => document.activeElement === document.querySelector("[data-chat-model-search]"),
+      );
+      const firstOpenReadyMs = await page.evaluate((start) => performance.now() - start, started);
+      await searchModels(page);
+      if (!(await page.locator('[data-chat-model-option="example/model-999"]').isEnabled())) {
+        throw new Error("First-open search result is not selectable");
+      }
+      return { firstOpenReadyMs };
     },
   },
   {

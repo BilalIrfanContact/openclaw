@@ -7,7 +7,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { chromium, type CDPSession } from "playwright";
+import { chromium, type CDPSession, type ElementHandle } from "playwright";
 import { CONTROL_UI_BOOTSTRAP_CONFIG_PATH } from "../src/gateway/control-ui-contract.js";
 import { captureSessionRowGeneration } from "../src/gateway/session-row-identity.js";
 import { shareSidebarSessionRows } from "../src/gateway/session-row-presentation.js";
@@ -43,6 +43,8 @@ const { values } = parseArgs({
     "first-pair-screenshots": { type: "boolean", default: false },
     "aa-control": { type: "boolean", default: false },
     "update-reload": { type: "boolean", default: false },
+    "asset-latency-ms": { type: "string", default: "0" },
+    "warm-picker": { type: "boolean", default: false },
   },
 });
 type Scenario = "brief-drop" | "long-sleep" | "restart" | "update";
@@ -50,15 +52,18 @@ const scenarios = (values.smoke ? ["brief-drop"] : values.scenarios.split(",")) 
 const rtts = values.smoke ? [100] : values.rtt.split(",").map(Number);
 const paneCounts = values.smoke ? [1] : values.panes.split(",").map(Number);
 const pairs = values.smoke ? 1 : Number(values.pairs);
+const assetLatencyMs = Number(values["asset-latency-ms"]);
 if (
   !Number.isInteger(pairs) ||
   pairs < 1 ||
+  !Number.isFinite(assetLatencyMs) ||
+  assetLatencyMs < 0 ||
   scenarios.some((s) => !["brief-drop", "long-sleep", "restart", "update"].includes(s)) ||
   rtts.some((n) => !Number.isFinite(n) || n < 0) ||
   paneCounts.some((n) => n !== 1 && n !== 10)
 ) {
   throw new Error(
-    "Expected positive pairs; scenarios brief-drop,long-sleep,restart,update; nonnegative RTT; panes 1,10",
+    "Expected positive pairs; scenarios brief-drop,long-sleep,restart,update; nonnegative RTT/asset latency; panes 1,10",
   );
 }
 const output = path.resolve(values.output);
@@ -340,6 +345,7 @@ type Sample = {
     byMethod: Record<string, number>;
   };
   trace?: ReturnType<typeof summarizeInteractionTrace>;
+  retainedPicker?: { sameNode: true; mutationRequests: 0 };
   updateReload?: {
     wallMs: number;
     restoredBuildId: string;
@@ -425,9 +431,11 @@ async function writeSummary() {
         timeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
         trace: values.trace,
         updateReload: values["update-reload"],
+        assetLatencyMs,
+        warmPicker: values["warm-picker"],
         host: { platform: os.platform(), arch: os.arch(), cpus: os.cpus().length },
         notes: [
-          "RPC RTT is split across synthetic request/response delivery; HTTP assets are local in both profiles.",
+          "RPC RTT is split across synthetic request/response delivery; assetLatencyMs adds a fixed delay to HTTP requests and synthetic bootstrap responses, without bandwidth or loss emulation.",
           "Long sleep advances Date.now by 30 minutes with transport unavailable; native rendering and timer clocks remain real.",
           "Update stops at the safe server-updated prompt; it is not claimed as fully live recovery.",
           ...(values["update-reload"]
@@ -475,7 +483,7 @@ try {
       dir,
       upgradedDir,
       build: JSON.parse(raw),
-      server: await startControlUiBenchGatewayServer(dir),
+      server: await startControlUiBenchGatewayServer(dir, 0, assetLatencyMs),
     });
   }
   await writeFile(
@@ -488,6 +496,8 @@ try {
         rtts,
         paneCounts,
         updateReload: values["update-reload"],
+        assetLatencyMs,
+        warmPicker: values["warm-picker"],
         planned: pairs * scenarios.length * rtts.length * paneCounts.length * servers.length,
         acceptance:
           "Ten interleaved pairs, median <=5% regression and p95 no worse; target -40% brief-drop/sleep and no reconnect task >100ms. A/A control on loaded hosts.",
@@ -523,6 +533,7 @@ try {
             let tracing = false;
             const events: unknown[] = [];
             const listCalls: unknown[] = [];
+            let retainedMenu: ElementHandle<HTMLElement | SVGElement> | null = null;
             try {
               if (slot.upgradedDir) {
                 await slot.server.selectBuild(slot.dir);
@@ -598,9 +609,12 @@ try {
                 },
               );
               let servedBuildId = slot.build.buildId;
-              if (values["update-reload"]) {
-                await page.route(`**${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`, (route) =>
-                  route.fulfill({
+              if (values["update-reload"] || assetLatencyMs > 0) {
+                await page.route(`**${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`, async (route) => {
+                  if (assetLatencyMs > 0) {
+                    await delay(assetLatencyMs);
+                  }
+                  await route.fulfill({
                     body: JSON.stringify(
                       createControlUiMockBootstrapConfig({
                         ...fixture,
@@ -609,8 +623,8 @@ try {
                     ),
                     contentType: "application/json",
                     status: 200,
-                  }),
-                );
+                  });
+                });
               }
               await page.addInitScript({
                 content: `;(() => { const __name = (v) => v; (${installTransport.toString()})(${JSON.stringify({ rtt, updateReload: values["update-reload"] })}); })();`,
@@ -658,6 +672,26 @@ try {
                 .locator(".chat-pane-cache__pane--visible .agent-chat__composer-combobox textarea")
                 .first()
                 .fill("Synthetic unsent reconnect draft");
+              if (values["warm-picker"]) {
+                const trigger = page.locator(
+                  ".chat-pane-cache__pane--active [data-chat-model-select]",
+                );
+                await trigger.click();
+                const search = page.locator("[data-chat-model-search]");
+                await search.waitFor();
+                retainedMenu = await page.locator(".chat-controls__model-menu").elementHandle();
+                if (!retainedMenu) {
+                  throw new Error("Opened picker did not retain a menu node");
+                }
+                await search.fill("Warm model 0999");
+                await page.locator('[data-chat-model-option="example/model-999"]').waitFor();
+                await search.fill("");
+                await trigger.click();
+                await page.locator(".chat-controls__model-menu").waitFor({ state: "hidden" });
+                await page
+                  .locator(".chat-pane-cache__pane--active .agent-chat__composer-combobox textarea")
+                  .click();
+              }
               await settleSidebarBackgroundWork(page);
               result.stage = "transport-drop";
               cdp = await context.newCDPSession(page);
@@ -856,6 +890,25 @@ try {
                   ((after[metric!] ?? 0) - (before[metric!] ?? 0)) * 1000,
                 );
               }
+              if (retainedMenu && scenario !== "update") {
+                if (!(await retainedMenu.evaluate((node) => node.isConnected))) {
+                  throw new Error("Reconnect replaced the retained picker menu");
+                }
+                await page
+                  .locator(".chat-pane-cache__pane--active [data-chat-model-select]")
+                  .click();
+                await retainedMenu.waitForElementState("visible");
+                await page.locator("[data-chat-model-search]").fill("Warm model 0999");
+                await page.locator('[data-chat-model-option="example/model-999"]').waitFor();
+                const mutations = [
+                  ...(await gateway.getRequests("sessions.patch")),
+                  ...(await gateway.getRequests("chat.send")),
+                ];
+                if (mutations.length) {
+                  throw new Error("Retained-picker recovery dispatched a mutation");
+                }
+                result.retainedPicker = { sameNode: true, mutationRequests: 0 };
+              }
               if (scenario === "update" && values["update-reload"]) {
                 result.stage = "update-reload-click";
                 const click = await page.evaluate(() => {
@@ -904,13 +957,13 @@ try {
                     ),
                   };
                 }, click.epoch);
-                if (
-                  [...result.rpc!, ...result.updateReload!.rpc].some(
-                    (row) => row.method === "chat.send",
-                  )
-                ) {
-                  throw new Error("Update reload dispatched the unsent draft");
-                }
+              }
+              if (
+                [...result.rpc!, ...(result.updateReload?.rpc ?? [])].some(
+                  (row) => row.method === "chat.send",
+                )
+              ) {
+                throw new Error("Reconnect dispatched the unsent draft");
               }
               if (errors.length) {
                 throw new Error(errors.join("\n"));
