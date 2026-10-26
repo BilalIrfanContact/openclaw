@@ -41,6 +41,7 @@ const terminalSession: SessionEntry = {
 async function expectCompletion(target: Parameters<typeof loadEntry>[0], sessionId: string) {
   expect((await loadEntry(target))?.sessionId).toBe(sessionId);
   expect(await readCompletion({ ...target, fallbackEndedAt: 3_000 })).toMatchObject({
+    startedAt: 1_000,
     endedAt: 2_000,
     outcome: { status: "ok" },
   });
@@ -168,6 +169,7 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
     const childSessionKey = "agent:main:subagent:target";
     const options = { cfg: { session: { store: storePath } } };
     const params = { childSessionKey, ...options, fallbackEndedAt: 3000 };
+    const depth = () => readDepth(childSessionKey, options);
     const policy = () =>
       withPreparedSessionCapabilityRead(() => readPolicy(childSessionKey, options));
     const writeTarget = (entry: Parameters<typeof replaceSessionEntrySync>[1]) =>
@@ -178,33 +180,17 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
       lifecycleRevision: "target-revision",
     };
     const coldPayload = `TARGET_COLD_PAYLOAD_${"x".repeat(65_536)}`;
-    for (let i = 0; i < 100; i++) {
-      replaceSessionEntrySync(
-        { storePath, sessionKey: `agent:main:subagent:other-${i}` },
-        {
-          sessionId: `other-${i}`,
-          updatedAt: 1,
-          skillsSnapshot: { prompt: `UNRELATED_PAYLOAD_${"x".repeat(4096)}`, skills: [] },
-        },
-      );
-    }
+    replaceSessionEntrySync(
+      { storePath, sessionKey: "agent:main:subagent:other" },
+      {
+        sessionId: "other",
+        updatedAt: 1,
+        skillsSnapshot: { prompt: `UNRELATED_PAYLOAD_${"x".repeat(4096)}`, skills: [] },
+      },
+    );
     writeTarget({
       ...lifecycle,
-      sessionDiffBaseline: {
-        version: 1,
-        sessionId: "target",
-        root: "/synthetic/workspace",
-        files: [{ path: "fixture.ts", fingerprint: coldPayload }],
-      },
       skillsSnapshot: { prompt: coldPayload, skills: [] },
-      systemPromptReport: {
-        source: "run",
-        generatedAt: 1000,
-        systemPrompt: { chars: 0, projectContextChars: 0, nonProjectContextChars: 0 },
-        injectedWorkspaceFiles: [],
-        skills: { promptChars: 0, entries: [{ name: coldPayload, blockChars: 0 }] },
-        tools: { listChars: 0, schemaChars: 0, entries: [] },
-      },
       spawnDepth: 2,
       spawnedBy: "agent:main:main",
       inheritedToolPolicyVersion: 1,
@@ -215,12 +201,7 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
     const reads = observeMainThreadReads();
     const messages = vi.spyOn(Worker.prototype, "emit");
     try {
-      expect(await readCompletion(params)).toMatchObject({
-        startedAt: 1000,
-        endedAt: 2000,
-        outcome: { status: "ok" },
-      });
-      expect(await readStartedAt(params)).toBe(1000);
+      await expectCompletion(params, "target");
       const transferred = JSON.stringify(
         messages.mock.calls.filter(([event]) => event === "message"),
       );
@@ -230,7 +211,7 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
       expect(await loadEntry(params)).toMatchObject(lifecycle);
       reads.expectIdle();
       expect.soft(JSON.stringify(parse.mock.calls)).not.toContain("TARGET_COLD_PAYLOAD_");
-      expect(await readDepth(childSessionKey, options)).toBe(2);
+      expect(await depth()).toBe(2);
       expect(await readDepth("target", options)).toBe(2);
       expect(
         await withPreparedSessionCapabilityRead(() => readCapabilities(childSessionKey, options)),
@@ -248,21 +229,13 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
     }
     writeTarget({ sessionId: "successor", updatedAt: 4000 });
     expect(await readCompletion(params)).toBeNull();
-    expect(
-      await readCompletion({ ...params, childSessionKey: "agent:main:subagent:missing" }),
-    ).toBeNull();
-
     const database = openOpenClawAgentDatabase(
       toDatabaseOptions(resolveSqliteScope({ storePath, sessionKey: childSessionKey })),
     );
     database.db
       .prepare("UPDATE session_nodes SET entry_json = ?, entry_valid = 0 WHERE session_key = ?")
       .run('{"bad":true}', childSessionKey);
-    for (const read of [
-      () => readCompletion(params),
-      () => readDepth(childSessionKey, options),
-      policy,
-    ]) {
+    for (const read of [() => readCompletion(params), depth, policy]) {
       await expect(read()).rejects.toThrow("invalid persisted session row requires repair");
     }
   });

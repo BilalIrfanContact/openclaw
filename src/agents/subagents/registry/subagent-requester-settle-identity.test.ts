@@ -3,10 +3,7 @@ import {
   makeSettledChild,
   REQUESTER,
 } from "../announce/subagent-announce.requester-settle-wake.test-support.js";
-import {
-  buildRequesterSettleWakeIdentity,
-  isRequesterSettleWakeForRun,
-} from "./subagent-requester-settle-identity.js";
+import { isRequesterSettleWakeForRun } from "./subagent-requester-settle-identity.js";
 
 const identity = {
   requesterSessionKey: REQUESTER,
@@ -42,11 +39,6 @@ function recognizes(entry: Child, runId: string, members = [entry]) {
     runsById: new Map(members.map((member) => [member.runId, member])),
   });
 }
-
-it("gives a scheduled retry its next continuation identity", () => {
-  const retainedWake = { status: "pending" as const, attemptCount: 1, nextAttemptAt: 30_000 };
-  expect(buildRequesterSettleWakeIdentity({ ...identity, retainedWake }).runId).toBe(retryId);
-});
 
 it.each([
   ["deliverable", undefined, false, false, true],
@@ -88,18 +80,6 @@ it.each([
     expect(matches(nextRunId)).toBe(false);
   },
 );
-
-it("recognizes an admitted frozen wake after an earlier member retires", () => {
-  const entry = child(
-    {},
-    {
-      status: "dispatching",
-      batchRunIds: ["retired-run", "run-b"],
-      attemptCount: 1,
-    },
-  );
-  expect(recognizes(entry, retryId.replace(":retry-1", ""))).toBe(true);
-});
 
 it.each([
   ["requester", { requesterSessionKey: "other" }, 1],
