@@ -87,10 +87,7 @@ it.each([
   "replays %s JSONL content %j through Anthropic",
   async (role, input, normalized, expected) => {
     const context = replayContext(role, input);
-    const replayed =
-      role === "assistant"
-        ? context.messages.find((message) => message.role === "assistant")
-        : context.messages.find((message) => message.role === "toolResult");
+    const replayed = context.messages.find((message) => message.role === role);
     expect(replayed?.content).toEqual(normalized);
     const payload = await anthropicPayload(context);
     const wire =

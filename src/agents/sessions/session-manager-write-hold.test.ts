@@ -1,28 +1,20 @@
-import path from "node:path";
 import { expect, it, vi } from "vitest";
 import {
   loadTranscriptEventsSync,
   readTranscriptMutationAtSync,
   resolveSessionTranscriptDatabasePath,
-  upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import { prepareTranscriptMessageAppend } from "../../config/sessions/session-accessor.sqlite-transcript-message-append.js";
 import { appendTranscriptMessageSnapshotSync } from "../../config/sessions/session-accessor.sqlite-transcript-write.js";
 import { resolveZstdCodec } from "../../infra/zstd-codec.js";
 import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
-import {
-  withOpenClawTestState,
-  type OpenClawTestState,
-} from "../../test-utils/openclaw-test-state.js";
 import type { AgentMessage } from "../runtime/index.js";
-import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
+import { makeAgentAssistantMessage } from "../test-helpers/agent-message-fixtures.js";
 import * as transcriptRedact from "../transcript-sanitize.js";
-import { sessionScope } from "./session-manager-fixtures.test-support.js";
+import { withSessionState } from "./session-manager-fixtures.test-support.js";
 import { SessionManager } from "./session-manager.js";
 
-async function setup(state: OpenClawTestState) {
-  const scope = sessionScope(path.join(state.sessionsDir(), "sessions.json"), "write-hold");
-  await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+function setup({ scope, state }: Parameters<Parameters<typeof withSessionState>[1]>[0]) {
   const manager = SessionManager.open(scope, state.workspaceDir);
   const parentId = manager.appendMessage({ role: "user", content: "first", timestamp: 1 });
   const { db } = openOpenClawAgentDatabase({
@@ -32,22 +24,20 @@ async function setup(state: OpenClawTestState) {
   return { scope, manager, parentId, db };
 }
 
-const assistantMessage = (text: string) => ({
-  role: "assistant" as const,
-  content: [{ type: "text" as const, text }],
-  api: "messages" as const,
-  provider: "anthropic",
-  model: "sonnet-4.6",
-  usage: createZeroUsageFixture(),
-  stopReason: "stop" as const,
-  timestamp: 2,
-});
+const assistantMessage = (text: string) =>
+  makeAgentAssistantMessage({
+    content: [{ type: "text" as const, text }],
+    api: "messages" as const,
+    provider: "anthropic",
+    model: "sonnet-4.6",
+    timestamp: 2,
+  });
 
 it.each(["assistant", "toolResult"] as const)(
   "prepares large %s payloads before the writer lock and preserves keyed replay",
   async (role) => {
-    await withOpenClawTestState({ label: "session-write-hold" }, async (state) => {
-      const { scope, manager, parentId, db } = await setup(state);
+    await withSessionState("session-write-hold", async (fixture) => {
+      const { scope, manager, parentId, db } = setup(fixture);
       const text = "```ts\nconst value = 42;\n```\n".repeat(8000);
       const content = [{ type: "text" as const, text }];
       const message: AgentMessage =
@@ -133,8 +123,8 @@ it.each(["assistant", "toolResult"] as const)(
 );
 
 it("rejects a stale generation and stores prepared messages under the rebased descendant", async () => {
-  await withOpenClawTestState({ label: "session-prepared-reparent" }, async (state) => {
-    const { scope, manager, parentId, db } = await setup(state);
+  await withSessionState("session-prepared-reparent", async (fixture) => {
+    const { scope, manager, parentId, db } = setup(fixture);
     const message = assistantMessage("prepared response ".repeat(8000));
     const prepared = prepareTranscriptMessageAppend({ message });
     expect(prepared?.persistedMessage).toEqual(message);
