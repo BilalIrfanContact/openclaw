@@ -95,7 +95,7 @@ function runtime(id = "openclaw", source: "model" | "session" = "model") {
 }
 
 function expectModel(
-  params: Partial<ModelInput>,
+  params: Parameters<typeof modelState>[0],
   expected: Partial<ReturnType<typeof resolveChatModelSelectState>>,
 ) {
   const { options, ...fields } = expected;

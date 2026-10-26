@@ -1601,7 +1601,10 @@ async function runFirstModelPicker(page: Page, recordPhases = false): Promise<In
       throw new Error("First-open search result is not selectable");
     }
     return recorder
-      ? { firstOpenReadyMs, ...(await recorder.evaluate((value, start) => value.finish(start), started)) }
+      ? {
+          firstOpenReadyMs,
+          ...(await recorder.evaluate((value, start) => value.finish(start), started)),
+        }
       : { firstOpenReadyMs };
   } finally {
     if (recorder) {
@@ -2450,7 +2453,8 @@ export const interactionScenarios: readonly InteractionScenario[] = [
   {
     id: "model-picker-first-open-phases",
     route: controlUiSessionPath(sessionKeys[0]),
-    expected: "The first-open picker exposes native input timestamps with the original action cadence.",
+    expected:
+      "The first-open picker exposes native input timestamps with the original action cadence.",
     diagnostic: "Native event listeners and post-action collection perturb timing.",
     explicitOnly: true,
     prepare: prepareFirstModelPicker,
