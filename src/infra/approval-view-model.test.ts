@@ -5,19 +5,7 @@ import type { ExecApprovalRequest } from "./exec-approvals.js";
 import type { PluginApprovalRequest } from "./plugin-approvals.js";
 
 const approvalRequestBase = { id: "approval-id", createdAtMs: 1, expiresAtMs: 2 };
-function pluginRequest(
-  request: Partial<PluginApprovalRequest["request"]> = {},
-): PluginApprovalRequest {
-  return {
-    ...approvalRequestBase,
-    id: "plugin-approval",
-    request: {
-      title: "Use protected tool",
-      description: "The plugin needs operator consent.",
-      ...request,
-    },
-  };
-}
+const pluginPayload = { title: "Use protected tool", description: "The plugin needs consent." };
 
 function approvalAction(
   approvalId: string,
@@ -68,10 +56,12 @@ describe("buildPendingApprovalView", () => {
 
   it("preserves plugin ownership, scope, and fail-closed decisions", () => {
     const request: PluginApprovalRequest = {
-      ...pluginRequest({
+      ...approvalRequestBase,
+      request: {
+        ...pluginPayload,
         scope: { kind: "external-post", target: "github", visibility: "public" },
         allowedDecisions: ["allow-once"],
-      }),
+      },
       id: "custom-id-without-prefix",
     };
     Object.defineProperty(request, "approvalKind", { value: "exec", enumerable: true });
@@ -118,7 +108,7 @@ describe("buildPendingApprovalView", () => {
     {
       request: {
         ...approvalRequestBase,
-        request: { title: "Use protected tool", description: "The plugin needs consent." },
+        request: pluginPayload,
       },
       metadata: [{ label: "Severity", value: "Warning" }],
     },

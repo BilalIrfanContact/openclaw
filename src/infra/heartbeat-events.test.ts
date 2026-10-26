@@ -9,10 +9,10 @@ import {
 
 type HeartbeatEventsModule = typeof import("./heartbeat-events.js");
 
-const heartbeatEventsModuleUrl = new URL("./heartbeat-events.ts", import.meta.url).href;
-
 async function importHeartbeatEventsModule(cacheBust: string): Promise<HeartbeatEventsModule> {
-  return (await import(`${heartbeatEventsModuleUrl}?t=${cacheBust}`)) as HeartbeatEventsModule;
+  return (await import(
+    `${new URL("./heartbeat-events.ts", import.meta.url).href}?t=${cacheBust}`
+  )) as HeartbeatEventsModule;
 }
 
 describe("heartbeat events", () => {
@@ -27,37 +27,19 @@ describe("heartbeat events", () => {
   });
 
   it.each([
-    {
-      status: "ok" as const,
-      completionStatus: "succeeded" as const,
-      delivered: true,
-      expected: "sent",
-    },
-    {
-      status: "ok" as const,
-      completionStatus: "succeeded" as const,
-      delivered: false,
-      expected: "ok-empty",
-    },
-    {
-      status: "error" as const,
-      completionStatus: "failed" as const,
-      delivered: false,
-      expected: "failed",
-    },
-    {
-      status: "ok" as const,
-      completionStatus: "unknown" as const,
-      delivered: false,
-      expected: "skipped",
-    },
-  ])(
-    "projects receipt settlement into the existing $expected diagnostic",
-    ({ expected, ...outcome }) => {
+    ["ok", "succeeded", true, "sent"],
+    ["ok", "succeeded", false, "ok-empty"],
+    ["error", "failed", false, "failed"],
+    ["ok", "unknown", false, "skipped"],
+  ] as const)(
+    "projects receipt settlement (%s, %s, delivered: %s) into %s",
+    (status, completionStatus, delivered, expected) => {
       emitLegacyHeartbeatCronOutcome({
         jobId: "converted",
         action: "finished",
-        ...outcome,
+        status,
+        completionStatus,
+        delivered,
         summary: "Synthetic automation result",
         durationMs: 12,
       });
@@ -65,7 +47,7 @@ describe("heartbeat events", () => {
         status: expected,
         preview: "Synthetic automation result",
         durationMs: 12,
-        silent: !outcome.delivered,
+        silent: !delivered,
       });
     },
   );
@@ -95,20 +77,10 @@ describe("heartbeat events", () => {
     },
   );
 
-  it("keeps an astral automation summary whole at the preview cap", () => {
-    emitLegacyHeartbeatCronOutcome({
-      jobId: "converted",
-      action: "finished",
-      status: "ok",
-      completionStatus: "succeeded",
-      delivered: true,
-      summary: `${"s".repeat(1999)}\u{1F600}summary tail`,
-    });
-    expect(getLastHeartbeatEvent()?.preview).toBe("s".repeat(1999));
-  });
-
-  it("keeps an automation summary that fits the preview cap unchanged", () => {
-    const summary = `${"s".repeat(1998)}\u{1F600}`;
+  it.each([
+    [`${"s".repeat(1999)}\u{1F600}summary tail`, "s".repeat(1999)],
+    [`${"s".repeat(1998)}\u{1F600}`, `${"s".repeat(1998)}\u{1F600}`],
+  ])("preserves whole code points at the preview cap", (summary, expected) => {
     emitLegacyHeartbeatCronOutcome({
       jobId: "converted",
       action: "finished",
@@ -117,7 +89,7 @@ describe("heartbeat events", () => {
       delivered: true,
       summary,
     });
-    expect(getLastHeartbeatEvent()?.preview).toBe(summary);
+    expect(getLastHeartbeatEvent()?.preview).toBe(expected);
   });
 
   it("delivers events to the Gateway callback and isolates its failures", () => {
