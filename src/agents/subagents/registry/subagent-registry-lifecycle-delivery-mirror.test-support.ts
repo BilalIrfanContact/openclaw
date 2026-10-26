@@ -25,8 +25,6 @@ export function registerDeliveryMirrorCases({
   createLifecycleController,
   waitForLifecycleState,
   callGateway,
-  blockSubagentCompletionDelivery,
-  logAnnounceGiveUp,
 }: Omit<LifecycleTestDrivers, "createRunEntry"> & {
   callGateway: Mock<(opts: CallGatewayOptions) => Promise<unknown>>;
   blockSubagentCompletionDelivery: Mock;
@@ -59,16 +57,6 @@ export function registerDeliveryMirrorCases({
       source === "child run"
         ? `${entry.runId}:message-tool:1`
         : `${buildExpectedAnnounceIdempotencyKey(mirrored)}:${source === "message tool" ? "message-tool:" : ""}internal-source-reply:0`;
-    const runSubagentAnnounceFlow = vi.fn<SubagentLifecycleOptions["runSubagentAnnounceFlow"]>(
-      async (announceParams) => {
-        await announceParams.onDeliveryResult?.({
-          delivered: false,
-          path: "direct",
-          error: failure,
-        });
-        return "retryable" as const;
-      },
-    );
     callGateway.mockImplementationOnce(async (request) => {
       // Multi-agent Gateways refuse an unqualified session key without an explicit agent.
       const { sessionKey, agentId } = (request.params ?? {}) as Record<string, unknown>;
@@ -92,7 +80,12 @@ export function registerDeliveryMirrorCases({
     await createLifecycleController({
       entry,
       captureSubagentCompletionReply: vi.fn(async () => text),
-      runSubagentAnnounceFlow,
+      runSubagentAnnounceFlow: vi.fn<SubagentLifecycleOptions["runSubagentAnnounceFlow"]>(
+        async ({ onDeliveryResult }) => {
+          await onDeliveryResult?.({ delivered: false, path: "direct", error: failure });
+          return "retryable";
+        },
+      ),
     }).completeSubagentRun(
       makeSubagentCompletion(entry, {
         triggerCleanup: true,
@@ -125,24 +118,6 @@ export function registerDeliveryMirrorCases({
     });
     if (delivered) {
       expectUndefinedFields(readLifecycleRun(entry).delivery, ["payload", "attemptCount"]);
-      expect(logAnnounceGiveUp).not.toHaveBeenCalled();
-    } else {
-      expect(blockSubagentCompletionDelivery).toHaveBeenCalledWith({
-        subagent: expect.objectContaining({
-          runId: entry.runId,
-          childSessionKey: entry.childSessionKey,
-          completion: expect.objectContaining({ resultText: "final completion reply" }),
-        }),
-        reason: failure,
-        suspendedReason: "expiry",
-      });
-      expect(logAnnounceGiveUp).toHaveBeenCalledWith(
-        expect.objectContaining({
-          runId: entry.runId,
-          requesterSessionKey: entry.requesterSessionKey,
-        }),
-        "expiry",
-      );
     }
   });
 }

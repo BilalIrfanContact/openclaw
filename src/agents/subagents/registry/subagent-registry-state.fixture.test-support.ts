@@ -128,18 +128,7 @@ export function persistRegistryFixture(
   runs: Map<string, SubagentRunRecord>,
   runIds?: readonly string[],
 ): void {
-  if (runIds) {
-    saveSubagentRegistryChangesToSqlite(runs, runIds);
-  } else {
-    saveSubagentRegistryToSqlite(runs);
-  }
-  publishRegistryFixture(runs, runIds);
-}
-
-function publishRegistryFixture(
-  runs: Map<string, SubagentRunRecord>,
-  runIds?: readonly string[],
-): void {
+  writeFixture(runs, runIds);
   const published = new Map(runs);
   for (const id of runIds ?? runs.keys()) {
     const entry = runs.get(id);

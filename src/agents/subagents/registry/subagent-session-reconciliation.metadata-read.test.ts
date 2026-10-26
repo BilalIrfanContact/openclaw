@@ -76,13 +76,11 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
     try {
       completion = await readCompletion(params);
       expect(await readStartedAt({ childSessionKey, ...options })).toBe(1000);
-      const transferred = messages.mock.calls
-        .filter(([event]) => event === "message")
-        .map(([, message]) => JSON.stringify(message));
-      expect(transferred.some((message) => message.includes('"sessionId":"target"'))).toBe(true);
-      expect
-        .soft(transferred.some((message) => message.includes("TARGET_COLD_PAYLOAD_")))
-        .toBe(false);
+      const transferred = JSON.stringify(
+        messages.mock.calls.filter(([event]) => event === "message"),
+      );
+      expect(transferred).toContain('"sessionId":"target"');
+      expect.soft(transferred).not.toContain("TARGET_COLD_PAYLOAD_");
       reads.clear();
       expect(await readEntry({ childSessionKey, ...options })).toMatchObject({
         sessionId: "target",
@@ -92,9 +90,7 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
         endedAt: 2000,
       });
       reads.expectIdle();
-      expect
-        .soft(parse.mock.calls.some(([value]) => value.includes("TARGET_COLD_PAYLOAD_")))
-        .toBe(false);
+      expect.soft(JSON.stringify(parse.mock.calls)).not.toContain("TARGET_COLD_PAYLOAD_");
       expect(await readDepth(childSessionKey, options)).toBe(2);
       expect(await readDepth("target", options)).toBe(2);
       expect(
@@ -105,10 +101,7 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
         inheritedToolAllow: ["read"],
         inheritedToolDeny: ["exec"],
       });
-      const unrelatedParses = parse.mock.calls.filter(
-        ([value]) => typeof value === "string" && value.includes("UNRELATED_PAYLOAD_"),
-      ).length;
-      expect(unrelatedParses).toBe(0);
+      expect(JSON.stringify(parse.mock.calls)).not.toContain("UNRELATED_PAYLOAD_");
     } finally {
       messages.mockRestore();
       reads.restore();
@@ -127,13 +120,12 @@ it("reads subagent lifecycle and policy metadata without decoding unrelated sess
     database.db
       .prepare("UPDATE session_nodes SET entry_json = ?, entry_valid = 0 WHERE session_key = ?")
       .run('{"bad":true}', childSessionKey);
-    await expect(readCompletion(params)).rejects.toThrow(
-      "invalid persisted session row requires repair",
-    );
-
-    await expect(readDepth(childSessionKey, options)).rejects.toThrow(
-      "invalid persisted session row requires repair",
-    );
-    await expect(policy()).rejects.toThrow("invalid persisted session row requires repair");
+    for (const read of [
+      () => readCompletion(params),
+      () => readDepth(childSessionKey, options),
+      policy,
+    ]) {
+      await expect(read()).rejects.toThrow("invalid persisted session row requires repair");
+    }
   });
 });

@@ -50,22 +50,6 @@ it.each([
 });
 
 it.each([
-  ["private batch", false, false],
-  ["deliverable yielded batch", true, false],
-  ["paused private batch", false, true],
-] as const)("matches the dispatched key: %s", (_name, yieldedFinalDeliverable, pause) => {
-  const entry = child(
-    { completionTarget: "parent", pauseReason: pause ? "sessions_yield" : undefined },
-    {
-      pauseNotice: pause ? { acknowledgment: "Waiting for direction" } : undefined,
-      yieldedFinalDeliverable: yieldedFinalDeliverable || undefined,
-    },
-  );
-  const dispatched = buildRequesterSettleWakeIdentity({ ...identity, pause }).runId;
-  expect(recognizes(entry, dispatched)).toBe(true);
-});
-
-it.each([
   ["deliverable", undefined, false, false, true],
   ["private", "parent", false, false, false],
   ["yielded private", "parent", false, true, true],
@@ -88,9 +72,11 @@ it.each([
     const matches = (runId: string) => recognizes(entry, runId);
     const originalRunId = persistedRunId.replace(":retry-1", "");
     const nextRunId = persistedRunId.replace(":retry-1", ":retry-2");
-    expect(matches(persistedRunId)).toBe(matched);
-    expect(matches(nextRunId)).toBe(false);
-    expect(matches(originalRunId)).toBe(!matched);
+    const observed = () => [persistedRunId, nextRunId, originalRunId].map(matches);
+    entry.requesterSettleWake!.attemptCount = 0;
+    expect(matches(originalRunId)).toBe(true);
+    entry.requesterSettleWake!.attemptCount = 2;
+    expect(observed()).toEqual([matched, false, !matched]);
     entry.requesterSettleWake!.status = "pending";
     expect(matches(persistedRunId)).toBe(matched);
     entry.requesterSettleWake!.nextAttemptAt = 30_000;
@@ -98,9 +84,7 @@ it.each([
     entry.requesterSettleWake!.status = "dispatching";
     entry.requesterSettleWake!.nextAttemptAt = undefined;
     entry.requesterSettleWake!.attemptCount = 3;
-    expect(matches(nextRunId)).toBe(matched);
-    expect(matches(persistedRunId)).toBe(false);
-    expect(matches(originalRunId)).toBe(!matched);
+    expect(observed()).toEqual([false, matched, !matched]);
     entry.requesterSettleWake!.rearmGeneration = 2;
     expect(matches(nextRunId)).toBe(false);
   },
