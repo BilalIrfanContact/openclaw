@@ -56,39 +56,18 @@ async function invoke(params: Record<string, unknown>, jobs: CronJob[] = []) {
 }
 
 it("backup.status returns destination freshness, cron-owned schedules and config-only storage", async () => {
-  const history = (archivePath: string, extra: Partial<BackupRunRecord> = {}) => {
-    const latestOk: BackupRunRecord = {
-      id: `${archivePath}:ok`,
-      archivePath,
-      createdAt: 10,
-      kind: "archive",
-      status: "ok",
-      ...extra,
-    };
-    const latest: BackupRunRecord = {
-      ...latestOk,
-      id: `${archivePath}:failed`,
-      createdAt: 20,
-      status: "failed",
-      archivePath: archivePath.replace("old", "new"),
-    };
-    return { latest, latestOk };
+  // Latest-vs-successful selection and namespace grouping belong to backup-run-records.test.ts.
+  const run: BackupRunRecord = {
+    id: "offsite-ok",
+    archivePath: "",
+    createdAt: 10,
+    kind: "archive",
+    status: "ok",
+    target: "offsite",
+    namespace: "host",
+    bytes: 12,
   };
-  const offsite = history("", { target: "offsite", namespace: "host", bytes: 12 });
-  offsite.latest.error = "disk unavailable";
-  const targets = [
-    { kind: "archive", target: "offsite", namespace: "host", ...offsite },
-    { kind: "archive", target: "/new.tar", ...history("/old.tar") },
-    {
-      kind: "sqlite-snapshot",
-      target: "/new-db",
-      ...history("/old-db", { kind: "sqlite-snapshot" }),
-    },
-  ];
-  ledger.mockResolvedValue([
-    ...targets.map(({ latest }) => latest),
-    ...targets.map(({ latestOk }) => latestOk),
-  ]);
+  ledger.mockResolvedValue([run]);
   const job: CronJob = {
     ...buildBackupScheduleJob({
       mode: "offsite",
@@ -105,7 +84,9 @@ it("backup.status returns destination freshness, cron-owned schedules and config
   };
   const respond = await invoke({}, [job]);
   expectRpcResult(respond, {
-    targets,
+    targets: [
+      { kind: "archive", target: "offsite", namespace: "host", latest: run, latestOk: run },
+    ],
     schedules: [
       {
         id: "backup-job",

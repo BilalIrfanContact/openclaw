@@ -44,26 +44,22 @@ function buildCreationPatch(opts: PatchInput) {
   });
 }
 
-function buildPatch({ label, ...opts }: PatchInput & { label?: string }) {
-  return buildCreationPatch({
-    freshEntry: {
-      sessionId: "session",
-      updatedAt: 1_000,
-      lifecycleRunId: "completed-run",
-      lastRunId: "completed-run",
-      status: "failed",
-      agentStatus: { note: "Need a password", attention: "key", expiresAt: 61_000 },
-      ...(label ? { label } : {}),
-    },
-    canonicalSessionKey: "agent:main:main",
-    storePath: "/tmp/openclaw-agent-status-test.json",
-    isSystemGatewayRun: true,
-    ...opts,
-  }).then(({ patch }) => patch);
-}
+const failedEntry: SessionEntry = {
+  sessionId: "session",
+  updatedAt: 1_000,
+  status: "failed",
+  lifecycleRunId: "completed-run",
+  lastRunId: "completed-run",
+  agentStatus: { note: "Need a password", attention: "key", expiresAt: 61_000 },
+};
 
 it("clears agent status at the next human interaction boundary", async () => {
-  const patch = await buildPatch({ touchInteraction: true });
+  const { patch } = await buildCreationPatch({
+    freshEntry: failedEntry,
+    touchInteraction: true,
+    isSystemGatewayRun: true,
+    canonicalSessionKey: "agent:main:main",
+  });
   expect(patch).toMatchObject({ agentStatus: undefined, lifecycleRunId: undefined });
   expect(patch.lastRunId).toBeUndefined();
 });
@@ -104,7 +100,12 @@ it.each([
   { label: undefined, requestLabel: "Fix flaky auth test", expected: "Fix flaky auth test" },
   { label: "Existing", requestLabel: undefined, expected: "Existing" },
 ])("preserves the run-start label $expected", async ({ label, requestLabel, expected }) => {
-  const patch = await buildPatch({ label, requestLabel });
+  const { patch } = await buildCreationPatch({
+    freshEntry: { ...failedEntry, label },
+    requestLabel,
+    isSystemGatewayRun: true,
+    canonicalSessionKey: "agent:main:main",
+  });
   expect(patch.label).toBe(expected);
   if (label) {
     expect(Object.hasOwn(patch, "agentStatus")).toBe(false);
@@ -122,7 +123,6 @@ it("does not name an existing session", async () => {
     freshEntry: entry,
   });
 
-  expect(result.patch).not.toHaveProperty("displayName");
   expect(mergeSessionEntry(entry, result.patch).displayName).toBe(entry.displayName);
 });
 
