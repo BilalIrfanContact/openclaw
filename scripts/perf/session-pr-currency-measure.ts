@@ -24,7 +24,11 @@ import type { SessionEntry } from "../../src/config/sessions/types.js";
 import type { OpenClawConfig } from "../../src/config/types.openclaw.js";
 import type { ControlUiSessionPrRead } from "../../src/gateway/control-ui-session-pr-read.js";
 import type { GatewayClient } from "../../src/gateway/server-methods/client-types.js";
-import type { GatewayRequestHandlerOptions } from "../../src/gateway/server-methods/types.js";
+import { createControlUiRequestOptions } from "../../src/gateway/server-methods/control-ui-request.test-support.js";
+import type {
+  GatewayRequestContext,
+  GatewayRequestHandlerOptions,
+} from "../../src/gateway/server-methods/types.js";
 import { createGatewayBenchEnv } from "../lib/gateway-bench-runtime.ts";
 import { parseStrictIntegerOption } from "../lib/strict-integer-option.ts";
 
@@ -296,6 +300,7 @@ try {
       const settleReplacements = async () => {
         await Promise.all(replacements.splice(0));
       };
+      const requestOptions = createControlUiRequestOptions(() => cfg);
       const requests = owner.handler
         ? clients.map((client, index) => {
             const params = { sessionKeys: [], passiveSessionKeys: [keyFor(index)] };
@@ -307,23 +312,22 @@ try {
                   throw new Error(message);
                 },
               },
-            } as GatewayRequestHandlerOptions["context"];
-            return {
+            } satisfies Pick<GatewayRequestContext, "controlUiSessionPullRequests"> & {
+              logGateway: Pick<GatewayRequestContext["logGateway"], "warn">;
+            };
+            const respond = (ok: boolean, payload: unknown) => {
+              assert(ok);
+              assert.deepEqual(payload, { subscribed: true });
+            };
+            return Object.assign(requestOptions(params, respond, { context }), {
+              client,
               req: {
                 type: "req" as const,
                 id: String(index),
                 method: "controlUi.sessionPullRequests.subscribe",
                 params,
               },
-              params,
-              client,
-              context,
-              isWebchatConnect: () => false,
-              respond: (ok: boolean, payload: unknown) => {
-                assert(ok);
-                assert.deepEqual(payload, { subscribed: true });
-              },
-            } satisfies GatewayRequestHandlerOptions;
+            }) satisfies GatewayRequestHandlerOptions;
           })
         : [];
       if (owner.handler) {
