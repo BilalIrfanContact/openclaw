@@ -54,25 +54,14 @@ describe("new-session composer critter visits", () => {
     expect(visitor(reopened.composer).seed).not.toBe(pet.seed);
   });
 
-  it("keeps visitor preferences and dismissal refresh connected to Appearance", async () => {
+  it("reflects Appearance preferences and branding without changing saved visitor settings", async () => {
     const context = composerContext({ client: null });
     context.theme.settings.lobsterPetVisits = false;
     context.theme.settings.lobsterPetSounds = true;
     const { composer, rerender } = renderComposer({ context });
     const pet = await loadPet(composer);
-    expect(pet).toMatchObject({ visitsEnabled: false, soundsEnabled: true });
+    expect(pet).toMatchObject({ visitsEnabled: false, soundsEnabled: true, residentEnabled: true });
     context.theme.settings.lobsterPetVisits = true;
-    rerender();
-    expect(pet.visitsEnabled).toBe(true);
-    pet.onVisitsDisabled();
-    expect(context.theme.refresh).toHaveBeenCalledOnce();
-  });
-
-  it("suspends only the resident for a theme without a mascot and passes its visitor catalog", async () => {
-    const context = composerContext({ client: null });
-    const { composer, rerender } = renderComposer({ context });
-    const pet = await loadPet(composer);
-    expect(pet).toMatchObject({ visitsEnabled: true, residentEnabled: true });
     context.theme.branding.mascot = "none";
     context.theme.branding.critters = ["penguin", "fedora"];
     rerender();
@@ -82,6 +71,8 @@ describe("new-session composer critter visits", () => {
       critters: ["penguin", "fedora"],
     });
     expect(context.theme.settings.lobsterPetVisits).toBe(true);
+    pet.onVisitsDisabled();
+    expect(context.theme.refresh).toHaveBeenCalledOnce();
     context.theme.branding.mascot = "claw";
     rerender();
     expect(pet).toMatchObject({ residentEnabled: true, visitsEnabled: true });

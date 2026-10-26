@@ -2,11 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import * as staleChunkReload from "../../app/stale-chunk-reload.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { createNewSessionRouteData as routeData } from "./location.test-support.ts";
-import type { NewSessionRouteData } from "./location.ts";
+import type { PageHost } from "./new-session-page-owner.ts";
 import "./new-session-page-entry.ts";
 
 const detailImport = vi.hoisted(() => ({
-  started: false,
   calls: 0,
   first: Promise.withResolvers<void>(),
   ready: Promise.withResolvers<void>(),
@@ -14,7 +13,6 @@ const detailImport = vi.hoisted(() => ({
   canReload: (): boolean => false,
 }));
 vi.mock("../chat/components/chat-detail-panel.tsx", async (importOriginal) => {
-  detailImport.started = true;
   if (++detailImport.calls === 1) {
     await detailImport.first.promise;
     throw new Error("Failed to fetch dynamically imported module");
@@ -23,12 +21,7 @@ vi.mock("../chat/components/chat-detail-panel.tsx", async (importOriginal) => {
   return importOriginal();
 });
 
-type NewSessionElement = HTMLElement & {
-  data: NewSessionRouteData;
-  updateComplete: Promise<boolean>;
-};
-
-async function enterMessage(page: NewSessionElement, message: string) {
+async function enterMessage(page: PageHost, message: string) {
   const textarea = page.querySelector<HTMLTextAreaElement>(".new-session-page__message")!;
   textarea.value = message;
   textarea.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
@@ -36,7 +29,7 @@ async function enterMessage(page: NewSessionElement, message: string) {
   return textarea;
 }
 
-async function pasteAttachment(page: NewSessionElement, text: string) {
+async function pasteAttachment(page: PageHost, text: string) {
   const textarea = await enterMessage(page, "Review the attachment");
   const paste = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(paste, "clipboardData", {
@@ -46,12 +39,9 @@ async function pasteAttachment(page: NewSessionElement, text: string) {
   expect(paste.defaultPrevented).toBe(true);
   await page.updateComplete;
   await vi.dynamicImportSettled();
-  await waitForSolid(() =>
-    expect(
-      page.querySelector("openclaw-chat-pasted-text .chat-attachment-file__open"),
-    ).not.toBeNull(),
-  );
-  page.querySelector<HTMLElement>("openclaw-chat-pasted-text .chat-attachment-file__open")!.click();
+  const open = () => page.querySelector<HTMLElement>(".chat-attachment-file__open");
+  await waitForSolid(() => expect(open()).not.toBeNull());
+  open()!.click();
 }
 
 afterEach(async () => {
@@ -80,11 +70,12 @@ it("keeps the draft usable through a cold preview retry and retires it before th
       return false;
     },
   );
-  const page = document.createElement("openclaw-new-session-page") as NewSessionElement;
+  const page = document.createElement("openclaw-new-session-page");
+  const loading = () => page.querySelector(".new-session-attachment-panel [role='status']");
   page.data = routeData("research");
   document.body.append(page);
   await page.updateComplete;
-  expect(detailImport.started).toBe(false);
+  expect(detailImport.calls).toBe(0);
   const original = "# Original pasted content\n  preserve indentation 漢字 😀\n".repeat(50);
   vi.stubGlobal(
     "fetch",
@@ -92,8 +83,8 @@ it("keeps the draft usable through a cold preview retry and retires it before th
   );
   await pasteAttachment(page, original);
   await waitForSolid(() => {
-    expect(detailImport.started).toBe(true);
-    expect(page.querySelector(".new-session-attachment-panel [role='status']")).not.toBeNull();
+    expect(detailImport.calls).toBe(1);
+    expect(loading()).not.toBeNull();
   });
   const textarea = await enterMessage(page, "Keep typing while the preview loads");
   expect(page.querySelector(".new-session-page__message")).toBe(textarea);
@@ -102,9 +93,7 @@ it("keeps the draft usable through a cold preview retry and retires it before th
   detailImport.first.resolve();
   await waitForSolid(() => expect(page.querySelector(".lazy-view-error--stale")).not.toBeNull());
   page.querySelector<HTMLButtonElement>(".lazy-view-error__action")!.click();
-  await waitForSolid(() =>
-    expect(page.querySelector(".new-session-attachment-panel [role='status']")).not.toBeNull(),
-  );
+  await waitForSolid(() => expect(loading()).not.toBeNull());
   expect(textarea.value).toBe("Keep typing while the preview loads");
   expect(detailImport.canReload()).toBe(true);
   detailImport.recovery.resolve();
