@@ -1516,8 +1516,12 @@ async function prepareFirstModelPicker(page: Page) {
 async function runFirstModelPicker(page: Page, recordPhases = false): Promise<InteractionEvidence> {
   const recorder = recordPhases
     ? await page.evaluateHandle((pane) => {
-        let startedAt = 0;
-        const evidence: Record<string, number> = { timeOriginMs: performance.timeOrigin };
+        const events: Array<{
+          target: string;
+          type: string;
+          eventMs: number;
+          observedMs: number;
+        }> = [];
         const eventTypes = [
           "pointerdown",
           "pointerup",
@@ -1532,7 +1536,7 @@ async function runFirstModelPicker(page: Page, recordPhases = false): Promise<In
           "input",
         ];
         const record = (event: Event) => {
-          if (!startedAt || !(event.target instanceof Element)) {
+          if (!(event.target instanceof Element)) {
             return;
           }
           const target = event.target.closest(`${pane} [data-chat-model-select]`)
@@ -1543,25 +1547,34 @@ async function runFirstModelPicker(page: Page, recordPhases = false): Promise<In
           if (!target) {
             return;
           }
-          const key = `native_${target}_${event.type}`;
-          const index = evidence[`${key}_count`] ?? 0;
-          evidence[`${key}_${index}_event_ms`] = event.timeStamp - startedAt;
-          evidence[`${key}_${index}_observed_ms`] = performance.now() - startedAt;
-          evidence[`${key}_count`] = index + 1;
+          events.push({
+            target,
+            type: event.type,
+            eventMs: event.timeStamp,
+            observedMs: performance.now(),
+          });
         };
         for (const type of eventTypes) {
           document.addEventListener(type, record, true);
         }
         return {
-          start() {
-            startedAt = performance.now();
-            evidence.startedAtMs = startedAt;
-            return startedAt;
+          finish(startedAt: number) {
+            const evidence: Record<string, number> = {
+              timeOriginMs: performance.timeOrigin,
+              startedAtMs: startedAt,
+            };
+            for (const event of events) {
+              if (event.observedMs < startedAt) {
+                continue;
+              }
+              const key = `native_${event.target}_${event.type}`;
+              const index = evidence[`${key}_count`] ?? 0;
+              evidence[`${key}_${index}_event_ms`] = event.eventMs - startedAt;
+              evidence[`${key}_${index}_observed_ms`] = event.observedMs - startedAt;
+              evidence[`${key}_count`] = index + 1;
+            }
+            return evidence;
           },
-          mark(name: string) {
-            evidence[name] = performance.now() - startedAt;
-          },
-          finish: () => evidence,
           dispose() {
             for (const type of eventTypes) {
               document.removeEventListener(type, record, true);
@@ -1571,38 +1584,24 @@ async function runFirstModelPicker(page: Page, recordPhases = false): Promise<In
       }, activePane)
     : undefined;
   try {
-    const started = recorder
-      ? await recorder.evaluate((value) => value.start())
-      : await page.evaluate(() => performance.now());
+    const started = await page.evaluate(() => performance.now());
     const trigger = page.locator(`${activePane} [data-chat-model-select]`);
     if ((page.viewportSize()?.width ?? 1440) < 600) {
       await trigger.tap();
     } else {
       await trigger.click();
     }
-    if (recorder) {
-      await recorder.evaluate((value) => value.mark("automationTapResolvedMs"));
-    }
     await page.locator("[data-chat-model-search]").waitFor();
-    if (recorder) {
-      await recorder.evaluate((value) => value.mark("automationPanelVisibleMs"));
-    }
     await page.waitForFunction(
       () => document.activeElement === document.querySelector("[data-chat-model-search]"),
     );
-    if (recorder) {
-      await recorder.evaluate((value) => value.mark("automationFocusAssertedMs"));
-    }
     const firstOpenReadyMs = await page.evaluate((start) => performance.now() - start, started);
     await searchModels(page);
-    if (recorder) {
-      await recorder.evaluate((value) => value.mark("automationSearchCompleteMs"));
-    }
     if (!(await page.locator('[data-chat-model-option="example/model-999"]').isEnabled())) {
       throw new Error("First-open search result is not selectable");
     }
     return recorder
-      ? { firstOpenReadyMs, ...(await recorder.evaluate((value) => value.finish())) }
+      ? { firstOpenReadyMs, ...(await recorder.evaluate((value, start) => value.finish(start), started)) }
       : { firstOpenReadyMs };
   } finally {
     if (recorder) {
@@ -2451,8 +2450,8 @@ export const interactionScenarios: readonly InteractionScenario[] = [
   {
     id: "model-picker-first-open-phases",
     route: controlUiSessionPath(sessionKeys[0]),
-    expected: "The first-open picker exposes native input and automation milestone timestamps.",
-    diagnostic: "Native event listeners and milestone sampling perturb timing.",
+    expected: "The first-open picker exposes native input timestamps with the original action cadence.",
+    diagnostic: "Native event listeners and post-action collection perturb timing.",
     explicitOnly: true,
     prepare: prepareFirstModelPicker,
     run: (page) => runFirstModelPicker(page, true),
