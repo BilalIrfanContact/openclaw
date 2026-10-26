@@ -22,10 +22,9 @@ import {
   retainSharedCodexAppServerClientIfCurrent as retain,
   retireSharedCodexAppServerClientIfCurrent as retire,
 } from "./shared-client.js";
-import { createClientHarness } from "./test-support.js";
+import { createRequestClientHarness } from "./test-support.js";
 import { CODEX_APP_SERVER_VERSION } from "./version.js";
 
-type Request = { id?: number; method: string; params?: { threadId: string } };
 async function exerciseRetention({ tempRoot }: { tempRoot: string }) {
   resetCodexTestBindingStore();
   configSnapshot.setRuntimeConfigSnapshot({});
@@ -33,32 +32,27 @@ async function exerciseRetention({ tempRoot }: { tempRoot: string }) {
   const turn = { id: "compact-turn", status: "inProgress" };
   const item = { id: "compact-item", type: "contextCompaction" };
   const final = [{ id: "final", type: "agentMessage", phase: "final_answer", text: "done" }];
-  const harness = createClientHarness({
-    onWrite(line, send) {
-      const { id, method, params } = JSON.parse(line) as Request;
-      if (id === undefined) {
-        return;
-      }
-      let result: { userAgent?: string } = {};
-      if (method === "initialize") {
-        result = { userAgent: `codex-cli/${CODEX_APP_SERVER_VERSION}` };
-      } else if (method === "thread/compact/start") {
-        const threadId = params?.threadId;
-        send({ method: "turn/started", params: { threadId, turn } });
-        const itemParams = { threadId, turnId: turn.id, item };
-        send({ method: "item/started", params: itemParams });
-        send({ method: "item/completed", params: itemParams });
-        send({
-          method: "turn/completed",
-          params: { threadId, turn: { ...turn, status: "completed", items: [] } },
-        });
-      } else if (method === "thread/unsubscribe") {
-        unsubscribed.push(params!.threadId);
-      } else {
-        throw new Error(`Unexpected retention fixture request: ${method}`);
-      }
-      send({ id, result });
-    },
+  const harness = createRequestClientHarness((method, id, rawParams, send) => {
+    const params = rawParams as { threadId: string } | undefined;
+    let result: { userAgent?: string } = {};
+    if (method === "initialize") {
+      result = { userAgent: `codex-cli/${CODEX_APP_SERVER_VERSION}` };
+    } else if (method === "thread/compact/start") {
+      const threadId = params?.threadId;
+      send({ method: "turn/started", params: { threadId, turn } });
+      const itemParams = { threadId, turnId: turn.id, item };
+      send({ method: "item/started", params: itemParams });
+      send({ method: "item/completed", params: itemParams });
+      send({
+        method: "turn/completed",
+        params: { threadId, turn: { ...turn, status: "completed", items: [] } },
+      });
+    } else if (method === "thread/unsubscribe") {
+      unsubscribed.push(params!.threadId);
+    } else {
+      throw new Error(`Unexpected retention fixture request: ${method}`);
+    }
+    send({ id, result });
   });
   vi.spyOn(Client, "start").mockResolvedValueOnce(harness.client);
   try {

@@ -24,18 +24,13 @@ vi.unmock("node:child_process");
 afterEach(resetThreadLifecycleTestFixtures);
 
 it.for([
-  { name: "supported", modelId: "gpt-6.1-sol", config: undefined, updates: true },
-  { name: "unsupported", modelId: "gpt-5.6-luna", config: undefined, updates: false },
-  {
-    name: "explicitly disabled",
-    modelId: "gpt-6.1-sol",
-    config: { "features.reasoning_effort_override": false },
-    updates: false,
-  },
-])(
-  "preserves native effort semantics for $name models",
+  ["supported", "gpt-6.1-sol", undefined, true],
+  ["unsupported", "gpt-5.6-luna", undefined, false],
+  ["disabled", "gpt-6.1-sol", { "features.reasoning_effort_override": false }, false],
+] as const)(
+  "preserves native effort semantics for %s models",
   { timeout: 60_000 },
-  async ({ modelId, config, updates }, context) => {
+  async ([_name, modelId, config, updates], context) => {
     const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
       context.onTestFinished(async () => {
         await closeOpenClawStateDatabaseAsync();
@@ -126,11 +121,11 @@ it.for([
       }
     }
     expect(requests).toHaveLength(3);
-    expect(requests.map((request) => request.reasoning)).toEqual([
-      expect.objectContaining({ effort: "low" }),
-      expect.objectContaining({ effort: updates ? "low" : "high" }),
-      expect.objectContaining({ effort: updates ? "low" : "medium" }),
-    ]);
+    expect(requests.map((request) => request.reasoning)).toEqual(
+      ["low", updates ? "low" : "high", updates ? "low" : "medium"].map((effort) =>
+        expect.objectContaining({ effort }),
+      ),
+    );
     const inputs = requests.map((request) => {
       expect(Array.isArray(request.input)).toBe(true);
       return Array.isArray(request.input) ? request.input : [];
@@ -141,11 +136,10 @@ it.for([
       inputs[2]?.filter((item) => isJsonObject(item) && item.type === "configuration_update"),
     ).toEqual(
       updates
-        ? [
-            { type: "configuration_update", reasoning: { effort: "low" } },
-            { type: "configuration_update", reasoning: { effort: "high" } },
-            { type: "configuration_update", reasoning: { effort: "medium" } },
-          ]
+        ? ["low", "high", "medium"].map((effort) => ({
+            type: "configuration_update",
+            reasoning: { effort },
+          }))
         : [],
     );
   },
