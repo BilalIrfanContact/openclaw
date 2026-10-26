@@ -133,7 +133,7 @@ export function registerRequesterWakeSettlementBoundaryTests<Response>({
     await registry.addSubagentRunForTests(recovered);
   }
   it.for(["cohort", "individual", "interrupted predecessor"] as const)(
-    "drains a restored %s before later cohorts when registry order differs",
+    "resumes restored %s deliveries in mailbox readiness order when registry order differs",
     async (firstKind, { signal }) => {
       vi.setSystemTime(100_000);
       const registryOrder = ["later-a", "later-b", "first"];
@@ -185,7 +185,11 @@ export function registerRequesterWakeSettlementBoundaryTests<Response>({
       try {
         await withinTest(flushOwnedWork(), signal);
         const firstChild = firstKind === "interrupted predecessor" ? "later-a" : "first";
-        const expected = ["first", "later-a", "later-b"].map((runId) =>
+        const readyOrder =
+          firstKind === "interrupted predecessor"
+            ? ["later-a", "later-b", "first"]
+            : ["first", "later-a", "later-b"];
+        const expected = readyOrder.map((runId) =>
           runId === "first" && firstKind !== "cohort"
             ? `announce:v1:agent:main:subagent:${firstChild}:first`
             : `announce:requester-settle:main:${requesterSessionKey}:${runId}:yield-1`,
