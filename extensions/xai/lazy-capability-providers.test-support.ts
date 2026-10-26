@@ -16,27 +16,22 @@ vi.mock("openclaw/plugin-sdk/agent-runtime", () => {
   throw new Error("Lazy capability metadata must not load the broad agent runtime");
 });
 
-const runtimeMocks = vi.hoisted(() => ({
+export const runtimeMocks = vi.hoisted(() => ({
   generateImage: vi.fn(),
   transcribeAudio: vi.fn(),
   generateVideo: vi.fn(),
   listVoices: vi.fn(),
   synthesize: vi.fn(),
-  streamSynthesize: vi.fn(),
-  synthesizeTelephony: vi.fn(),
   transcriptionConnect: vi.fn(),
   transcriptionSendAudio: vi.fn(),
   transcriptionClose: vi.fn(),
-  transcriptionIsConnected: vi.fn(),
   createTranscriptionSession: vi.fn(),
   voiceConnect: vi.fn(),
   voiceSendAudio: vi.fn(),
   voiceSetMediaTimestamp: vi.fn(),
   voiceSendUserMessage: vi.fn(),
   voiceTriggerGreeting: vi.fn(),
-  voiceHandleBargeIn: vi.fn(),
   voiceSubmitToolResult: vi.fn(),
-  voiceAcknowledgeMark: vi.fn(),
   voiceClose: vi.fn(),
   voiceIsConnected: vi.fn(),
   buildImageProvider: vi.fn(),
@@ -47,8 +42,6 @@ const runtimeMocks = vi.hoisted(() => ({
   buildVoiceProvider: vi.fn(),
   createVoiceBridge: vi.fn<(request: RealtimeVoiceBridgeCreateRequest) => RealtimeVoiceBridge>(),
 }));
-
-export { runtimeMocks };
 
 vi.mock("./image-generation-provider.js", () => ({
   buildXaiImageGenerationProvider: runtimeMocks.buildImageProvider,
@@ -121,10 +114,7 @@ beforeEach(() => {
   m.generateVideo.mockResolvedValue({ videos: [] });
   m.listVoices.mockResolvedValue([]);
   m.synthesize.mockResolvedValue({ audioBuffer: Buffer.alloc(0) });
-  m.streamSynthesize.mockResolvedValue({ audioStream: {} });
-  m.synthesizeTelephony.mockResolvedValue({ audioBuffer: Buffer.alloc(0) });
   m.transcriptionConnect.mockResolvedValue(undefined);
-  m.transcriptionIsConnected.mockReturnValue(false);
   m.voiceConnect.mockResolvedValue(undefined);
   m.voiceIsConnected.mockReturnValue(false);
 
@@ -132,7 +122,7 @@ beforeEach(() => {
     connect: m.transcriptionConnect,
     sendAudio: m.transcriptionSendAudio,
     close: m.transcriptionClose,
-    isConnected: m.transcriptionIsConnected,
+    isConnected: () => false,
   });
   m.createVoiceBridge.mockImplementation(() => ({
     supportsToolResultContinuation: false,
@@ -141,9 +131,9 @@ beforeEach(() => {
     setMediaTimestamp: m.voiceSetMediaTimestamp,
     sendUserMessage: m.voiceSendUserMessage,
     triggerGreeting: m.voiceTriggerGreeting,
-    handleBargeIn: m.voiceHandleBargeIn,
+    handleBargeIn() {},
     submitToolResult: m.voiceSubmitToolResult,
-    acknowledgeMark: m.voiceAcknowledgeMark,
+    acknowledgeMark() {},
     close: m.voiceClose,
     isConnected: m.voiceIsConnected,
   }));
@@ -154,8 +144,6 @@ beforeEach(() => {
   m.buildSpeechProvider.mockReturnValue({
     listVoices: m.listVoices,
     synthesize: m.synthesize,
-    streamSynthesize: m.streamSynthesize,
-    synthesizeTelephony: m.synthesizeTelephony,
   });
   m.buildTranscriptionProvider.mockReturnValue({ createSession: m.createTranscriptionSession });
   m.buildVoiceProvider.mockReturnValue({ createBridge: m.createVoiceBridge });

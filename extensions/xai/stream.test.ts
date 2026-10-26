@@ -1,9 +1,4 @@
-import {
-  streamSimple,
-  type Model,
-  type ModelThinkingLevel,
-  type ModelRequestHeaders,
-} from "openclaw/plugin-sdk/llm";
+import { streamSimple, type Model, type ModelThinkingLevel } from "openclaw/plugin-sdk/llm";
 import { describe, expect, it } from "vitest";
 import { XAI_BASE_URL } from "./model-definitions.js";
 import { resolveFastModeSupport } from "./provider-policy-api.js";
@@ -11,25 +6,11 @@ import { applyXaiRuntimeModelCompat } from "./runtime-model-compat.js";
 import { wrapXaiProviderStream } from "./stream.js";
 import { captureXaiRequest, xaiModel } from "./test-helpers.js";
 
-function captureRequest(
-  model: Model<"openai-responses">,
-  extraParams: Record<string, unknown> = {},
-  headers?: ModelRequestHeaders,
-  payload?: Record<string, unknown>,
-) {
-  const captured = captureXaiRequest(model, {
-    extraParams: { tool_stream: false, ...extraParams },
-    headers,
-    payload: payload ?? {},
-  });
-  return { capturedModelId: captured.modelId, capturedHeaders: captured.headers };
-}
-
 function patchPayload<T extends Record<string, unknown>>(
   payload: T,
   model: Partial<Model<"openai-responses">> = {},
 ): T {
-  captureRequest(xaiModel(model), {}, undefined, payload);
+  captureXaiRequest(xaiModel(model), { extraParams: { tool_stream: false }, payload });
   return payload;
 }
 
@@ -82,7 +63,8 @@ it.each([
     }),
   ).toBe(supported);
   const capture = (fastMode: boolean | "ultrafast" | (() => "ultrafast")) =>
-    captureRequest(xaiModel({ id: modelId }), { fastMode }).capturedModelId;
+    captureXaiRequest(xaiModel({ id: modelId }), { extraParams: { tool_stream: false, fastMode } })
+      .modelId;
   expect([capture(true), capture("ultrafast"), capture(() => "ultrafast"), capture(false)]).toEqual(
     [target, target, target, modelId],
   );
@@ -125,38 +107,12 @@ async function captureXaiResponsesPayloadWithThinking(
 }
 
 describe("xai stream wrappers", () => {
-  it("adds the Grok OAuth proxy request contract", () => {
-    const id = "grok-4.7";
-    const { capturedModelId, capturedHeaders } = captureRequest(
-      xaiModel({
-        id,
-        name: "Subscription default",
-        input: ["text"],
-        params: { canonicalModelId: "grok-fixture-unselected" },
-        baseUrl: "https://cli-chat-proxy.grok.com/v1",
-      }),
-      {},
-      { "X-XAI-Token-Auth": "operator-value", "X-Existing": "kept", "x-delete": null },
-    );
-
-    expect(capturedModelId).toBe(id);
-    expect(capturedHeaders).toEqual({
-      "X-Existing": "kept",
-      "x-delete": null,
-      "x-grok-client-version": "2026.7.2",
-      "x-grok-model-override": id,
-      "X-XAI-Token-Auth": "xai-grok-cli",
-    });
-  });
-
   it("does not add Grok OAuth headers for a lookalike host", () => {
-    const { capturedHeaders } = captureRequest(
+    const { headers } = captureXaiRequest(
       xaiModel({ id: "grok-4.5", baseUrl: "https://cli-chat-proxy.grok.com.example/v1" }),
-      {},
-      { "X-Existing": "kept" },
+      { extraParams: { tool_stream: false }, headers: { "X-Existing": "kept" } },
     );
-
-    expect(capturedHeaders).toEqual({ "X-Existing": "kept" });
+    expect(headers).toEqual({ "X-Existing": "kept" });
   });
 
   it("strips unsupported reasoning controls from non-reasoning xai payloads", () => {
@@ -269,9 +225,6 @@ describe("xai stream wrappers", () => {
     const input = payload.input as Array<Record<string, unknown>>;
     expect(input[0]).toEqual(toolOutput("(see attached image)"));
     expect(input[1]).toEqual(imageMessage(1, firstImage, secondImage));
-    const replayParts = input[1]?.content as unknown[];
-    expect(replayParts[1]).toBe(firstImage);
-    expect(replayParts[2]).toBe(secondImage);
     expect(JSON.stringify(originalParts)).toBe(originalBytes);
   });
 

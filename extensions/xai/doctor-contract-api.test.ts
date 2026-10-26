@@ -2,10 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { readMigrationConfigPath } from "openclaw/plugin-sdk/migration";
 import { describe, expect, it } from "vitest";
 import { legacyConfigRules, normalizeCompatibilityConfig } from "./doctor-contract-api.js";
-
-function pluginConfig(config: Record<string, unknown>): OpenClawConfig {
-  return { plugins: { entries: { xai: { config } } } };
-}
+import { xaiPluginConfig as pluginConfig } from "./plugin-config.test-support.js";
 
 function mediaConfig(models: unknown[]): OpenClawConfig {
   return { tools: { media: { models } } } as OpenClawConfig;
