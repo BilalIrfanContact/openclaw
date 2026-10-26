@@ -24,16 +24,19 @@ vi.mock("node:child_process", async (importOriginal) => ({
   spawnSync: spawnSyncMock,
 }));
 
-describe("readWindowsProcessStartTimeSync", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    spawnSyncMock.mockReset();
-    nativeIdentity.mockReset().mockImplementation(() => {
-      throw new Error("native binding unavailable");
-    });
+beforeEach(() => {
+  vi.useFakeTimers();
+  spawnSyncMock.mockReset();
+  nativeIdentity.mockReset().mockImplementation(() => {
+    throw new Error("native binding unavailable");
   });
-  afterEach(() => vi.useRealTimers());
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
+describe("readWindowsProcessStartTimeSync", () => {
   it("projects supplied native context with Windows key precedence for both queries", () => {
     const env = {
       SYSTEMROOT: "D:\\Native",
@@ -47,12 +50,12 @@ describe("readWindowsProcessStartTimeSync", () => {
     failAfter(600);
     spawnSyncMock.mockReturnValueOnce(creationDate);
     expect(readWindowsProcessStartTimeSync(456, 1000, env)).toBe(expectedTime);
-    expect(spawnSyncMock.mock.calls[0]?.[0]).toBe(
-      "D:\\Native\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-    );
-    expect(spawnSyncMock.mock.calls[1]?.[0]).toBe("D:\\Native\\System32\\wbem\\wmic.exe");
-    expect(spawnSyncMock.mock.calls[0]?.[2]).toMatchObject({ timeout: 1000 });
-    expect(spawnSyncMock.mock.calls[1]?.[2]).toMatchObject({ timeout: 400 });
+    expect(
+      spawnSyncMock.mock.calls.map(([command, , options]) => ({ command, ...options })),
+    ).toMatchObject([
+      { command: "D:\\Native\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", timeout: 1000 },
+      { command: "D:\\Native\\System32\\wbem\\wmic.exe", timeout: 400 },
+    ]);
     for (const call of spawnSyncMock.mock.calls) {
       expect(call[2].env).toEqual({
         SYSTEMROOT: "D:\\Native",
@@ -60,50 +63,36 @@ describe("readWindowsProcessStartTimeSync", () => {
         PATH: "native-path",
         PSModuleAnalysisCachePath: "D:\\NativeCache",
       });
-      expect(call[2].timeout).toBeLessThanOrEqual(1000);
     }
     expect(env.SystemRoot).toBe("E:\\Ignored");
     expect(env.DIAGNOSTIC_NEUTRAL_CANARY).toBe("synthetic");
   });
 
-  it("does not start WMIC once PowerShell has spent the whole budget", () => {
-    failAfter(1000);
-    expect(readWindowsProcessStartTimeSync(321, 1000)).toBeNull();
-    expect(spawnSyncMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves the default WMIC fallback after PowerShell spends five seconds", () => {
-    failAfter(5000);
-    spawnSyncMock.mockReturnValueOnce(creationDate);
-    expect(readWindowsProcessStartTimeSync(987)).toBe(expectedTime);
-    expect(spawnSyncMock.mock.calls.map((call) => call[2].timeout)).toEqual([5000, 5000]);
-  });
-
-  it("returns null when process creation time is unavailable", () => {
-    spawnSyncMock
-      .mockReturnValueOnce({ status: 1, stdout: "" })
-      .mockReturnValueOnce({ status: 1, stdout: Buffer.alloc(0) });
-
-    expect(readWindowsProcessStartTimeSync(789, 1000)).toBeNull();
-    expect(readWindowsProcessStartTimeSync(0, 1000)).toBeNull();
+  it.each([
+    ["exhausted budget", 1000, 1000, null, [1000]],
+    ["default fallback", 5000, undefined, expectedTime, [5000, 5000]],
+    ["unavailable creation time", 0, 1000, null, [1000, 1000]],
+  ] as const)("handles %s", (_name, elapsed, timeout, expected, budgets) => {
+    failAfter(elapsed);
+    spawnSyncMock.mockReturnValueOnce(
+      expected === null ? { status: 1, stdout: Buffer.alloc(0) } : creationDate,
+    );
+    expect(readWindowsProcessStartTimeSync(123, timeout)).toBe(expected);
+    expect(spawnSyncMock.mock.calls.map((call) => call[2].timeout)).toEqual(budgets);
   });
 });
 
 describe("native Windows process start identity", () => {
   beforeEach(() => {
     vi.stubGlobal("process", { ...process, platform: "win32" });
-    spawnSyncMock.mockReset().mockReturnValue({ status: 0, stdout: "2026-07-13T07:20:49.123Z" });
-    nativeIdentity.mockReset().mockReturnValue({
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: "2026-07-13T07:20:49.123Z" });
+    nativeIdentity.mockReturnValue({
       pid: 123,
       parentPid: 1,
       startTimeMicros: expectedTime * 1000 + 999,
       startTimeResolutionMicros: 1,
       exited: false,
     });
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.useRealTimers();
   });
 
   it("preserves millisecond precision and refreshes foreign process identities", () => {
@@ -136,7 +125,6 @@ describe("native Windows process start identity", () => {
   );
 
   it("charges native initialization to the fallback deadline", () => {
-    vi.useFakeTimers();
     nativeIdentity.mockImplementation(() => {
       vi.advanceTimersByTime(1000);
       throw new Error("native unavailable");

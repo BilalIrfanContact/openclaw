@@ -100,46 +100,33 @@ async function fixture() {
   return { read, databasePath: resolveClientCredentialStorePath(env) };
 }
 
-it("releases physical custody so another process can read between cached operations", async () => {
+it.each([
+  ["read", undefined],
+  ["copied", "migration is incomplete or stale"],
+  ["newer", "unsupported schema version 2"],
+  ["newer-layout", "unsupported schema version 2"],
+  ["replace", "missing table device_auth_tokens"],
+  ["damage", "missing table device_auth_tokens"],
+] as const)("revalidates custody and schema after another client: %s", async (operation, error) => {
   const { read, databasePath } = await fixture();
-  const observed = await otherClient(databasePath, "read");
-  expect(observed.deviceId).toBe(identity.device_id);
-  expect(observed.after).toEqual(observed.before);
-  expect(await read()).toEqual({ kind: "identity", identity });
-});
-
-it("refuses an in-place copied receipt from another process despite an unchanged admission key", async () => {
-  const { read, databasePath } = await fixture();
-  const observed = await otherClient(databasePath, "copied");
-  expect(observed.after).toEqual(observed.before);
-  await expect(read()).rejects.toThrow("migration is incomplete or stale");
-});
-
-it.each(["newer", "newer-layout"] as const)(
-  "refuses a %s schema before interpreting its changed receipt",
-  async (operation) => {
-    const { read, databasePath } = await fixture();
-    const observed = await otherClient(databasePath, operation);
+  const observed = await otherClient(databasePath, operation);
+  if (operation === "newer" || operation === "newer-layout") {
     expect(observed.before.version).toBe(1);
     expect(observed.after).toEqual({ ...observed.before, version: 2 });
-    await expect(read()).rejects.toThrow("unsupported schema version 2");
-  },
-);
-
-it("re-admits a replacement file before serving a row that remains readable", async () => {
-  const { read, databasePath } = await fixture();
-  const observed = await otherClient(databasePath, "replace");
-  expect(observed.after.ino).not.toBe(observed.before.ino);
-  expect(observed.after.version).toBe(observed.before.version);
-  await expect(read()).rejects.toThrow("missing table device_auth_tokens");
-});
-
-it("discards schema admission facts when maintenance drainage closes the worker", async () => {
-  const { read, databasePath } = await fixture();
-  // Inject foreign same-version corruption only to prove drainage forces full schema admission.
-  // The selected identity row stays readable, so serving it would miss this damaged schema.
-  const observed = await otherClient(databasePath, "damage");
-  expect(observed.after).toEqual(observed.before);
-  await drainAgentDatabaseResources({ path: databasePath }, async () => {});
-  await expect(read()).rejects.toThrow("missing table device_auth_tokens");
+  } else if (operation === "replace") {
+    expect(observed.after.ino).not.toBe(observed.before.ino);
+    expect(observed.after.version).toBe(observed.before.version);
+  } else {
+    expect(observed.after).toEqual(observed.before);
+  }
+  if (operation === "damage") {
+    // The identity remains readable; drainage must force full schema admission.
+    await drainAgentDatabaseResources({ path: databasePath }, async () => {});
+  }
+  if (error) {
+    await expect(read()).rejects.toThrow(error);
+  } else {
+    expect(observed.deviceId).toBe(identity.device_id);
+    expect(await read()).toEqual({ kind: "identity", identity });
+  }
 });

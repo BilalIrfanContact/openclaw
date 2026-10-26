@@ -47,14 +47,9 @@ if (owner === "foreign") {
 }
 if (owner === "failed") {
   fs.writeFileSync(cacheDir, "fixture");
-  enableOpenClawCompileCache({ currentFile, installRoot });
-} else {
-  // Positive control goes through the real OpenClaw entry enable owner.
-  enableOpenClawCompileCache({
-    currentFile,
-    installRoot,
-  });
 }
+// Positive and failed controls both go through the real entry enable owner.
+enableOpenClawCompileCache({ currentFile, installRoot });
 assert.deepEqual({ ...process.env }, initialEnv, "enable must not mutate the environment");
 delete process.env.NODE_COMPILE_CACHE;
 const parentDirectory = getCompileCacheDir() ?? null;
