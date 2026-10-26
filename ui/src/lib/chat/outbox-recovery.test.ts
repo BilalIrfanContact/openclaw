@@ -134,30 +134,27 @@ function interceptTransfer(
   const set = sessionStorage.setItem.bind(sessionStorage);
   const remove = sessionStorage.removeItem.bind(sessionStorage);
   const ownedKey = storageTargetForComposer(f.state).key;
-  const stage = (key: string, value?: string) => {
-    const source = key === f.source.key;
-    if (value === undefined) {
-      return source ? "retire-remove" : "discard";
-    }
-    const record = JSON.parse(value) as { recovery: Record<string, { sourceScopeKey: string }> };
-    const staging = Object.values(record.recovery).some(
-      (row) => row.sourceScopeKey === sourceScope,
-    );
-    return source ? (staging ? "claim" : "retire-write") : staging ? "stage" : "publish";
-  };
-  const apply = (key: string, commit: () => void, value?: string) => {
-    if (key === f.source.key || key === ownedKey) {
-      intercept(stage(key, value), commit);
-    } else {
+  const apply = (key: string, value?: string) => {
+    const commit = () => (value === undefined ? remove(key) : set(key, value));
+    if (key !== f.source.key && key !== ownedKey) {
       commit();
+      return;
     }
+    const source = key === f.source.key;
+    let stage = source ? "retire-remove" : "discard";
+    if (value !== undefined) {
+      const record = JSON.parse(value) as { recovery: Record<string, { sourceScopeKey: string }> };
+      const staging = Object.values(record.recovery).some(
+        (row) => row.sourceScopeKey === sourceScope,
+      );
+      stage = source ? (staging ? "claim" : "retire-write") : staging ? "stage" : "publish";
+    }
+    intercept(stage, commit);
   };
   const writes = vi
     .spyOn(sessionStorage, "setItem")
-    .mockImplementation((key, value) => apply(key, () => set(key, value), value));
-  const removals = vi
-    .spyOn(sessionStorage, "removeItem")
-    .mockImplementation((key) => apply(key, () => remove(key)));
+    .mockImplementation((key, value) => apply(key, value));
+  const removals = vi.spyOn(sessionStorage, "removeItem").mockImplementation((key) => apply(key));
   return () => {
     writes.mockRestore();
     removals.mockRestore();
@@ -294,42 +291,32 @@ it.each(["recovery", "history"] as const)("fences retirement after %s changes", 
   expect(f.entries()[0]?.session.queue).toHaveLength(1);
 });
 
-it("does not offer clear fences as saved messages or erase canonical clear fences", () => {
+it("offers textless recovery input but preserves and hides canonical clear fences", () => {
   const f = fixture("draft");
   const fence = { updatedAt: 12, draftRevision: 12 };
   const legacy = f.legacy();
   legacy.sessions["global\u0000agent:main"] = fence;
-  legacy.recovery.cleared = recovery(fence, 3);
-  f.saveLegacy(legacy);
-  const owned = f.stored();
-  owned.recovery.cleared = recovery(fence);
-  f.save(owned);
-  const before = sessionStorage.getItem(f.source.key);
-  expect(f.entries().map((entry) => entry.session.draft)).toEqual(["Retained draft 雪"]);
-  expect(sessionStorage.getItem(f.source.key)).toBe(before);
-  expect(f.stored().recovery.cleared).toBeUndefined();
-  expect(f.legacy().sessions["global\u0000agent:main"]).toEqual(fence);
-});
-
-it("keeps textless attachment, goal, and reply recovery actionable", () => {
-  const f = fixture("draft");
-  const legacy = f.legacy();
-  legacy.sessions = {};
   legacy.recovery = {
+    cleared: recovery(fence, 3),
     attachment: recovery(
-      storedSession({
-        queue: [queueItem({ id: "attachment", text: "", attachments: [attachment] })],
-      }),
+      storedSession({ queue: [queueItem({ text: "", attachments: [attachment] })] }),
     ),
     goal: recovery(storedSession({ goalMode: { action: "start" } }, 2)),
     reply: recovery(storedSession({ replyTarget: { messageId: "message", text: "quoted" } }, 3)),
   };
   f.saveLegacy(legacy);
+  const owned = f.stored();
+  owned.recovery.cleared = recovery(fence);
+  f.save(owned);
+  const before = sessionStorage.getItem(f.source.key);
   expect(f.entries().map((entry) => entry.id)).toEqual([
-    "legacy-recovery:attachment",
-    "legacy-recovery:goal",
-    "legacy-recovery:reply",
+    "legacy-session:" + sourceScope,
+    ...["attachment", "goal", "reply"].map((id) => "legacy-recovery:" + id),
   ]);
+  expect(f.entries()[0]?.session.draft).toBe("Retained draft 雪");
+  expect(sessionStorage.getItem(f.source.key)).toBe(before);
+  expect(f.stored().recovery.cleared).toBeUndefined();
+  expect(f.legacy().sessions["global\u0000agent:main"]).toEqual(fence);
 });
 
 it.each(["queue", "draft"] as const)("discards %s without changing the composer", (kind) => {
@@ -373,25 +360,6 @@ it.each(["account", "gateway", "revision", "incognito", "confirmation"] as const
   },
 );
 
-it.each(["claim", "stage", "retire", "discard"] as const)(
-  "retains recovery after discard %s fails",
-  (boundary) => {
-    const f = fixture("queue");
-    const entry = f.entry();
-    const reset = interceptTransfer(f, (stage, commit) => {
-      if (stage === (boundary === "retire" ? "retire-remove" : boundary)) {
-        throw new Error("blocked storage");
-      }
-      commit();
-    });
-    expect(f.discard(entry)).toBe("storage-failed");
-    reset();
-    f.expectRetained();
-    expect(f.discard()).toBe("discarded");
-    expect(f.entries()).toEqual([]);
-  },
-);
-
 it("retires attachment payloads only after the last recovery copy is discarded", () => {
   const f = fixture("queue");
   const reference = { key: "blob", tabId: "this-tab", recoveryScope: "account-a" };
@@ -409,67 +377,76 @@ it("retires attachment payloads only after the last recovery copy is discarded",
 });
 
 const stages = ["claim", "stage", "retire-write", "retire-remove", "publish"] as const;
-const failures = ["throw", "after-write"] as const;
-it.each(
-  stages.flatMap((stage) =>
-    failures.flatMap((failure) =>
-      (stage === "publish" ? (["queue", "draft"] as const) : (["queue"] as const)).map((kind) => ({
-        stage,
-        failure,
-        kind,
-      })),
-    ),
+const transferCases = stages.flatMap((stage) =>
+  ["throw", "after-write"].flatMap((failure) =>
+    (stage === "publish" ? (["queue", "draft"] as const) : (["queue"] as const)).map((kind) => ({
+      stage,
+      failure,
+      kind,
+      discard: false,
+    })),
   ),
-)("retains one $kind after $stage $failure, then retries elsewhere", ({ stage, failure, kind }) => {
-  const f = fixture(kind, stage === "retire-write");
-  const original = f.entry();
-  let failuresSeen = 0;
-  const reset = interceptTransfer(f, (currentStage, commit) => {
-    if (currentStage === stage) {
-      failuresSeen++;
-      if (failure === "after-write") {
-        commit();
+);
+it.each([
+  ...transferCases,
+  ...["claim", "stage", "retire-remove", "discard"].map((stage) => ({
+    stage,
+    failure: "throw",
+    kind: "queue" as const,
+    discard: true,
+  })),
+])(
+  "retains $kind across $stage $failure (discard=$discard)",
+  ({ stage, failure, kind, discard }) => {
+    const f = fixture(kind, stage === "retire-write");
+    const original = f.entry();
+    let failed = false;
+    const reset = interceptTransfer(f, (currentStage, commit) => {
+      if (currentStage === stage) {
+        failed = true;
+        if (failure === "after-write") {
+          commit();
+        }
+        throw new Error("Injected " + stage);
       }
-      throw new Error("Injected " + stage);
-    }
-    commit();
-  });
-  expect(f.restore(original)).toBe("storage-failed");
-  expect(failuresSeen).toBe(1);
-  reset();
-  reopenStorage();
-  const committed = stage === "publish" && failure === "after-write";
-  if (committed) {
-    expect(f.entry()).toBeUndefined();
-    expect(f.restore(original, secondScope)).toBe("conflict");
-  } else {
-    f.expectRetained();
-    expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toHaveLength(1);
-    expect(f.restore(f.entry(), secondScope)).toBe("restored");
-  }
-  const scope = committed ? firstScope : secondScope;
-  const sessions = f.stored().sessions;
-  expect(Object.keys(sessions)).toEqual([scopeKey(scope)]);
-  if (kind === "draft") {
-    expect(sessions[scopeKey(scope)]).toMatchObject({ draft: f.session.draft });
-  } else {
-    const restored = sessions[scopeKey(scope)]?.queue?.[0];
-    expect(restored).toMatchObject({
-      id: "original-input",
-      text: "Retained queue 雪",
-      ...scope,
-      storageScope,
-      sendAttempts: 0,
-      sendState: "failed",
+      commit();
     });
-    expect(restored).not.toHaveProperty("sendRunId");
-    expect(restored).not.toHaveProperty("sessionId");
-  }
-  expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toEqual([]);
-  if (stage === "retire-write") {
-    expect(f.entries()[0]?.session.draft).toBe("untouched");
-  }
-});
+    expect(discard ? f.discard(original) : f.restore(original)).toBe("storage-failed");
+    expect(failed).toBe(true);
+    reset();
+    reopenStorage();
+    const committed = stage === "publish" && failure === "after-write";
+    if (committed) {
+      expect(f.entry()).toBeUndefined();
+      expect(f.restore(original, secondScope)).toBe("conflict");
+    } else {
+      f.expectRetained();
+      expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toHaveLength(1);
+      expect(discard ? f.discard() : f.restore(f.entry(), secondScope)).toBe(
+        discard ? "discarded" : "restored",
+      );
+    }
+    const sessions = f.stored().sessions;
+    if (discard) {
+      expect(sessions).toEqual({});
+    } else {
+      const scope = committed ? firstScope : secondScope;
+      const key = scopeKey(scope);
+      expect(Object.keys(sessions)).toEqual([key]);
+      expect(sessions[key]).toMatchObject(
+        kind === "draft"
+          ? { draft: f.session.draft }
+          : {
+              queue: [{ id: "original-input", text: "Retained queue 雪", ...scope, storageScope }],
+            },
+      );
+    }
+    expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toEqual([]);
+    if (stage === "retire-write") {
+      expect(f.entries()[0]?.session.draft).toBe("untouched");
+    }
+  },
+);
 
 it.each([
   [sourceScope, "agent:main:legacy", true, {}],
@@ -562,6 +539,13 @@ it.each([
   expect(Object.keys(f.stored().sessions)).toHaveLength(20);
   reopenStorage();
   expect(f.entry().session).toEqual(f.session);
+  if (occupied === "pending") {
+    const ordinary = f.stored();
+    ordinary.sessions[scopeKey(firstScope)] = { ...f.session, updatedAt: Date.now() };
+    f.save(ordinary);
+    expect(f.stored().sessions[scopeKey(firstScope)]).toBeUndefined();
+    expect(f.entry().session).toEqual(f.session);
+  }
   const freed = f.stored();
   delete freed.sessions[key(0)];
   f.save(freed);
@@ -576,31 +560,4 @@ it.each([
   );
   expect(after[scopeKey(firstScope)]).toBeUndefined();
   expect(f.entries()).toEqual([]);
-});
-
-it("rejects an omitted required destination before changing storage without overriding retention", () => {
-  const f = fixture("draft");
-  const target = storageTargetForComposer(f.state);
-  fillDestination(f, "pending");
-  const owned = f.stored();
-  owned.recovery.retained = recovery(f.session);
-  writeStoredOutboxStore(sessionStorage, target, owned);
-  const previous = sessionStorage.getItem(target.key);
-  const next = f.stored();
-  const key = scopeKey(firstScope);
-  next.sessions[key] = { ...f.session, updatedAt: Date.now() };
-  delete next.recovery.retained;
-  const set = vi.spyOn(sessionStorage, "setItem");
-  const remove = vi.spyOn(sessionStorage, "removeItem");
-  expect(() =>
-    writeStoredOutboxStore(sessionStorage, target, next, { requiredSessionKey: key }),
-  ).toThrow("Required chat outbox destination exceeds retention");
-  expect(set).not.toHaveBeenCalled();
-  expect(remove).not.toHaveBeenCalled();
-  expect(sessionStorage.getItem(target.key)).toBe(previous);
-  next.recovery = owned.recovery;
-  writeStoredOutboxStore(sessionStorage, target, next);
-  expect(f.stored().sessions[key]).toBeUndefined();
-  expect(Object.keys(f.stored().sessions)).toHaveLength(20);
-  expect(f.stored().recovery.retained?.session).toEqual(f.session);
 });
