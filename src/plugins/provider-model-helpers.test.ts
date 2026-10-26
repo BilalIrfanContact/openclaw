@@ -39,22 +39,16 @@ function clone(params: Partial<CloneParams>, models = [template("template-a")]) 
 }
 const transport = { api: "anthropic-messages", baseUrl: "https://models.example" } as const;
 
-it("clones the first matching template and applies patches", () => {
+it("clones the first matching template and normalizes its patched transport", () => {
   const model = clone(
     {
       modelId: " next-model ",
       templateIds: ["missing", "template-a", "template-b"],
-      patch: { reasoning: true },
+      patch: { reasoning: true, ...transport, baseUrl: transport.baseUrl + "/v1" },
     },
     [template("template-a", { name: "Template A" })],
   );
-  expect(model).toEqual(template(modelId, { reasoning: true }));
-});
-
-it("normalizes the patched transport", () => {
-  expect(clone({ patch: { ...transport, baseUrl: transport.baseUrl + "/v1" } })).toEqual(
-    template(modelId, transport),
-  );
+  expect(model).toEqual(template(modelId, { ...transport, reasoning: true }));
 });
 
 it("returns undefined when no template exists", () => {

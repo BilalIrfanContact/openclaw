@@ -82,18 +82,14 @@ describe("capability-aware provider auth", () => {
       ...configured("openai:key"),
       store: authProfiles({ "openai:key": keyCredential("runtime-overlay") }),
     };
-    expect(
-      await isConfigured({
+    const acceptsApiKey = (key: string) => key === "synthetic-key";
+    expect(await isConfigured({ ...params, acceptsApiKey })).toBe(true);
+    await expect(
+      isConfigured({
         ...params,
-        acceptsApiKey: (key) => key === "synthetic-key",
+        acceptsApiKey: (key) => ["runtime-overlay", "openai:key"].includes(key),
       }),
-    ).toBe(true);
-    expect(
-      await isConfigured({
-        ...params,
-        acceptsApiKey: (key) => key === "runtime-overlay" || key === "openai:key",
-      }),
-    ).toBe(false);
+    ).resolves.toBe(false);
   });
 
   it("answers config-only availability without opening an auth store", async () => {
@@ -127,13 +123,13 @@ describe("capability-aware provider auth", () => {
 
   it("rejects a selected local profile even when the environment key is acceptable", async () => {
     vi.stubEnv("OPENAI_API_KEY", "acceptable-env-key");
-    expect(
-      await isConfigured({
+    await expect(
+      isConfigured({
         ...local,
         cfg: { auth: { order: { openai: ["openai:key"] } } },
         acceptsApiKey: (key) => key === "acceptable-env-key",
       }),
-    ).toBe(false);
+    ).resolves.toBe(false);
     expect(authStore.ensureAuthProfileStore).not.toHaveBeenCalled();
     expect(authStore.ensureAuthProfileStoreAsync).toHaveBeenCalledOnce();
   });
