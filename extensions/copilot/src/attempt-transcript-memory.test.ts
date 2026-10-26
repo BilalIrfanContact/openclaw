@@ -16,6 +16,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+async function memoryFixture() {
+  const fixture = await createFixture();
+  fixture.bridge.detach();
+  const manager = SessionManager.inMemory(fixture.tempDir);
+  const attempt = { ...fixture.attempt, sessionTarget: undefined, sessionManager: manager };
+  return { ...fixture, manager, attempt, ...createJournalSession(attempt) };
+}
+
 describe("Copilot caller-owned transcript", () => {
   it.each([false, true])(
     "preserves group hooks and replay identity (blocked: %s)",
@@ -24,11 +32,8 @@ describe("Copilot caller-owned transcript", () => {
         blocked && message.role === "toolResult" ? { block: true } : undefined,
       );
       installJournalMessageWriteHook(hook);
-      const fixture = await createFixture();
-      fixture.bridge.detach();
-      const manager = SessionManager.inMemory(fixture.tempDir);
-      const attempt = { ...fixture.attempt, sessionTarget: undefined, sessionManager: manager };
-      const first = createJournalSession(attempt);
+      const first = await memoryFixture();
+      const { manager, attempt } = first;
       await first.journal.persistInitialUser();
       emitReplayGroup(first.session);
       await first.journal.barrier("first group");
@@ -56,28 +61,21 @@ describe("Copilot caller-owned transcript", () => {
   it.each(["durable", "memory"] as const)(
     "rejects a manager rebound to %s while user resolution is awaited",
     async (destination) => {
-      const fixture = await createFixture();
-      fixture.bridge.detach();
-      const manager = SessionManager.inMemory(fixture.tempDir);
+      const { manager, recorder, target, attempt, journal, bridge } = await memoryFixture();
       const resolved = createDeferred<Extract<AgentMessage, { role: "user" }>>();
       const started = createDeferred<void>();
-      fixture.recorder.resolveMessage.mockImplementation(async () => {
+      recorder.resolveMessage.mockImplementation(async () => {
         started.resolve();
         return await resolved.promise;
-      });
-      const { journal, bridge } = createJournalSession({
-        ...fixture.attempt,
-        sessionTarget: undefined,
-        sessionManager: manager,
       });
       const persistence = journal.persistInitialUser();
       await started.promise;
       if (destination === "durable") {
-        await manager.setSessionTargetAsync(fixture.target);
+        await manager.setSessionTargetAsync(target);
       } else {
         manager.newSession();
       }
-      resolved.resolve({ role: "user", content: fixture.attempt.prompt, timestamp: 1 });
+      resolved.resolve({ role: "user", content: attempt.prompt, timestamp: 1 });
 
       await expect(persistence).rejects.toThrow("caller-owned transcript changed");
       bridge.detach();
@@ -86,18 +84,11 @@ describe("Copilot caller-owned transcript", () => {
   );
 
   it("rejects a manager reset by a tool-group hook before publishing the group", async () => {
-    const fixture = await createFixture();
-    fixture.bridge.detach();
-    const manager = SessionManager.inMemory(fixture.tempDir);
+    const { manager, journal, session, bridge } = await memoryFixture();
     installJournalMessageWriteHook((input: unknown) => {
       if ((input as { message: AgentMessage }).message.role === "assistant") {
         manager.newSession();
       }
-    });
-    const { journal, session, bridge } = createJournalSession({
-      ...fixture.attempt,
-      sessionTarget: undefined,
-      sessionManager: manager,
     });
     await journal.persistInitialUser();
     emitReplayGroup(session);
@@ -116,14 +107,7 @@ describe("Copilot caller-owned transcript", () => {
         ? { message: { ...message, details: { nonSerializable: 1n } } }
         : undefined;
     });
-    const fixture = await createFixture();
-    fixture.bridge.detach();
-    const manager = SessionManager.inMemory(fixture.tempDir);
-    const { journal, session, bridge } = createJournalSession({
-      ...fixture.attempt,
-      sessionTarget: undefined,
-      sessionManager: manager,
-    });
+    const { manager, journal, session, bridge } = await memoryFixture();
     const abort = vi.spyOn(session, "abort");
     await journal.persistInitialUser();
     emitReplayGroup(session);
