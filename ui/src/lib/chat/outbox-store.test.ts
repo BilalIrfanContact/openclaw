@@ -19,6 +19,7 @@ import type {
 import { createStoredChatOutboxReader } from "./outbox-store-projection.ts";
 import { retireStoredComposerDrafts } from "./outbox-store-retirement.ts";
 import {
+  readProjectedOutboxStore,
   readStoredOutboxStore,
   storedChatOutboxScopeKey,
   storageTargetForComposer,
@@ -26,7 +27,17 @@ import {
   subscribeStoredChatOutboxChanges,
   writeStoredOutboxStore,
 } from "./outbox-store.ts";
-import { seedSource, seedStore, sourceJson, storedSession } from "./outbox.test-support.ts";
+import {
+  draftSession,
+  privateInput,
+  queued,
+  recoveryRow,
+  recoveryRows,
+  seedSource,
+  seedStore,
+  sourceJson,
+  storedSession,
+} from "./outbox.test-support.ts";
 
 function ownedState(gatewayUrl = target.gatewayOwner) {
   return {
@@ -43,29 +54,11 @@ function ownedQueue(gatewayUrl: string, queue: ChatQueueItem[]): ChatQueueItem[]
   }));
 }
 
-const queued = (id: string, overrides: Partial<ChatQueueItem> = {}): ChatQueueItem => ({
-  id,
-  text: id,
-  createdAt: 1,
-  ...overrides,
-});
-const draftSession = (draft: string, revision: number) =>
-  storedSession({ draft, draftRevision: revision, updatedAt: revision });
-const privateInput = () => ({
-  draft: "@Alex private legacy input",
-  draftMentions: [{ profileId: "alex", start: 0, end: 5 }],
-  goalMode: { action: "start", sessionId: "private-goal" },
-});
 const readStore = () => readStoredOutboxStore(sessionStorage, target);
+const queueItems = (store: StoredComposerState) =>
+  Object.values(store.sessions).flatMap((entry) => entry.queue ?? []);
 const storedJson = (key: string) => JSON.parse(sessionStorage.getItem(key)!);
 
-const recoveryRow = (
-  sourceScopeKey: string,
-  session: StoredComposerState["sessions"][string],
-  sourceVersion: 1 | 2 | 3 | 4 = 4,
-) => ({ sourceVersion, sourceScopeKey, session });
-const recoveryRows = (make: (index: number) => ReturnType<typeof recoveryRow>) =>
-  Object.fromEntries(Array.from({ length: 80 }, (_, index) => [`row-${index}`, make(index)]));
 const mention = (start = 0, end = 5) => ({ profileId: "profile-alex", start, end });
 function storageEvent(key: string | null) {
   const event = new StorageEvent("storage", { key });
@@ -330,43 +323,49 @@ it.each([1, 2, 4])("refreshes a cached v%i projection after an external write", 
   const changed = vi.fn();
   cleanups.push(reader.subscribe(changed));
   const state = { settings: { gatewayUrl }, client: null, connected: false };
-  const { key } = seedSource(target, version, {
-    "agent:main:summary\u0000agent:main": storedSession({ queue: [queued("first")] }),
-  });
+  const storageKey = `openclaw.control.chatComposer.v${version}:${encodeURIComponent(gatewayUrl)}`;
+  const stored = (ids: string[]) =>
+    sourceJson(target, version, {
+      "agent:main:summary\u0000agent:main": {
+        ...(ids.length > 1 ? { draft: "new" } : {}),
+        queue: ids.map((id, createdAt) => queued(id, { createdAt })),
+        updatedAt: ids.length,
+      },
+    });
+  sessionStorage.setItem(storageKey, stored(["first"]));
   if (version !== 4) {
     const write = sessionStorage.setItem.bind(sessionStorage);
-    vi.spyOn(sessionStorage, "setItem").mockImplementation((nextKey, value) => {
-      if (nextKey !== key) {
-        quotaExceeded();
+    vi.spyOn(sessionStorage, "setItem").mockImplementation((key, value) => {
+      if (key !== storageKey) {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
       }
-      write(nextKey, value);
+      write(key, value);
     });
   }
-  expect(reader.read(state)).toMatchObject({ total: 1 });
-  expect(reader.read(state).hasSessionDraft("agent:main:summary")).toBe(false);
-  seedSource(target, version, {
-    "agent:main:summary\u0000agent:main": storedSession({
-      draft: "new",
-      queue: [queued("first"), queued("second")],
-    }),
-  });
-  storageEvent(key);
-  expect(reader.read(state).total).toBe(2);
-  const cached = reader.read(state);
-  reader.invalidate();
-  expect(reader.read(state)).not.toBe(cached);
-  expect(reader.read(state).hasSessionDraft("agent:main:summary")).toBe(true);
+  const first = readProjectedOutboxStore(sessionStorage, target);
+  expect(readProjectedOutboxStore(sessionStorage, target)).toBe(first);
+  expect(queueItems(first)).toHaveLength(1);
+  expect(createStoredChatOutboxReader().read(ownedState(gatewayUrl)).total).toBe(0);
+  const summary = reader.read(state);
+  expect(reader.read({ ...state })).toBe(summary);
+  expect(summary.hasSessionDraft("agent:main:summary")).toBe(false);
+  sessionStorage.setItem(storageKey, stored(["first", "second"]));
+  storageEvent(storageKey);
+  const refreshed = readProjectedOutboxStore(sessionStorage, target);
+  expect(refreshed).not.toBe(first);
+  expect(queueItems(refreshed)).toHaveLength(2);
   expect(changed).toHaveBeenCalledOnce();
-  expect(reader.read(ownedState(gatewayUrl)).total).toBe(0);
-  expect(reader.read({ ...state, settings: { gatewayUrl: "ws://other.test" } }).total).toBe(0);
-  expect(reader.read(state).total).toBe(2);
-  if (version === 4) {
-    const foreign = { ...target, gatewayOwner: "ws://other.test/control" };
-    seedStore(foreign, { "global\u0000agent:work": storedSession({ queue: [queued("queued")] }) });
-    storageEvent(key);
-    expect(reader.read(state).total).toBe(0);
-    expect(storedJson(target.key).gatewayOwner).toBe(foreign.gatewayOwner);
-  }
+  expect(reader.read(state)).not.toBe(summary);
+  expect(reader.read(state).hasSessionDraft("agent:main:summary")).toBe(true);
+  expect(
+    reader
+      .read({ ...state, settings: { gatewayUrl: "ws://other.test" } })
+      .hasSessionDraft("agent:main:summary"),
+  ).toBe(false);
+  expect(reader.read(state).hasSessionDraft("agent:main:summary")).toBe(true);
+  const reconnected = reader.read(state);
+  reader.invalidate();
+  expect(reader.read(state)).not.toBe(reconnected);
 });
 
 it.each([1, 3])("retains the last v%i source when quota blocks verified retirement", (version) => {

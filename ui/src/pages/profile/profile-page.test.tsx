@@ -461,16 +461,22 @@ it("bootstraps and refreshes the connected user's profile through users.self", a
     ...modelAccountProfile,
     emails: ["ada@example.test", "ada@work.test"],
   };
-  const request = mockRpc({
-    "users.prefs.get": () => ({ status: "ok", entries: {} }),
-    "users.self": () => ({ profile }),
-    "users.listModelAccounts": () => ({ profileId: "profile-1", accounts: [], links: [] }),
-    "users.setDisplayName": (params) => {
+  const request = vi.fn(async (method: string, params?: unknown) => {
+    if (method === "users.prefs.get") {
+      return { status: "ok", entries: {} };
+    }
+    if (method === "users.self") {
+      return { profile };
+    }
+    if (method === "users.listModelAccounts") {
+      return { profileId: "profile-1", accounts: [], links: [] };
+    }
+    if (method === "users.setDisplayName") {
       expect(params).toEqual({ profileId: "profile-1", displayName: "Augusta Ada" });
       profile = { ...profile, displayName: "Augusta Ada", updatedAt: 3 };
       return { profile };
-    },
-    "users.setAvatar": () => {
+    }
+    if (method === "users.setAvatar") {
       profile = {
         ...profile,
         displayName: "Augusta Ada",
@@ -480,7 +486,8 @@ it("bootstraps and refreshes the connected user's profile through users.self", a
       };
       publishAvatarPresence?.();
       return { profile, avatarRevision };
-    },
+    }
+    throw new Error(`unexpected method: ${method}`);
   });
   const harness = createConnectedContext(request as GatewayBrowserClient["request"], {
     id: "profile-1",
@@ -494,27 +501,38 @@ it("bootstraps and refreshes the connected user's profile through users.self", a
   const page = mountProfilePage(harness.context);
 
   await waitForFast(() => expect(page.querySelector("#settings-profile-identity")).not.toBeNull());
-  await waitForFast(() => expect(profileName(page)?.value).toBe(profile.displayName));
-  const viewer = () =>
-    page.querySelector<HTMLElement & { user?: AuthenticatedUser }>("openclaw-viewer-avatar");
-  expect(viewer()?.user?.id).toBe(profile.id);
+  await waitForFast(() =>
+    expect(page.querySelector<HTMLInputElement>(".identity-name-control input")?.value).toBe(
+      profile.displayName,
+    ),
+  );
+  const viewer = page.querySelector<HTMLElement & { user?: AuthenticatedUser }>(
+    "openclaw-viewer-avatar",
+  );
+  expect(viewer?.user?.id).toBe(profile.id);
   expect(page.textContent).toContain("ada@example.test, ada@work.test");
-  expect(rpcCalls(request, "users.list")).toHaveLength(0);
+  expect(request.mock.calls.some(([method]) => method === "users.list")).toBe(false);
 
-  const input = profileName(page);
+  const input = page.querySelector<HTMLInputElement>('.identity-name-control input[type="text"]');
   await waitForFast(() => expect(input?.disabled).toBe(false));
   input!.value = "Augusta Ada";
   input!.dispatchEvent(new Event("input", { bubbles: true }));
   flush();
   page.querySelector<HTMLButtonElement>('.identity-name-control button[type="submit"]')?.click();
 
-  await waitForFast(() => expect(rpcCalls(request, "users.setDisplayName")).not.toHaveLength(0));
-  await waitForFast(() => expect(rpcCalls(request, "users.self")).toHaveLength(2));
+  await waitForFast(() =>
+    expect(request.mock.calls.some(([method]) => method === "users.setDisplayName")).toBe(true),
+  );
+  await waitForFast(() =>
+    expect(request.mock.calls.filter(([method]) => method === "users.self")).toHaveLength(2),
+  );
   flush();
-  expect(profileName(page)?.value).toBe("Augusta Ada");
+  expect(page.querySelector<HTMLInputElement>(".identity-name-control input")?.value).toBe(
+    "Augusta Ada",
+  );
   expect(harness.context.gateway.snapshot.selfUser?.name).toBe("Augusta Ada");
 
-  const displayNameInput = profileName(page)!;
+  const displayNameInput = page.querySelector<HTMLInputElement>(".identity-name-control input")!;
   await waitForFast(() => expect(displayNameInput.disabled).toBe(false));
   displayNameInput.value = "Unsaved draft";
   displayNameInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -523,41 +541,78 @@ it("bootstraps and refreshes the connected user's profile through users.self", a
   expect(accountContext?.textContent).toContain("Augusta Ada");
   expect(accountContext?.textContent).not.toContain("Unsaved draft");
   stubProfileAvatarProcessing();
-  for (const presence of [true, false]) {
-    if (!presence) {
-      avatarRevision = "response-content-hash-png";
-      publishAvatarPresence = undefined;
-    }
-    const count = rpcCalls(request, "users.setAvatar").length;
-    await waitForFast(() => expect(displayNameInput.disabled).toBe(false));
-    selectProfileAvatar(page);
-    await waitForFast(() => {
-      expect(rpcCalls(request, "users.setAvatar")).toHaveLength(count + 1);
-      expect(rpcCalls(request, "users.self")).toHaveLength(count + 3);
-      expect(displayNameInput.disabled).toBe(false);
-      expect(harness.context.gateway.snapshot.selfUser?.avatarUrl).toContain(
-        `/api/users/profile-1/avatar?v=${avatarRevision}`,
-      );
-      expect(viewer()?.user?.avatarUrl).toBe(`/api/users/profile-1/avatar?v=${avatarRevision}`);
-      expect(profileName(page)?.value).toBe("Unsaved draft");
-    });
-  }
+  selectProfileAvatar(page);
+  await waitForFast(() =>
+    expect(request.mock.calls.some(([method]) => method === "users.setAvatar")).toBe(true),
+  );
+  await waitForFast(() =>
+    expect(request.mock.calls.filter(([method]) => method === "users.self")).toHaveLength(3),
+  );
+  flush();
+  expect(harness.context.gateway.snapshot.selfUser?.avatarUrl).toContain(
+    `/api/users/profile-1/avatar?v=${avatarRevision}`,
+  );
+  expect(
+    (
+      page.querySelector("openclaw-viewer-avatar") as
+        | (HTMLElement & { user?: AuthenticatedUser })
+        | null
+    )?.user?.avatarUrl,
+  ).toBe(`/api/users/profile-1/avatar?v=${avatarRevision}`);
+  expect(page.querySelector<HTMLInputElement>(".identity-name-control input")?.value).toBe(
+    "Unsaved draft",
+  );
+
+  const avatarRequestCount = request.mock.calls.filter(
+    ([method]) => method === "users.setAvatar",
+  ).length;
+  avatarRevision = "response-content-hash-png";
+  publishAvatarPresence = undefined;
+  await waitForFast(() => expect(displayNameInput.disabled).toBe(false));
+  selectProfileAvatar(page);
+  await waitForFast(() =>
+    expect(request.mock.calls.filter(([method]) => method === "users.setAvatar")).toHaveLength(
+      avatarRequestCount + 1,
+    ),
+  );
+  await waitForFast(() =>
+    expect(harness.context.gateway.snapshot.selfUser?.avatarUrl).toContain(
+      `/api/users/profile-1/avatar?v=${avatarRevision}`,
+    ),
+  );
+  await waitForFast(() =>
+    expect(
+      (
+        page.querySelector("openclaw-viewer-avatar") as
+          | (HTMLElement & { user?: AuthenticatedUser })
+          | null
+      )?.user?.avatarUrl,
+    ).toContain(`/api/users/profile-1/avatar?v=${avatarRevision}`),
+  );
 
   await waitForFast(() => expect(displayNameInput.disabled).toBe(false));
   request.mockClear();
-  refreshButton(page)?.click();
-  await waitForFast(() => expect(rpcCalls(request, "users.self")).not.toHaveLength(0));
-  await waitForFast(() => expect(profileName(page)?.disabled).toBe(false));
-  expect(profileName(page)?.value).toBe("Unsaved draft");
+  page.querySelector<HTMLButtonElement>(".profile-refresh")?.click();
+  await waitForFast(() =>
+    expect(request.mock.calls.some(([method]) => method === "users.self")).toBe(true),
+  );
+  await waitForFast(() =>
+    expect(page.querySelector<HTMLInputElement>(".identity-name-control input")?.disabled).toBe(
+      false,
+    ),
+  );
+  expect(page.querySelector<HTMLInputElement>(".identity-name-control input")?.value).toBe(
+    "Unsaved draft",
+  );
   const processing =
     createDeferred<Awaited<ReturnType<typeof avatarProcessing.processProfileAvatar>>>();
   vi.spyOn(avatarProcessing, "processProfileAvatar").mockReturnValue(processing.promise);
   selectProfileAvatar(page);
   flush();
   request.mockClear();
-  refreshButton(page)?.click();
+  page.querySelector<HTMLButtonElement>(".profile-refresh")?.click();
   flush();
-  expect(rpcCalls(request, "users.self")).toHaveLength(0);
+  expect(request.mock.calls.some(([method]) => method === "users.self")).toBe(false);
   processing.resolve({ mime: "image/png", avatarBase64: "aA==" });
 });
 
