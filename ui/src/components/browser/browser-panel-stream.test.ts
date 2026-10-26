@@ -85,7 +85,7 @@ describe("Browser panel streaming", () => {
     expect(revokedUrls).toEqual(["blob:frame-0"]);
   });
 
-  it.each([false, true])("reconnects with a pending screenshot (failed: %s)", async (failed) => {
+  it("retries a failed reconnect while a screenshot is pending", async () => {
     const { screenshot, controller, calls } = setupScreenshot();
     const socket = await start(controller);
     socket.disconnect(1006);
@@ -93,27 +93,18 @@ describe("Browser panel streaming", () => {
     expect(calls("/screenshot")).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(calls("/screencast")).toHaveLength(2);
-    if (!failed) {
-      await receive(sockets[1]!, screencastFrame(NEXT_URL));
-      const recovered = controller.view;
-      expect(recovered?.url).toBe(NEXT_URL);
-      screenshot.resolve(screenshotAt("/old.png"));
-      await flush();
-      expect(controller.view).toBe(recovered);
-    } else {
-      sockets[1]!.disconnect(1006);
-      await flush();
-      expect(calls("/screenshot")).toHaveLength(1);
-      screenshot.resolve(screenshotAt("/fresh.png"));
-      await flush();
-      expect(controller.view?.dataUrl).toMatch(/^data:/);
-      expect(controller.loading).toBe(false);
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(calls("/screencast")).toHaveLength(3);
-      sockets[2]!.disconnect(1006);
-      await flush();
-      expect(calls("/screenshot")).toHaveLength(2);
-    }
+    sockets[1]!.disconnect(1006);
+    await flush();
+    expect(calls("/screenshot")).toHaveLength(1);
+    screenshot.resolve(screenshotAt("/fresh.png"));
+    await flush();
+    expect(controller.view?.dataUrl).toMatch(/^data:/);
+    expect(controller.loading).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(calls("/screencast")).toHaveLength(3);
+    sockets[2]!.disconnect(1006);
+    await flush();
+    expect(calls("/screenshot")).toHaveLength(2);
   });
 
   it("sizes the first stream from the viewport before any resize notification", async () => {
@@ -218,9 +209,9 @@ describe("Browser panel streaming", () => {
     await flush();
     expect(calls("/screenshot")).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(10_000);
-    await receive(sockets[1]!, screencastFrame());
+    await receive(sockets[1]!, screencastFrame(NEXT_URL));
     const streamedView = controller.view;
-    expect(streamedView?.dataUrl).toBe("blob:frame-0");
+    expectFrame(controller, 0, NEXT_URL);
     expect(controller.loading).toBe(false);
     if (closes) {
       sockets[1]!.disconnect(1006);
