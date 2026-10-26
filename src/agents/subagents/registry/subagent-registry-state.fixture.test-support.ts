@@ -14,7 +14,6 @@ import { copySubagentRunRuntimeOwner } from "./subagent-run-generation.js";
 export function createSubagentStoreRunFixture(
   overrides: Partial<SubagentRunRecord> = {},
 ): SubagentRunRecord {
-  const timing = { startedAt: 110, endedAt: 250 };
   const identity = {
     childSessionKey: "agent:main:subagent:one",
     requesterSessionKey: "agent:main:main",
@@ -27,27 +26,17 @@ export function createSubagentStoreRunFixture(
     cleanup: "keep",
     createdAt: 100,
     expectsCompletionMessage: true,
-    execution: {
-      status: "terminal",
-      ...timing,
-      outcome: { status: "ok", ...timing, elapsedMs: 140 },
-    },
+    execution: { status: "terminal", startedAt: 110, endedAt: 250, outcome: { status: "ok" } },
     completion: {
       required: true,
       resultText: "done",
-      capturedAt: 260,
       terminalReply: { disposition: "visible", text: "done" },
     },
     delivery: {
       status: "pending",
-      createdAt: 270,
-      lastAttemptAt: 280,
-      attemptCount: 2,
-      lastError: "retry later",
       payload: {
         ...identity,
         childRunId: "run-one",
-        ...timing,
         outcome: { status: "ok" },
         expectsCompletionMessage: true,
       },

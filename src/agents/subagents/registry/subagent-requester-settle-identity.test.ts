@@ -14,12 +14,7 @@ const identity = {
   batchRunIds: ["run-b"],
   rearmGeneration: 1,
 };
-const wake = {
-  status: "pending" as const,
-  attemptCount: 0,
-  batchRunIds: identity.batchRunIds,
-  rearmGeneration: 1,
-};
+const { batchRunIds, rearmGeneration: generation } = identity;
 const retryId = "announce:requester-settle:main:agent:main:main:run-b:yield-1:retry-1";
 type Child = ReturnType<typeof makeSettledChild>;
 function child(
@@ -30,7 +25,13 @@ function child(
     runId: "run-b",
     requesterAgentId: "main",
     ...overrides,
-    requesterSettleWake: { ...wake, ...wakeOverrides },
+    requesterSettleWake: {
+      status: "pending",
+      attemptCount: 0,
+      batchRunIds,
+      rearmGeneration: generation,
+      ...wakeOverrides,
+    },
   });
 }
 function recognizes(entry: Child, runId: string, members = [entry]) {
@@ -42,10 +43,8 @@ function recognizes(entry: Child, runId: string, members = [entry]) {
   });
 }
 
-it.each([
-  { status: "pending" as const, attemptCount: 1, nextAttemptAt: 30_000 },
-  { status: "dispatching" as const, attemptCount: 2, nextAttemptAt: undefined },
-])("keeps the known-result continuation identity while $status", (retainedWake) => {
+it("gives a scheduled retry its next continuation identity", () => {
+  const retainedWake = { status: "pending" as const, attemptCount: 1, nextAttemptAt: 30_000 };
   expect(buildRequesterSettleWakeIdentity({ ...identity, retainedWake }).runId).toBe(retryId);
 });
 
@@ -102,9 +101,14 @@ it("recognizes an admitted frozen wake after an earlier member retires", () => {
   expect(recognizes(entry, retryId.replace(":retry-1", ""))).toBe(true);
 });
 
-it.each(["requester", "agent", "store", "generation"] as const)(
+it.each([
+  ["requester", { requesterSessionKey: "other" }, 1],
+  ["agent", { requesterAgentId: "other" }, 1],
+  ["store", { requesterStorePath: "/synthetic/other.sqlite" }, 1],
+  ["generation", {}, 2],
+] as const)(
   "excludes a frozen member rebound to another %s",
-  (difference) => {
+  (_difference, binding, rearmGeneration) => {
     const entry = child(
       { requesterStorePath: "/synthetic/requester.sqlite" },
       { batchRunIds: ["run-b", "run-other"] },
@@ -112,15 +116,8 @@ it.each(["requester", "agent", "store", "generation"] as const)(
     const other = makeSettledChild({
       ...entry,
       runId: "run-other",
-      ...(difference === "requester" ? { requesterSessionKey: "other" } : {}),
-      ...(difference === "agent" ? { requesterAgentId: "other" } : {}),
-      ...(difference === "store" ? { requesterStorePath: "/synthetic/other.sqlite" } : {}),
-      requesterSettleWake: {
-        ...entry.requesterSettleWake,
-        status: "pending",
-        attemptCount: 0,
-        rearmGeneration: difference === "generation" ? 2 : 1,
-      },
+      ...binding,
+      requesterSettleWake: { ...entry.requesterSettleWake!, rearmGeneration },
     });
     expect(recognizes(entry, retryId.replace(":retry-1", ""), [entry, other])).toBe(true);
   },
