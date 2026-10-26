@@ -36,6 +36,8 @@ Add `--update-reload` to continue update samples through the real **Server updat
 
 `--warm-picker` opens, searches and closes the active pane's model picker before the drop. After the measured reconnect interval it verifies the same retained menu node can reopen and search, with no session patch or message send. This checks an already opened, retained panel across reconnect. The node-retention assertion excludes `update`, which intentionally replaces the document; use a focused `--scenarios long-sleep --panes 1` comparison for retained-menu timing. The separate interaction scenarios `model-picker-first-open-search` and `model-picker-open-search` compare initial opening with the existing reopened-panel path on desktop/mobile; the first-open scenario also reports automation-to-focus `firstOpenReadyMs`.
 
+For exact call counts during a picker interaction, run `scripts/bench-control-ui-interactions.ts --function-counts --steps model-picker-first-open-search` with the same bundle arguments. This diagnostic writes V8 precise function/block coverage to each sample's `functionCoverageArtifact`; it does not produce timing summaries. Run it separately from `--trace` or `--selector-stats`, since coverage instrumentation changes execution cost.
+
 ```sh
 NODE_DISABLE_COMPILE_CACHE=1 node --import ./scripts/tsx.mjs \
   scripts/bench-control-ui-reconnect.ts \

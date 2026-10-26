@@ -71,6 +71,7 @@ const { values } = parseArgs({
     "selector-stats": { type: "boolean", default: false },
     theme: { type: "string", default: "light" },
     "thread-cpu-time": { type: "boolean", default: false },
+    "function-counts": { type: "boolean", default: false },
     "first-pair-screenshots": { type: "boolean", default: false },
     "invalidation-tracking": { type: "boolean", default: false },
     "resource-counts": { type: "boolean", default: false },
@@ -91,6 +92,9 @@ if (values["projection-counts"] && !values["projection-fixtures"]) {
 }
 if (values["projection-counts"] && trace) {
   throw new Error("Run precise projection counts separately from CPU profiles/traces");
+}
+if (values["function-counts"] && trace) {
+  throw new Error("Run precise function counts separately from CPU profiles/traces");
 }
 if (values["projection-fixtures"] && values["resource-counts"]) {
   throw new Error("Run native resource counts separately from projection fixture measurements");
@@ -365,6 +369,7 @@ type Result = {
   processWakeups?: ProcessWakeups;
   projectionFixture?: ProjectionFixtureFacts;
   projectionCoverageArtifact?: string;
+  functionCoverageArtifact?: string;
   projectionScreenshotArtifact?: string;
   measurementClass?:
     | "production-interaction"
@@ -600,6 +605,9 @@ try {
           ? "CDP trace + 1ms CPU profiler (overhead included)"
           : "untraced CDP metrics",
         metricTimeDomain: values["thread-cpu-time"] ? "threadTicks" : "timeTicks",
+        functionCounts: values["function-counts"]
+          ? "Precise function/block counts during the interaction; diagnostic overhead, not timing evidence."
+          : false,
         cpuThrottle,
         retainedHeap: values["retained-heap"]
           ? "Separate GC-controlled proof: collect before tracing and after action metrics/tracing; not a timing comparison."
@@ -887,13 +895,14 @@ try {
               await cdp.send("Network.setBypassServiceWorker", { bypass: false });
               await cdp.send("Network.disable");
             }
-            result.measurementClass = scenario.diagnostic
-              ? "diagnostic"
-              : scenario.projectionFamily
-                ? values["projection-counts"]
-                  ? "projection-counter"
-                  : "projection-cpu"
-                : "production-interaction";
+            result.measurementClass =
+              scenario.diagnostic || values["function-counts"]
+                ? "diagnostic"
+                : scenario.projectionFamily
+                  ? values["projection-counts"]
+                    ? "projection-counter"
+                    : "projection-cpu"
+                  : "production-interaction";
             if (scenario.projectionFamily) {
               result.projectionFixture = await prepareProjectionFixture(
                 page,
@@ -1081,7 +1090,10 @@ try {
               return { durations, observer };
             });
             const before = await metrics(cdp);
-            if (scenario.projectionFamily && values["projection-counts"]) {
+            if (
+              values["function-counts"] ||
+              (scenario.projectionFamily && values["projection-counts"])
+            ) {
               await cdp.send("Profiler.enable");
               await cdp.send("Profiler.startPreciseCoverage", { callCount: true, detailed: true });
               preciseCoverage = true;
@@ -1098,9 +1110,16 @@ try {
               const coverage = await cdp.send("Profiler.takePreciseCoverage");
               await cdp.send("Profiler.stopPreciseCoverage");
               preciseCoverage = false;
-              const artifact = `${artifactPrefix}.projection-coverage.json`;
-              await writeFile(path.join(artifactDir, artifact), JSON.stringify(coverage));
-              result.projectionCoverageArtifact = artifact;
+              if (values["function-counts"]) {
+                const artifact = `${artifactPrefix}.function-coverage.json`;
+                await writeFile(path.join(artifactDir, artifact), JSON.stringify(coverage));
+                result.functionCoverageArtifact = artifact;
+              }
+              if (scenario.projectionFamily && values["projection-counts"]) {
+                const artifact = `${artifactPrefix}.projection-coverage.json`;
+                await writeFile(path.join(artifactDir, artifact), JSON.stringify(coverage));
+                result.projectionCoverageArtifact = artifact;
+              }
             }
             const after = await metrics(cdp);
             if (processSession && result.rendererProcessMetrics?.before) {
@@ -1512,6 +1531,7 @@ const summary = viewports
             ).map((metric) => [
               metric,
               !diagnostic &&
+              !values["function-counts"] &&
               samples.length &&
               !values["projection-counts"] &&
               samples.every((row) => row[metric] !== undefined)
