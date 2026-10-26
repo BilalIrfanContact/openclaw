@@ -13,6 +13,7 @@ import {
   resolveGatewaySystemdServiceName,
   resolveGatewayWindowsTaskName,
 } from "../../src/daemon/constants.js";
+import type { UserProfilesDatabase } from "../../src/state/user-profiles.types.js";
 import { createGatewayBenchEnv } from "../lib/gateway-bench-runtime.ts";
 
 const { values } = parseArgs({
@@ -79,7 +80,6 @@ const [
   { appendTranscriptEventsInTransaction },
   agentDb,
   stateDb,
-  users,
   usersSchema,
   kysely,
 ] = await Promise.all([
@@ -87,7 +87,6 @@ const [
   import("../../src/config/sessions/session-accessor.sqlite-transcript-store.js"),
   import("../../src/state/openclaw-agent-db.js"),
   import("../../src/state/openclaw-state-db.js"),
-  import("../../src/state/user-profiles-internal.js"),
   import("../../src/state/user-profiles-schema.js"),
   import("../../src/infra/kysely-sync.js"),
 ]);
@@ -97,8 +96,8 @@ stateDb.runOpenClawStateWriteTransaction(
   ({ db }) => {
     kysely.executeSqliteQuerySync(
       db,
-      users
-        .userProfilesDb(db)
+      kysely
+        .getNodeSqliteKysely<UserProfilesDatabase>(db)
         .insertInto("user_profiles")
         .values(
           Array.from({ length: 24 }, (_, index) => ({
