@@ -15,6 +15,7 @@ import {
 } from "../test-utils/openclaw-test-state.js";
 import { prepareCronRunAdmission } from "./run-admission.js";
 import { TEST_SCHEDULED_EXECUTION } from "./scheduled-occurrence.test-support.js";
+import { cronTestInput } from "./service.fixture-builders.test-support.js";
 import type { CronService } from "./service.js";
 import { createCronServiceWithStateForTest, createNoopLogger } from "./service.test-harness.js";
 import type { CronServiceDeps } from "./service/state.js";
@@ -83,16 +84,14 @@ describe("scheduled cron execution identity", () => {
         runIsolatedAgentJob,
       });
       cron = service.cron;
-      const job = await cron.add({
-        name: "identity-linked scheduled run",
-        agentId: "main",
-        enabled: true,
-        schedule: { kind: "every", everyMs: 60_000 },
-        sessionTarget: "isolated",
-        wakeMode: "next-heartbeat",
-        payload: { kind: "agentTurn", message: "record one scheduled execution" },
-        delivery: { mode: "none" },
-      });
+      const job = await cron.add(
+        cronTestInput({
+          name: "identity-linked scheduled run",
+          agentId: "main",
+          payload: { kind: "agentTurn", message: "record one scheduled execution" },
+          delivery: { mode: "none" },
+        }),
+      );
       clock.now = job.state.nextRunAtMs!;
       await onTimer(service.state);
       expect(runIsolatedAgentJob).toHaveBeenCalledOnce();

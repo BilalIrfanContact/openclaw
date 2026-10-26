@@ -15,36 +15,28 @@ import { createStorePathFixture, expectPathMissing, makeStore } from "./store.te
 
 const makeStorePath = createStorePathFixture();
 
-it("rejects unrecognized historical quarantine files without modifying them", async () => {
-  const { storePath } = await makeStorePath();
-  const quarantinePath = storePath.replace(/\.json$/, "-quarantine.json");
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(
-    quarantinePath,
-    JSON.stringify({ version: 2, jobs: [{ reason: "old-shape", raw: "keep-me" }] }),
-  );
-
-  await expect(loadLegacyCronQuarantineForMigration(storePath)).rejects.toThrow(
-    /Unsupported cron quarantine file shape/,
-  );
-
-  expect(JSON.parse(await fs.readFile(quarantinePath, "utf-8"))).toMatchObject({
-    jobs: [{ raw: "keep-me" }],
-  });
-});
-
-it("rejects malformed UTF-8 historical quarantine without modifying its bytes", async () => {
-  const { storePath } = await makeStorePath();
-  const quarantinePath = storePath.replace(/\.json$/, "-quarantine.json");
-  const bytes = Buffer.from('{"version":1,"jobs":[{"reason":"\x80","raw":"keep-me"}]}', "latin1");
-  await fs.mkdir(path.dirname(storePath), { recursive: true });
-  await fs.writeFile(quarantinePath, bytes);
-
-  await expect(loadLegacyCronQuarantineForMigration(storePath)).rejects.toThrow(
+it.each([
+  [
+    "unrecognized shape",
+    Buffer.from(JSON.stringify({ version: 2, jobs: [{ reason: "old-shape", raw: "keep-me" }] })),
+    "Unsupported cron quarantine file shape",
+  ],
+  [
+    "malformed UTF-8",
+    Buffer.from('{"version":1,"jobs":[{"reason":"\x80","raw":"keep-me"}]}', "latin1"),
     "must be valid UTF-8",
-  );
-  expect(await fs.readFile(quarantinePath)).toEqual(bytes);
-});
+  ],
+] as const)(
+  "rejects %s historical quarantine without modifying its bytes",
+  async (_name, bytes, error) => {
+    const { storePath } = await makeStorePath();
+    const quarantinePath = storePath.replace(/\.json$/, "-quarantine.json");
+    await fs.mkdir(path.dirname(storePath), { recursive: true });
+    await fs.writeFile(quarantinePath, bytes);
+    await expect(loadLegacyCronQuarantineForMigration(storePath)).rejects.toThrow(error);
+    expect(await fs.readFile(quarantinePath)).toEqual(bytes);
+  },
+);
 
 it("preserves recovery rows when maintenance authority expires before worker dispatch", async () => {
   const { storePath } = await makeStorePath();
