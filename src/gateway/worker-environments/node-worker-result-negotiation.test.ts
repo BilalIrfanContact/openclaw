@@ -6,15 +6,26 @@ import {
   manifestCaptureOutput,
   seedNodeWorkspaceRepositories,
   unchangedWorkspaceUpload,
+  workspaceActions,
   workspaceCommandResult,
   workspaceSnapshot,
   workspaceTransfer,
 } from "./node-worker-tunnel.test-support.js";
-import { createNodeWorkerWorkspaceActions } from "./node-worker-workspace-actions.js";
 import type { WorkerWorkspaceCommand } from "./tunnel-contract.js";
 import { captureWorkspaceManifest } from "./workspace-manifest-worker.js";
 
 const temporary = useAutoCleanupTempDirTracker(afterEach);
+const source = (root: string, ref = "test") => ({
+  kind: "local" as const,
+  path: root,
+  stagedResult: { ref: `refs/openclaw/worker-results/${ref}`, record: () => {} },
+  journal: {
+    load: async () => undefined,
+    begin: async () => {},
+    commit: async () => {},
+    abort: async () => {},
+  },
+});
 
 it.each([false, true])(
   "requests result v2 only when the worker supports it (%s)",
@@ -33,38 +44,20 @@ it.each([false, true])(
       });
       throw finished;
     });
-    const actions = createNodeWorkerWorkspaceActions({
+    const workspace = {
+      source: source("/fixture"),
+      remoteWorkspaceDir: "/worker",
+      baseManifestRef,
+    };
+    const actions = workspaceActions({
       environmentId: "environment",
-      ownerEpoch: 1,
       sessionId: "session",
-      ownerSignal: new AbortController().signal,
-      isOwnerCurrent: () => true,
       supportsGitResults: async () => supported,
-      restoredWorkspace: {
-        source: { kind: "local", path: "/fixture" },
-        remoteWorkspaceDir: "/worker",
-        manifestRef: baseManifestRef,
-      },
+      restoredWorkspace: { ...workspace, manifestRef: baseManifestRef },
       workspaceTransfer: workspaceTransfer({ prepareUpload, revoke }),
       runWorkspaceCommand,
     });
-    await expect(
-      actions.reconcileWorkspace({
-        source: {
-          kind: "local",
-          path: "/fixture",
-          stagedResult: { ref: "refs/openclaw/worker-results/test", record: () => {} },
-          journal: {
-            load: async () => undefined,
-            begin: async () => {},
-            commit: async () => {},
-            abort: async () => {},
-          },
-        },
-        remoteWorkspaceDir: "/worker",
-        baseManifestRef,
-      }),
-    ).rejects.toBe(finished);
+    await expect(actions.reconcileWorkspace(workspace)).rejects.toBe(finished);
     expect(runWorkspaceCommand).toHaveBeenCalledOnce();
     expect(prepareUpload).toHaveBeenCalledWith(
       "environment",
@@ -87,18 +80,16 @@ it("rejects a changed worker HEAD even when the working tree still matches", asy
     ...unchangedWorkspaceUpload(snapshot, temporary.make("node-result-head-staging-")),
     gitHistory: { baseCommit, headCommit: baseCommit, descendsFromBase: true },
   };
-  const actions = createNodeWorkerWorkspaceActions({
+  const workspace = {
+    source: source(localPath, "head-check"),
+    remoteWorkspaceDir: remotePath,
+    baseManifestRef: snapshot.manifestRef,
+  };
+  const actions = workspaceActions({
     environmentId: "environment",
-    ownerEpoch: 1,
     sessionId: "session",
-    ownerSignal: new AbortController().signal,
-    isOwnerCurrent: () => true,
     supportsGitResults: async () => true,
-    restoredWorkspace: {
-      source: { kind: "local", path: localPath },
-      remoteWorkspaceDir: remotePath,
-      manifestRef: snapshot.manifestRef,
-    },
+    restoredWorkspace: { ...workspace, manifestRef: snapshot.manifestRef },
     workspaceTransfer: workspaceTransfer({
       prepareUpload: () => "upload-token",
       takeUpload: () => uploaded,
@@ -112,21 +103,7 @@ it("rejects a changed worker HEAD even when the working tree still matches", asy
             : manifestCaptureOutput(snapshot.manifestRef),
       }),
   });
-  const result = await actions.reconcileWorkspace({
-    source: {
-      kind: "local",
-      path: localPath,
-      stagedResult: { ref: "refs/openclaw/worker-results/head-check", record: () => {} },
-      journal: {
-        load: async () => undefined,
-        begin: async () => {},
-        commit: async () => {},
-        abort: async () => {},
-      },
-    },
-    remoteWorkspaceDir: remotePath,
-    baseManifestRef: snapshot.manifestRef,
-  });
+  const result = await actions.reconcileWorkspace(workspace);
   await expect(result.verifyStable()).rejects.toThrow("Git HEAD changed");
   await result.discardPreparedStagedResult?.();
 });
