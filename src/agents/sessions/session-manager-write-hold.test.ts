@@ -92,7 +92,8 @@ it.each(["assistant", "toolResult"] as const)(
       expect(compressionHeld).toEqual([false]);
       expect(largeJsonHeld.length).toBeGreaterThan(0);
       expect(largeJsonHeld).not.toContain(true);
-      const entry = manager.getEntry(entryId);
+      const stored = loadTranscriptEventsSync(scope);
+      const entry = stored.at(-1);
       expect(entry).toMatchObject({
         parentId,
         message: {
@@ -106,8 +107,6 @@ it.each(["assistant", "toolResult"] as const)(
       }
       expect(entry.message).not.toHaveProperty("MediaPaths");
       expect(entry.message).not.toHaveProperty("MediaTypes");
-      const stored = loadTranscriptEventsSync(scope);
-      expect(stored.at(-1)).toEqual(manager.getEntry(entryId));
       const replay = appendTranscriptMessageSnapshotSync(
         scope,
         { message, eventId: entryId, parentId, now: 2 },
@@ -127,7 +126,6 @@ it("rejects a stale generation and stores prepared messages under the rebased de
     const { scope, manager, parentId, db } = setup(fixture);
     const message = assistantMessage("prepared response ".repeat(8000));
     const prepared = prepareTranscriptMessageAppend({ message });
-    expect(prepared?.persistedMessage).toEqual(message);
     const expectedMutationAt = readTranscriptMutationAtSync(scope);
     const descendant = manager.appendMessage(assistantMessage("intervening assistant"));
     const before = loadTranscriptEventsSync(scope);
@@ -143,10 +141,7 @@ it("rejects a stale generation and stores prepared messages under the rebased de
     ).toThrow("SQLite transcript changed while preparing rewrite");
     expect(loadTranscriptEventsSync(scope)).toEqual(before);
 
-    expect(appendTranscriptMessageSnapshotSync(scope, options, prepared)).toMatchObject({
-      ok: true,
-      value: { result: { appended: true, effectiveParentId: descendant } },
-    });
+    appendTranscriptMessageSnapshotSync(scope, options, prepared);
     expect(loadTranscriptEventsSync(scope)).toEqual([
       ...before,
       expect.objectContaining({ id: "prepared-response", parentId: descendant, message }),

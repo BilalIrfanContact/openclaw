@@ -75,27 +75,20 @@ async function anthropicPayload(context: { messages: AgentMessage[] }) {
 
 const structuredResult = { output: "status card text" };
 it.each([
-  [
-    "assistant",
-    "assistant replay text",
-    text("assistant replay text"),
-    text("assistant replay text"),
-  ],
-  ["toolResult", "lookup result text", text("lookup result text"), "lookup result text"],
-  ["toolResult", structuredResult, [structuredResult], expect.stringContaining("status card text")],
-] as const)(
-  "replays %s JSONL content %j through Anthropic",
-  async (role, input, normalized, expected) => {
-    const context = replayContext(role, input);
-    const replayed = context.messages.find((message) => message.role === role);
-    expect(replayed?.content).toEqual(normalized);
-    const payload = await anthropicPayload(context);
-    const wire =
-      role === "assistant"
-        ? payload.messages.find((message) => message.role === role)?.content
-        : payload.messages
-            .flatMap((message) => message.content)
-            .find((block) => block.type === "tool_result")?.content;
-    expect(typeof input === "string" ? wire : String(wire)).toEqual(expected);
-  },
-);
+  ["assistant", "assistant replay text", text("assistant replay text")],
+  ["toolResult", "lookup result text", "lookup result text"],
+  ["toolResult", structuredResult, expect.stringContaining("status card text")],
+] as const)("replays %s JSONL content %j through Anthropic", async (role, input, expected) => {
+  const context = replayContext(role, input);
+  expect(context.messages.find((message) => message.role === role)?.content).toEqual(
+    typeof input === "string" ? text(input) : [input],
+  );
+  const payload = await anthropicPayload(context);
+  const wire =
+    role === "assistant"
+      ? payload.messages.find((message) => message.role === role)?.content
+      : payload.messages
+          .flatMap((message) => message.content)
+          .find((block) => block.type === "tool_result")?.content;
+  expect(typeof input === "string" ? wire : String(wire)).toEqual(expected);
+});
