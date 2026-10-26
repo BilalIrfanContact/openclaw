@@ -6,12 +6,10 @@ mutated, not a title search and not permission to expand a frozen release.
 
 ## Start from the shared ledger
 
-Prefer the [hotfix ledger](hotfix-ledger-management.md) for candidate decisions
-and release-specific assessments. Load carry-forward items and prior-release
-evidence before new discovery, then sync newly found fixes and dispositions
-back to it. An empty or incomplete ledger does not replace the pinned inventory
-below: continue looking at main and sibling releases for missed P0/P1 fixes.
-Use the existing local evidence workflow when the service or access is unavailable.
+Start with [shared candidates and assessments](hotfix-ledger-management.md),
+including carry-forward and sibling-release evidence; sync new findings and
+decisions back. Empty/incomplete records do not replace the pinned inventory
+or P0/P1 discovery below. Use local evidence when access is unavailable.
 
 ## Freeze the Audit
 

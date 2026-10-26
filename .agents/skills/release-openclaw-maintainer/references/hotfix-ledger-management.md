@@ -1,112 +1,88 @@
 # Hotfix ledger management
 
-Use `https://hotfix-ledger.openclaw.ai` as the recommended shared record for
-hotfix candidates and release-specific backport assessments. These procedures
-are part of the release skill; a separate `hotfix-ledger` skill is not required.
-Keep the existing handoff and immutable release evidence for approvals, scan
-bounds, and validation receipts. The ledger links that evidence rather than
-replacing it or introducing another publication gate.
+Prefer `https://hotfix-ledger.openclaw.ai` for shared candidates and per-release
+assessments. Keep scan inventories, approvals, and validation receipts in existing
+release evidence; link them rather than copying everything into the service.
+No separate skill installation or additional release gate is needed.
 
-## Connect and find the release
+## Access
 
-Use the agent's existing managed secret-egress path with these protected bindings:
+Check secret metadata first; installing a skill does not provision credentials.
+Managed bindings map to headers as follows:
 
-| Binding                                 | HTTPS header              |
+| Binding                                 | Header                    |
 | --------------------------------------- | ------------------------- |
 | `HOTFIX_LEDGER_CF_ACCESS_CLIENT_ID`     | `CF-Access-Client-Id`     |
 | `HOTFIX_LEDGER_CF_ACCESS_CLIENT_SECRET` | `CF-Access-Client-Secret` |
 
-Send `Accept: application/json` and an identifying User-Agent such as
-`OpenClaw-Release/1.0`. Keep credentials out of prompts, logs, and release evidence;
-missing bindings are a reason to use the fallback, not to copy another agent's
-secrets. Read authenticated `/v1/health`, `/v1/capabilities`, and the relevant
-operations in `/v1/openapi.json` for current fields, enums, and permissions.
+Use Gateway-hosted execution (`gateway_exec` in Codex), with protected egress
+enabled and both bindings allowing `hotfix-ledger.openclaw.ai`. Its injected
+variables are opaque sentinels, not plaintext; pass them unchanged in headers.
+Native shell, sandbox, and remote-node commands do not inherit these bindings.
+Without bindings, use an authorized provider from the operator's task context or
+private instructions (`$release-private` / `$one-password` when available);
+do not assume 1Password access or search arbitrary credential files. Keep values
+out of model context, logs, and artifacts. If provider fields contain complete
+`Header-Name: value` strings, strip the matching prefix and whitespace inside
+the loader; do not alter managed sentinels. If neither credential path is
+available, use the local fallback.
 
-Find the target under `GET /v1/releases?repository=openclaw%2Fopenclaw` before
-creating it. Match the intended release/branch, not just the channel. Create via
-`POST /v1/releases` when absent, recording `releaseKey`, `name`, `channel`,
-`versionLabel`, `gitRef`, and `observedHeadSha` alongside `repository` and
-`state: active`. Reuse the record on resume; separate release versions should
-remain distinguishable. The current API has beta/stable channels only: use
-`stable` for extended-stable and identify its track in `releaseKey`, `name`,
-and `gitRef`. This does not change its publication or eligibility rules.
+Send `Accept: application/json` and an identifying User-Agent, e.g.
+`OpenClaw-Release/1.0`. Authenticated `/v1/health`, `/v1/capabilities`, and
+`/v1/openapi.json` provide availability, permissions, and the current contract.
 
-## Recommended release flow
+## Recommended flow
 
-- **Discover:** load repository hotfixes and this release's assessments, including
-  blocked carry-forward work. Reuse sibling-release evidence as a starting point,
-  not a verdict for this baseline. Continue the existing pinned-main inventory,
-  P0/P1 readiness review, and authorized security reconciliation. An empty ledger
-  or an automated classification is not proof that discovery is complete.
-- **Record:** look up a fix by `sourceUnitKey` and source references before creating
-  it. Reuse its canonical identity across releases; describe an ordered companion
-  group or squash scope explicitly. Record impact, severity, rationale, confidence,
-  source PR/commit refs, dependencies, and eligibility. Newly discovered uncertain
-  fixes can start as `needs_review`; automation nominations need the same review.
-  The full scan inventory can stay in staging evidence, including unrelated commits.
-- **Assess and select:** upsert the hotfix/release pair against the exact head being
-  assessed. Record applicability, handling, dependencies, exclusions, adaptations,
-  and supporting evidence. Use these records to present the proposed set, then
-  record the owner's decisions and approval evidence. Eligibility and a clean
-  applicability probe are recommendations, not inclusion authority.
-- **Apply and verify:** follow the existing approved backport and validation flow.
-  Record `destinationCommitRefs` and proof after applying a fix. Update the release's
-  observed head as it changes and reassess affected decisions; `stale` assessments
-  need review, not a timestamp/SHA-only rewrite to make them look current.
-- **Finish or hand off:** retain included, deferred, and blocked decisions with
-  final branch/version/SHA evidence so the next owner can continue. Prefer updating
-  assessments over deleting history. Archive a release when it is no longer active,
-  not simply because one candidate has been published.
+1. **Resolve:** find the intended repository/release/branch before creating a
+   release record; reuse it on resume. Record version, ref, and observed head.
+   The API supports beta/stable channels: represent extended-stable as `stable`
+   with its track explicit in `releaseKey`, `name`, and `gitRef`.
+2. **Discover:** load candidates, target assessments, and blocked carry-forward
+   work. Continue pinned-main, sibling-release, P0/P1, and authorized security
+   discovery. Prior assessments and automation suggestions are evidence, not
+   completeness or applicability proof for this baseline.
+3. **Assess/select:** deduplicate by `sourceUnitKey` and source refs; record the
+   smallest complete fix/group, impact, eligibility, dependencies, and evidence.
+   Upsert its target-release assessment at the assessed SHA. Keep existing
+   selection authority; eligibility or clean application is not approval.
+4. **Apply/verify:** follow the approved backport flow; record destination commits
+   and proof. Update the observed head and review stale assessments rather than
+   merely replacing their SHA. Keep deferred/blocked work for the next owner.
+5. **Handoff:** link the release ID, assessed SHA, scan/selection evidence, and any
+   unsynced decisions. Archive inactive releases rather than deleting history.
 
-The current assessment fields distinguish `applicability` (`unknown`, `needed`,
-`already_present`, `not_affected`) from `handling` (`unknown`, `straightforward`,
-`adaptation_required`, `blocked`). A deferred fix can still be needed and
-straightforward; a fix skipped on one line may suit another. Put proposed,
-approved, included, deferred, or skipped dispositions and their reasons in
-`notes`, with evidence links. Do not mark a fix globally `not_a_hotfix` merely
-because one release excludes it. P0/P1 priority is separate from API severity;
-retain it in the rationale/evidence rather than inventing enum values.
+Use `applicability` for needed/already-present/not-affected decisions and
+`handling` for straightforward/adaptation-required/blocked work; consult OpenAPI
+for exact enums. Put proposed/approved/included/deferred/skipped dispositions
+and reasons in `notes`, with evidence links. Deferral is not necessarily blocked;
+one release's exclusion does not make a fix globally `not_a_hotfix`. Keep P0/P1
+priority in rationale/evidence, separate from API severity.
 
-## API mechanics
+## API essentials
 
-| Record     | Read/list                                 | Create or update                                                     |
-| ---------- | ----------------------------------------- | -------------------------------------------------------------------- |
-| Hotfix     | `/v1/hotfixes`, `/v1/hotfixes/{id}`       | POST collection; PATCH individual                                    |
-| Release    | `/v1/releases`, `/v1/releases/{id}`       | POST collection; PATCH individual                                    |
-| Assessment | `/v1/assessments`, `/v1/assessments/{id}` | PUT `/v1/releases/{releaseId}/hotfixes/{hotfixId}`; PATCH individual |
+- GET/POST `/v1/hotfixes` and `/v1/releases`; GET/PATCH their `/{id}` routes.
+- GET `/v1/assessments` or `/{id}`; PUT
+  `/v1/releases/{releaseId}/hotfixes/{hotfixId}` to create/update a pair, or
+  PATCH `/v1/assessments/{id}`.
+- Filter by repository and assessment `releaseId`; follow `{items, next}` with
+  `after=next` until null (`limit` ≤100). Consult OpenAPI for create fields/filters.
+- Writes use JSON, `Content-Type: application/json`, `Idempotency-Key`, and
+  `X-Change-Reason`. PATCH needs current `expectedRevision`; pair PUT uses 0
+  for creation, current revision for updates. Replay uncertain writes with the
+  exact key/body. Resolve 409s by reading/reconciling, not blind overwrites.
+  Authentication supplies actor/assessor.
+- Audit/diagnostics help investigation. Export, bulk, backup/restore, and deletion
+  are documented administrative operations, not routine release steps.
 
-Follow list pagination: `{items, next}`, passing `after=next` until null;
-`limit` is at most 100. Filter by repository and, for assessments, `releaseId`.
-Use OpenAPI for additional filters and required create fields rather than
-assuming the table is a complete request schema.
+## Fallback and privacy
 
-Mutations use `Content-Type: application/json`, `Idempotency-Key`, and
-`X-Change-Reason`. PATCH uses the current `expectedRevision`; pair PUT uses 0
-for creation or the current revision
-for an update. Retain the exact body and key for an uncertain write: exact replay
-returns its saved result. A 409 needs a fresh read and reconciliation, not a new
-create or a blind overwrite. The verified identity supplies actor/assessor.
-For routine diagnosis, use the authenticated audit and admin diagnostics endpoints.
-Export, bulk operations, backup/restore, and permanent deletion are available
-through the documented API for separately scoped maintenance, not release steps.
+If access, service availability, or required capabilities prevent use, note why
+and continue local backport evidence. Keep pending updates there; reconcile with
+current records at a useful recovery checkpoint, without delaying publication or
+overwriting another owner. Request/revision errors normally need correction, not
+fallback. Existing security reconciliation and release gates still apply.
 
-## When the ledger is unavailable
-
-If credentials/access, service availability, or a required API capability prevent
-use, note the limitation once and continue the existing local backport ledger and
-handoff. Keep pending updates with that evidence; retry at a useful checkpoint
-rather than polling or delaying publication. On recovery, read current records,
-reconcile uncertain writes, and sync outstanding decisions without discarding
-another owner's work. A validation error or revision conflict is normally something
-to fix, not evidence that the service is down. This fallback concerns ledger
-bookkeeping only; existing security reconciliation and release gates still apply.
-
-## Private security evidence
-
-Keep unpublished GHSA details, exploit notes, and private commit references in
-the approved security record unless this ledger is explicitly approved for that
-material and audience. Public release evidence should contain only the permitted
-opaque pending/cleared status. Authenticated access is not disclosure permission;
-a future public dashboard would need a deliberately sanitized view, not raw
-records, exports, or audit events. Follow the API contract regardless of its
-storage backend; no database migration is part of using this workflow.
+Keep unpublished GHSA details/private refs in the approved security record unless
+this ledger is approved for that audience and material. Public evidence gets only
+the permitted opaque pending/cleared status. A public dashboard would need a
+sanitized view, never raw records, exports, or audit history.

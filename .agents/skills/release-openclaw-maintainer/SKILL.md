@@ -43,14 +43,11 @@ Read only the references needed for the selected phase:
 
 ## Hotfix ledger management
 
-For Tideclaw and other release-owning sessions, use the
-[hotfix ledger](references/hotfix-ledger-management.md) as the recommended
-shared record for backport discovery, selection, and outcomes. Start with its
-existing candidates, add discoveries from main and other releases, and keep
-release-specific assessments current as fixes are selected and shipped.
-If access or the service is unavailable, continue with the existing local
-backport evidence and reconcile later. This is a working convention, not a new
-release gate; adapt the mechanics to the task without changing release authority.
+Prefer the [shared hotfix ledger](references/hotfix-ledger-management.md) for
+backport discovery, selection, and outcomes, including Tideclaw-owned releases.
+Reuse candidates, add discoveries from main/sibling releases, and update each
+release's assessments. If access is unavailable, keep local evidence and sync
+later. This is recommended bookkeeping, not another release gate.
 
 ## Shared release boundaries
 
