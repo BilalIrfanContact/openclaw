@@ -47,7 +47,8 @@ async function fixture({ hold = false, cooperate = true, timeoutMs = 0 } = {}) {
         }),
     },
   );
-  const environment = await support.seedReady("worker-identity");
+  const { environmentId, ownerEpoch } = await support.seedReady("worker-identity");
+  const environment = { environmentId, ownerEpoch };
   const operations: Promise<unknown>[] = [];
   const track = (operation: Promise<unknown>) => {
     const pending = operation.catch((error: unknown) => error);
@@ -63,14 +64,8 @@ async function fixture({ hold = false, cooperate = true, timeoutMs = 0 } = {}) {
     settled,
     effect,
     resolveIdentity,
-    lookup: () => track(service.resolveSshIdentity(environment.environmentId)),
-    start: () =>
-      track(
-        service.startTunnel({
-          environmentId: environment.environmentId,
-          ownerEpoch: environment.ownerEpoch,
-        }),
-      ),
+    lookup: () => track(service.resolveSshIdentity(environmentId)),
+    start: () => track(service.startTunnel(environment)),
     [Symbol.asyncDispose]: async () => {
       release.resolve();
       await Promise.all(operations);
@@ -122,8 +117,7 @@ it("rejects a late identity and its queued lookup after the lease owner changes"
   await f.entered.promise;
   const second = f.lookup();
   await f.service.attachSession({
-    environmentId: f.environment.environmentId,
-    ownerEpoch: f.environment.ownerEpoch,
+    ...f.environment,
     sessionId: "queued-new-owner",
   });
   f.release.resolve();

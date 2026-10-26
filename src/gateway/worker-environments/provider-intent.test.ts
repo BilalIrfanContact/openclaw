@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { requireGit } from "../../agents/worktrees/git.js";
-import type { WorkerProvider } from "../../plugins/types.js";
 import { readWorkerProjectPreparation } from "./preparation-identity.schema.js";
 import { createWorkerProviderIntent } from "./provider-intent.js";
 import { nodeArtifacts, repository } from "./provider-lifecycle.test-support.js";
@@ -18,17 +17,14 @@ describe("prepared worker intent admission", () => {
       disableSigning: true,
       content: "base\n",
     });
-    const target = vi.fn<NonNullable<WorkerProvider["resolvePreparationTarget"]>>(
-      (_profile, machineClass, os) => ({
-        machineClass: machineClass ?? "small",
-        platform: os ?? "linux",
-        arch: "amd64",
-      }),
-    );
     const provider = support.createProvider({
       requiresNodeEnrollment: true,
       supportsProjectPreparation: () => true,
-      resolvePreparationTarget: target,
+      resolvePreparationTarget: (_profile, machineClass = "small", platform = "linux") => ({
+        machineClass,
+        platform,
+        arch: "amd64",
+      }),
     });
     const prepareNodeArtifacts = vi.fn(async () => nodeArtifacts(["runtime-plugin"]));
     const resumeProvision = vi.fn(async (record: WorkerEnvironmentRecord) => record);
@@ -49,7 +45,7 @@ describe("prepared worker intent admission", () => {
       options: Parameters<typeof owner.createWithProfile>[2] = {},
       admitted?: Parameters<typeof owner.createWithProfile>[3],
     ) => owner.createWithProfile("development", key, { projectPath, ...options }, admitted);
-    const spies = { target, prepareNodeArtifacts, resumeProvision };
+    const spies = { prepareNodeArtifacts, resumeProvision };
     return { owner, provider, projectPath, spies, prepare, create };
   }
 
@@ -69,7 +65,10 @@ describe("prepared worker intent admission", () => {
     const options = { machineClass: "large", os: "linux", signal: controller.signal };
     const intent = await f.prepare(options);
     expect(intent.profileSnapshot.project?.preparation?.key).toMatch(/^[a-f0-9]{64}$/u);
-    expect(f.spies.target).toHaveBeenCalledWith({ region: "test" }, "large", "linux");
+    expect(intent.profileSnapshot.project?.preparation?.target).toMatchObject({
+      machineClass: "large",
+      platform: "linux",
+    });
     expect(support.testState.store.list()).toEqual([]);
     expect(f.spies.resumeProvision).not.toHaveBeenCalled();
     controller.abort();
