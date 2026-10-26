@@ -78,10 +78,7 @@ it("repairs readable entries before independently preparing mixed agent database
   });
   const brokenDatabasePath = path.join(
     fixture.stateDir,
-    "agents",
-    "broken",
-    "agent",
-    "openclaw-agent.sqlite",
+    "agents/broken/agent/openclaw-agent.sqlite",
   );
   fs.mkdirSync(path.dirname(brokenDatabasePath), { recursive: true });
   fs.writeFileSync(brokenDatabasePath, "not sqlite");

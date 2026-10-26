@@ -88,7 +88,7 @@ describe("pinned file descriptors", () => {
     },
   );
 
-  it("hashes all bytes without moving or closing the borrowed descriptor", async () => {
+  it("hashes and copies all bytes without moving or closing borrowed descriptors", async () => {
     const sourcePath = path.join(directory, "source");
     await fs.writeFile(sourcePath, bytes);
     await using source = await fs.open(sourcePath, "r");
@@ -100,13 +100,8 @@ describe("pinned file descriptors", () => {
     const remaining = Buffer.alloc(bytes.length);
     const count = readSync(source.fd, remaining);
     expect(remaining.subarray(0, count)).toEqual(bytes.subarray(2));
-  });
-
-  it("copies and observes all source bytes while retaining both handle positions", async () => {
-    await using source = await fs.open(path.join(directory, "source"), "wx+");
     const targetPath = path.join(directory, "target");
     await using target = await fs.open(targetPath, "wx+");
-    await source.writeFile(bytes);
     await target.writeFile("seed");
     const observed = createHash("sha256");
     const copied = await copyFileHandle(source, target, {

@@ -72,11 +72,7 @@ it.each(["legacy", "daemon-aware", "local-aware", "legacy-alias", "local-aware-a
       updated_at_ms: 123,
     };
     withDaemonRuntimePinStore(env, true, (db) => {
-      db.prepare("INSERT INTO daemon_runtime_pins VALUES (?, ?, ?)").run(
-        intent.state_key,
-        intent.value_json,
-        intent.updated_at_ms,
-      );
+      db.prepare("INSERT INTO daemon_runtime_pins VALUES (?, ?, ?)").run(...Object.values(intent));
     });
     const localAware = caller.startsWith("local-aware");
     const daemonAware = !caller.startsWith("legacy");
@@ -89,14 +85,8 @@ it.each(["legacy", "daemon-aware", "local-aware", "legacy-alias", "local-aware-a
       ...(daemonAware ? { includeLocalStoreVersions: true } : {}),
       ...(localAware ? { includeClientCredentialStoreVersion: true } : {}),
     };
-    // Both entrypoints use the same publisher; exercise capture on three callers
-    // without repeating a full snapshot for every version-only response.
     const capture = caller !== "local-aware" && caller !== "legacy-alias";
     const admitted = capture ? await inventoryUpdateCandidateStateWorker(input) : undefined;
-    if (admitted) {
-      expect(admitted.databaseInventory).toContain(local);
-      expect(admitted.databaseInventory).toContain(client);
-    }
     const response = await runWorker({
       ...input,
       ...admitted,

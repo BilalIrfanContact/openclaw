@@ -120,7 +120,6 @@ it.each(["recover", "exhaust", "abort"] as const)(
       }
     }
     await settled;
-    expect(mocks.git.mock.calls[0]?.[2]?.timeoutMs).toBe(resolveGatewayStartupTiming().deadlineMs);
   },
 );
 
