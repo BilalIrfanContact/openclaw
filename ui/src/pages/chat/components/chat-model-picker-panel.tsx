@@ -29,9 +29,12 @@ import { ChatModelSearchContext, type ChatModelSearchCatalog } from "./chat-mode
 import { createModelPickerWindow } from "./chat-model-picker-window.tsx";
 import type { ChatModelPickerParams } from "./chat-model-picker.tsx";
 
-function prepareChatModelPickerPanel(params: ChatModelPickerParams) {
-  const defaultModelOption = params.modelOptions.find((option) => option.isDefault);
-  const activeModelOption = params.modelOptions.find((option) =>
+function prepareChatModelPickerPanel(
+  params: ChatModelPickerParams,
+  modelOptions: ModelPickerOption[],
+) {
+  const defaultModelOption = modelOptions.find((option) => option.isDefault);
+  const activeModelOption = modelOptions.find((option) =>
     isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
   );
   const leadingModelOption = activeModelOption ?? defaultModelOption;
@@ -44,13 +47,13 @@ function prepareChatModelPickerPanel(params: ChatModelPickerParams) {
   // Default restores inheritance; it stays ahead of ranked model choices. When a
   // provider recommends models, they follow, and the rest collapse under "All models".
   const recommendingProviders = new Set(
-    params.modelOptions.filter((option) => option.recommended).map(groupProvider),
+    modelOptions.filter((option) => option.recommended).map(groupProvider),
   );
   const providerGroups = new Map<
     string,
     { lead: ModelPickerOption[]; more: ModelPickerOption[] }
   >();
-  for (const option of params.modelOptions) {
+  for (const option of modelOptions) {
     const provider = groupProvider(option);
     const group = providerGroups.get(provider) ?? { lead: [], more: [] };
     if (option.isDefault) {
@@ -85,8 +88,8 @@ function prepareChatModelPickerPanel(params: ChatModelPickerParams) {
   );
   const targetGroups = params.targetGroups ?? [];
   const targetOptionCount = targetGroups.reduce((count, group) => count + group.options.length, 0);
-  const hasOptions = params.modelOptions.length > 0 || targetGroups.length > 0;
-  const hasSelectableModelOptions = params.modelOptions.some((option) => !option.disabled);
+  const hasOptions = modelOptions.length > 0 || targetGroups.length > 0;
+  const hasSelectableModelOptions = modelOptions.some((option) => !option.disabled);
   return {
     orderedProviderGroups,
     activeProvider,
@@ -121,7 +124,8 @@ export function ChatModelPickerPanel(panel: {
   searchRef: (element: HTMLInputElement) => void;
 }) {
   const search = useContext(ChatModelSearchContext);
-  const state = createMemo(() => prepareChatModelPickerPanel(panel.params));
+  const modelOptions = createMemo(() => panel.params.getModelOptions());
+  const state = createMemo(() => prepareChatModelPickerPanel(panel.params, modelOptions()));
   const accounts = createMemo(() =>
     panel.params.accountSection?.viewProps(
       state().orderedOptions.length + state().targetOptionCount,
@@ -541,7 +545,7 @@ export function ChatModelPickerPanel(panel: {
                 }
                 onKeyDown={handleModelSearchKeydown}
               />
-              {panel.params.modelOptions.length > 0 ? (
+              {modelOptions().length > 0 ? (
                 <ChatModelCatalogRefresh state={panel.params.modelCatalogState} />
               ) : undefined}
             </div>
@@ -549,11 +553,11 @@ export function ChatModelPickerPanel(panel: {
           {renderCatalogStatus()(() => (
             <ChatModelCatalogState
               state={panel.params.modelCatalogState}
-              hasOptions={panel.params.modelOptions.length > 0}
+              hasOptions={modelOptions().length > 0}
               hasSelectableOptions={state().hasSelectableModelOptions}
               onModelSetup={panel.params.onModelSetup}
               emptyLabel={
-                panel.params.modelOptions.some(
+                modelOptions().some(
                   (option) =>
                     option.unavailableReason === "missing-auth" &&
                     resolveModelRuntimeRoute(option.provider, option.agentRuntimeId) ===

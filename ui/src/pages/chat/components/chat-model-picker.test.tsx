@@ -1,16 +1,20 @@
 /* @vitest-environment jsdom */
+import { createSignal } from "solid-js";
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { findMenuShortcut } from "../../../components/menu-shortcuts.ts";
 import type { ModelProviderAuthLabel } from "../../../lib/model-provider-auth-label.ts";
 import { installModelPickerLayout } from "../../../test-helpers/model-picker-layout.ts";
+import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
 import {
   modelControlSelector,
   modelOption as option,
+  modelPickerParams,
   modelPickerProps as pickerProps,
   mountModelPicker as mountPicker,
   waitForModelMenu as waitForMenu,
 } from "./chat-model-picker.test-support.tsx";
+import { ChatModelPicker } from "./chat-model-picker.tsx";
 
 // Cold code loading is covered in Chromium; these cases exercise the loaded panel.
 beforeAll(async () => {
@@ -52,6 +56,39 @@ function accountSection(onSelect = vi.fn(), open = false) {
     }),
   };
 }
+
+it("defers full catalog reads until first open and uses the latest options", async () => {
+  let options = [option("openai", "old")];
+  const getModelOptions = vi.fn(() => options);
+  const params = modelPickerParams(pickerProps({ triggerModelLabel: "Current" }));
+  let openPicker!: () => void;
+  const { container } = mountSolid(() => {
+    const [open, setOpen] = createSignal(false);
+    openPicker = () => {
+      setOpen(true);
+      flush();
+    };
+    return (
+      <ChatModelPicker
+        {...params}
+        getModelOptions={getModelOptions}
+        triggerModelOption={{ provider: "openai", supportsTools: false }}
+        open={open()}
+      />
+    );
+  });
+  flush();
+  expect(getModelOptions).not.toHaveBeenCalled();
+  expect(control(container, "select")?.getAttribute("data-chat-model-tools")).toBe("unavailable");
+  expect(container.querySelector(".chat-controls__model-menu")).toBeNull();
+
+  options = [option("openai", "latest")];
+  openPicker();
+  await waitForMenu(container);
+  expect(getModelOptions).toHaveBeenCalled();
+  expect(control(container, "option", "openai/latest")).not.toBeNull();
+  expect(control(container, "option", "openai/old")).toBeNull();
+});
 
 it("forgets disclosure for removed providers", async () => {
   const params = pickerProps({

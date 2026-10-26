@@ -18,10 +18,9 @@ import type { ModelProviderAuthLabel } from "../../../lib/model-provider-auth-la
 import { registerEnglishCatalog, t } from "../../../lib/reactive/i18n.ts";
 import type { ChatContextWindowControlParams } from "./chat-context-window-control.tsx";
 import type { ChatModelAccountSection } from "./chat-model-account-control.ts";
-import {
-  isModelPickerOptionSelected,
-  type ChatModelPickerOption as ModelPickerOption,
-  type ChatModelPickerTargetGroup,
+import type {
+  ChatModelPickerOption as ModelPickerOption,
+  ChatModelPickerTargetGroup,
 } from "./chat-model-picker-options.ts";
 import {
   ChatModelSearchContext,
@@ -52,7 +51,9 @@ export type ChatModelPickerParams = {
   renderModelCatalogStatus?: (render: () => SolidElement) => SolidElement;
   modelSelectionLocked: boolean;
   selectionScopeDescription?: string;
-  modelOptions: ModelPickerOption[];
+  /** Only the retained panel reads the full catalog, after its first open. */
+  getModelOptions: () => ModelPickerOption[];
+  triggerModelOption?: Pick<ModelPickerOption, "provider" | "supportsTools">;
   open?: boolean;
   targetGroups?: readonly ChatModelPickerTargetGroup[];
   selectedModelValue: string;
@@ -61,7 +62,6 @@ export type ChatModelPickerParams = {
   sessionModelPinned: boolean;
   sessionKey: string;
   triggerModelLabel: string;
-  triggerModelValue?: string;
   triggerStatusLabel?: string;
   triggerLoading?: boolean;
   onModelSetup?: () => void;
@@ -117,18 +117,7 @@ export function ChatModelPicker(params: ChatModelPickerParams) {
     requestAnimationFrame(focusSearch);
   });
   const state = createMemo(() => {
-    const activeModelOption = params.modelOptions.find((option) =>
-      isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
-    );
-    const triggerModelValue = params.triggerModelValue;
-    const triggerModelOption =
-      triggerModelValue === undefined
-        ? activeModelOption
-        : triggerModelValue === ""
-          ? undefined
-          : params.modelOptions.find((option) =>
-              isModelPickerOptionSelected(option, triggerModelValue, params.selectedAgentRuntime),
-            );
+    const triggerModelOption = params.triggerModelOption;
     const modelToolsUnavailable = triggerModelOption?.supportsTools === false;
     const selectedContextWindowOption = params.contextWindow?.options.find(
       (option) => option.id === params.contextWindow?.selected,
