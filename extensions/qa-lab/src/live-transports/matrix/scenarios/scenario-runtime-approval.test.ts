@@ -10,25 +10,16 @@ import { matrixSyncResponse } from "./scenario-runtime.test-support.js";
 afterEach(() => vi.unstubAllGlobals());
 
 it.each([
-  {
-    kind: "exec",
-    decision: "allow-once",
-    emoji: "✅",
-    run: runApprovalExecMetadataSingleEventScenario,
-  },
-  { kind: "exec", decision: "deny", emoji: "❌", run: runApprovalDenyReactionScenario },
-  {
-    kind: "plugin",
-    decision: "allow-once",
-    emoji: "✅",
-    run: runApprovalPluginMetadataSingleEventScenario,
-  },
-])(
-  "observes the $kind $decision option and sender echo before accepting the decision",
-  async ({ kind, decision, emoji, run }) => {
+  ["exec", "allow-once", "✅", runApprovalExecMetadataSingleEventScenario],
+  ["exec", "deny", "❌", runApprovalDenyReactionScenario],
+  ["plugin", "allow-once", "✅", runApprovalPluginMetadataSingleEventScenario],
+] as const)(
+  "observes the %s %s option and sender echo before accepting the decision",
+  async (kind, decision, emoji, run) => {
     const phases: string[] = [];
     let approvalId = "plugin-approval";
     let syncCount = 0;
+    const relation = { rel_type: "m.annotation", event_id: "$approval", key: emoji };
     const context = createMatrixQaE2eeTestContext({
       gatewayCall: async (method, params, options) => {
         if (method === `${kind}.approval.request`) {
@@ -64,9 +55,7 @@ it.each([
           if (typeof body !== "string") {
             throw new Error("Matrix reaction must send JSON text");
           }
-          expect(JSON.parse(body)).toEqual({
-            "m.relates_to": { rel_type: "m.annotation", event_id: "$approval", key: emoji },
-          });
+          expect(JSON.parse(body)).toEqual({ "m.relates_to": relation });
           phases.push("send");
           return Response.json({ event_id: "$reaction" });
         }
@@ -116,9 +105,7 @@ it.each([
               event_id: echo ? "$reaction" : "$option",
               sender: echo ? context.driverUserId : context.sutUserId,
               type: "m.reaction",
-              content: {
-                "m.relates_to": { rel_type: "m.annotation", event_id: "$approval", key: emoji },
-              },
+              content: { "m.relates_to": relation },
             },
           ],
           echo ? "echo" : "option",
@@ -127,24 +114,17 @@ it.each([
     );
     const result = await run(context);
     expect(phases.at(-1)).toBe("decision");
-    expect(result.details).toBe(
-      (kind === "plugin"
-        ? [
-            "approval event: $approval",
-            `approval id: ${approvalId}`,
-            "plugin id: matrix-qa-plugin",
-            "tool name: matrix_qa_tool",
-            "decision: allow-once",
-          ]
+    expect(result.details.split("\n")).toEqual([
+      "approval event: $approval",
+      `approval id: ${approvalId}`,
+      ...(kind === "plugin"
+        ? ["plugin id: matrix-qa-plugin", "tool name: matrix_qa_tool", "decision: allow-once"]
         : [
-            "approval event: $approval",
-            `approval id: ${approvalId}`,
             "approval kind: exec",
             `decision: ${decision}`,
             "reaction event: $reaction",
             "reaction target: $approval",
-          ]
-      ).join("\n"),
-    );
+          ]),
+    ]);
   },
 );

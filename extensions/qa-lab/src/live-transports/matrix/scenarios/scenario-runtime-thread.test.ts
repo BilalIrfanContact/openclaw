@@ -8,6 +8,7 @@ import {
 } from "./scenario-runtime-allowbots.js";
 import { createMatrixQaE2eeTestContext } from "./scenario-runtime-e2ee.test-helpers.js";
 import { runMatrixQaCanary } from "./scenario-runtime-thread.js";
+import { matrixMessage, matrixSyncResponse } from "./scenario-runtime.test-support.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -58,25 +59,11 @@ describe("Matrix top-level scenario reporting", () => {
         if (!url.searchParams.has("since")) {
           return Response.json({ next_batch: "primed" });
         }
-        return Response.json({
-          next_batch: "replied",
-          rooms: {
-            join: {
-              [roomId]: {
-                timeline: {
-                  events: [
-                    {
-                      event_id: "$reply",
-                      sender: context.sutUserId,
-                      type: "m.room.message",
-                      content: { body: marker, msgtype: "m.text" },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        });
+        return matrixSyncResponse(
+          roomId,
+          [matrixMessage("$reply", marker, context.sutUserId, "m.text")],
+          "replied",
+        );
       });
       const reply = {
         eventId: "$reply",
