@@ -21,10 +21,6 @@ import { createAcpSessionMeta, createAcpTestConfig } from "./test-fixtures/acp-r
 const manager = vi.hoisted(() => ({
   resolveSessionAsync: vi.fn<() => Promise<AcpSessionResolution>>(),
   runTurn: vi.fn<(input: AcpRunTurnInput) => Promise<void>>(),
-  getObservabilitySnapshot: () => ({
-    turns: { queueDepth: 0 },
-    runtimeCache: { activeSessions: 0 },
-  }),
 }));
 
 vi.mock("../../acp/control-plane/manager.js", () => ({

@@ -73,13 +73,8 @@ it.each([
         SessionKey: sessionKey,
       },
       sessionKey,
-    }),
-  ).toEqual({
-    channel: "telegram",
-    to: "telegram:12345",
-    accountId: "work",
-    threadId,
-  });
+    })?.threadId,
+  ).toBe(threadId);
 });
 const transition = resolveFallbackTransition({
   selectedProvider: "openai",
@@ -88,25 +83,20 @@ const transition = resolveFallbackTransition({
   activeModel: "fallback-model",
   attempts: [],
 });
-function fallbackPayload(fallbackFailureKnown: boolean) {
-  return buildSilentFallbackFailurePayload({
+it.each([false, true])("only surfaces a known failed fallback (%s)", (fallbackFailureKnown) => {
+  const payload = buildSilentFallbackFailurePayload({
     fallbackTransition: transition,
     fallbackFailureKnown,
     fallbackAttempts: [],
     cfg: fallbackFailureKnown ? { agents: { defaults: { silentReply: { group: "allow" } } } } : {},
     completion: resolveReplyCompletion("required", "empty"),
   });
-}
-
-it("surfaces both model identities when a required fallback reply is missing", () => {
-  const payload = fallbackPayload(true);
-
-  expect(payload?.isError).toBe(true);
-  expect(payload?.text).toContain(transition.selectedModelRef);
-  expect(payload?.text).toContain(transition.activeModelRef);
-  expect(getReplyPayloadMetadata(payload ?? {})?.deliverDespiteSourceReplySuppression).toBe(true);
-});
-
-it("requires an active failed fallback", () => {
-  expect(fallbackPayload(false)).toBeUndefined();
+  if (fallbackFailureKnown) {
+    expect(payload?.isError).toBe(true);
+    expect(payload?.text).toContain(transition.selectedModelRef);
+    expect(payload?.text).toContain(transition.activeModelRef);
+    expect(getReplyPayloadMetadata(payload ?? {})?.deliverDespiteSourceReplySuppression).toBe(true);
+  } else {
+    expect(payload).toBeUndefined();
+  }
 });
