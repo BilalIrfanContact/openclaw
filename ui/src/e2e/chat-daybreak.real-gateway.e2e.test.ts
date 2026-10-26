@@ -175,7 +175,18 @@ globalThis.__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__ = { ...undici, fetch: globalThi
           },
         },
         plugins: { allow: ["openai"], entries: { codex: { enabled: false } } },
-        models: { catalogRefresh: { enabled: false } },
+        models: {
+          catalogRefresh: { enabled: false },
+          providers: {
+            openai: {
+              baseUrl: "https://api.openai.com/v1",
+              api: "openai-responses",
+              auth: "api-key",
+              apiKey: "sk-synthetic-configured-fixture",
+              models: [],
+            },
+          },
+        },
       },
     });
     const token =
@@ -234,7 +245,7 @@ globalThis.__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__ = { ...undici, fetch: globalThi
 });
 
 suite.define(() => {
-  it("discovers Platform programs in the UI without submitting an inference request", async () => {
+  it("discovers configured-key programs in the UI and submits the selected access", async () => {
     const runCli = async (args: string[]) => {
       const result = await owner.cli(args);
       expect(result.code, result.stderr).toBe(0);
@@ -242,7 +253,6 @@ suite.define(() => {
     };
     const key = "agent:main:platform-discovery";
     await call("sessions.create", { key, agentId: "main", label: "Platform discovery" });
-    await call("sessions.patch", { key, model: "openai/gpt-6.1-sol@openai:platform-fixture" });
     const inferenceCount = inferenceRequests;
     await suite.withPage(
       { viewport: { width: 1440, height: 900 }, colorScheme: "dark" },
@@ -264,7 +274,6 @@ suite.define(() => {
           expect(result.providerOutcomes).toContainEqual(
             expect.objectContaining({
               provider: "openai",
-              profileId: "openai:platform-fixture",
               status: "ready",
             }),
           );
@@ -293,11 +302,52 @@ suite.define(() => {
                 ),
             )
             .toEqual(advertised ?? []);
+          expect(inferenceRequests).toBe(inferenceCount);
+          const frame = await takeControlUiScreenshotFrame(
+            page,
+            picker.locator(".chat-controls__effort-menu"),
+            [],
+            { animations: "disabled" },
+          );
+          await writeFile(
+            path.join(dir, "configured-key-" + (advertised?.at(-1) ?? "unknown") + ".png"),
+            frame.png,
+          );
         }
+        const picker = page.locator(".chat-controls__effort-picker").first();
+        await picker.locator('[data-chat-access-option="daybreak_red"]').click();
+        await expect
+          .poll(async () => {
+            const result = await call<SessionsListResult>("sessions.list", { agentId: "main" });
+            return result.sessions.find((session) => session.key === key)?.cyberAccessProgram;
+          })
+          .toBe("daybreak_red");
+        const index = receipts.length;
+        await evaluateControlUiContext(
+          page,
+          async (context, data) =>
+            context.gateway.snapshot.client!.request("chat.send", {
+              sessionKey: data.key,
+              message: "Reply with the fixture result.",
+              idempotencyKey: data.id,
+            }),
+          { key, id: randomUUID() },
+        );
+        await expect.poll(() => receipts.length).toBe(index + 1);
+        expect(receipts[index]?.access).toEqual({ cyber: "daybreak_red" });
+        await expect
+          .poll(async () => {
+            const result = await call<SessionsListResult>("sessions.list", { agentId: "main" });
+            return Boolean(result.sessions.find((session) => session.key === key)?.hasActiveRun);
+          })
+          .toBe(false);
       },
     );
-    expect(inferenceRequests).toBe(inferenceCount);
-    proof.platformDiscovery = { complete: true, inferenceRequests: 0 };
+    proof.platformDiscovery = {
+      complete: true,
+      discoveryInferenceRequests: 0,
+      selectedAccessRequests: 1,
+    };
   }, 90_000);
 
   it("persists visible selections and refreshes queued requests on desktop and mobile", async () => {
@@ -313,6 +363,7 @@ suite.define(() => {
       reasoningEfforts = ["medium"];
       proof.initialCatalog = await call("models.list", { agentId: "main", refresh: true });
       await call("sessions.create", { key, agentId: "main", label: "Daybreak " + name });
+      await call("sessions.patch", { key, model: "openai/gpt-6.1-sol@openai:daybreak-fixture" });
       await suite.withPage(
         {
           viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 },
