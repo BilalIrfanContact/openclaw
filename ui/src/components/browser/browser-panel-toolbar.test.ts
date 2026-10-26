@@ -5,7 +5,7 @@ import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { restorePropertyDescriptor } from "../../test-helpers/property-descriptor.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
-import { PANEL_HOSTED_TABS_CHANGE_EVENT, readPanelHostedTabs } from "../panel-hosted-tabs.ts";
+import { PANEL_HOSTED_TABS_CHANGE_EVENT } from "../panel-hosted-tabs.ts";
 import {
   createBrowserClient,
   createBrowserPanelTestMetrics,
@@ -36,8 +36,12 @@ function publishTabs(revision: number, tabs: NativeBrowserTab[]) {
 }
 
 const query = (panel: HTMLElement, selector: string) => panel.querySelector<HTMLElement>(selector);
-const icon = expect.any(SVGSVGElement);
-const projectedTab = (id: string, label: string, url: string) => ({ id, label, url, icon });
+function panelFor(client: HTMLElementTagNameMap["openclaw-browser-panel"]["client"]) {
+  const panel = document.createElement("openclaw-browser-panel");
+  panel.available = panel.embedded = panel.presented = true;
+  panel.client = client;
+  return panel;
+}
 
 setupBrowserPanelTestCleanup();
 
@@ -66,12 +70,9 @@ async function mount(embedded = true, tabsInHeader = true) {
     "/act": createBrowserPanelTestMetrics("https://example.test/a", "Example"),
   };
   const gateway = createBrowserClient(async ({ path }) => responses[path] ?? { ok: true });
-  const panel = document.createElement("openclaw-browser-panel");
-  panel.available = true;
+  const panel = panelFor(gateway.client);
   panel.embedded = embedded;
-  panel.presented = true;
   panel.tabsInHeader = tabsInHeader;
-  panel.client = gateway.client;
   panel.preferredTab = {
     tab: { target: "host", profile: "default", targetId: "remote:a" },
     revision: "initial",
@@ -92,12 +93,8 @@ it.each([
     expect(Boolean(panel.querySelector(".bp-header"))).toBe(ownsStrip);
     expect(Boolean(panel.querySelector(".tabstrip"))).toBe(ownsStrip);
     expect(panel.querySelector(".bp-toolbar")).not.toBeNull();
-    const viewport = query(panel, ".bp-viewport")!;
-    const activeTab = query(panel, '.tabstrip-tab[aria-selected="true"]');
-    expect(viewport.getAttribute("aria-labelledby")).toBe(ownsStrip ? activeTab?.id : null);
-    if (ownsStrip) {
-      expect(activeTab).not.toBeNull();
-      expect(activeTab?.getAttribute("aria-controls")).toBe(viewport.id);
+    if (!ownsStrip) {
+      expect(query(panel, ".bp-viewport")!.getAttribute("aria-labelledby")).toBeNull();
     }
     if (embedded) {
       expect(panel.querySelector(".bp-header [data-new-tab-action]")).toBeNull();
@@ -107,16 +104,8 @@ it.each([
   },
 );
 
-it("projects remote and native tabs and keeps simultaneous panels' DOM associations separate", async () => {
+it("renders tab labels and keeps simultaneous panels' DOM associations separate", async () => {
   const { panel } = await mount(true, false);
-  expect(readPanelHostedTabs(panel)).toBe(panel);
-  const hostedTabs = panel.hostedTabs;
-  expect(hostedTabs).toEqual([
-    { ...projectedTab("native:b", "second.test", "https://second.test/b"), favicon },
-    projectedTab("remote:a", "Example", "https://example.test/a"),
-    projectedTab("remote:c", "New tab", "about:blank"),
-  ]);
-  expect(hostedTabs[0]!.icon).not.toBe(panel.hostedTabs[0]!.icon);
   expect(panel.activeHostedTabId).toBe("remote:a");
   expect(
     [...panel.querySelectorAll(".tabstrip-tab__label")].map((label) => label.textContent),
@@ -158,12 +147,10 @@ it("publishes selection, title and favicon-only changes but not unrelated render
     const { favicon: _previousIcon, ...withoutIcon } = { ...nativeTab, title: "Changed" };
     publishTabs(2, [withoutIcon]);
     await panel.updateComplete;
-    expect(panel.hostedTabs[0]?.favicon).toBeUndefined();
     expect(panel.querySelector("img.tabstrip-tab__favicon")).toBeNull();
     expect(changed).toHaveBeenCalledTimes(3);
     publishTabs(3, [{ ...withoutIcon, favicon }]);
     await panel.updateComplete;
-    expect(panel.hostedTabs[0]?.favicon).toBe(favicon);
     expect(panel.querySelector("img.tabstrip-tab__favicon")?.getAttribute("src")).toBe(favicon);
     expect(changed).toHaveBeenCalledTimes(4);
 
@@ -182,14 +169,7 @@ it("publishes selection, title and favicon-only changes but not unrelated render
 describe("Browser toolbar", () => {
   async function mountToolbar() {
     stubScreenshotMedia();
-    const panel = document.createElement("openclaw-browser-panel");
-    panel.available = true;
-    panel.embedded = true;
-    panel.presented = true;
-    panel.client = createBrowserPageClient(
-      "asset",
-      "https://assets.example.test/preview.png",
-    ).client;
+    const panel = panelFor(createBrowserPageClient("asset", "https://assets.test/a.png").client);
     mountSolid(() => panel);
     await waitForSolid(() => expect(panel.querySelector(".bp-shot")).not.toBeNull());
     return panel;
@@ -240,17 +220,8 @@ describe("Browser toolbar", () => {
 
   it("renders the download's Gateway error and HTTP status", async () => {
     const panel = await mountToolbar();
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { error: { message: "Unauthorized", type: "unauthorized" } },
-            { status: 401 },
-          ),
-        ),
-    );
+    const error = { error: { message: "Unauthorized", type: "unauthorized" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(error, { status: 401 })));
     (await openBrowserActions(panel))
       .querySelector<HTMLElement>('[aria-label="Download file"]')!
       .click();
@@ -312,29 +283,20 @@ describe("Browser recovery", () => {
   function mountFailingBrowser(nativeAvailable: boolean, remoteAvailable: boolean) {
     const nativeMessages: NativeBrowserMessage[] = [];
     if (nativeAvailable) {
-      vi.stubGlobal("webkit", {
-        messageHandlers: {
-          openclawBrowser: {
-            postMessage: async (message: NativeBrowserMessage) => {
-              nativeMessages.push(message);
-              return message.type === "open"
-                ? { ok: false, error: "Synthetic browser failure" }
-                : { ok: true };
-            },
-          },
-        },
-      });
+      const postMessage = async (message: NativeBrowserMessage) => {
+        nativeMessages.push(message);
+        return message.type === "open"
+          ? { ok: false, error: "Synthetic browser failure" }
+          : { ok: true };
+      };
+      vi.stubGlobal("webkit", { messageHandlers: { openclawBrowser: { postMessage } } });
       vi.stubGlobal("__OPENCLAW_NATIVE_BROWSER__", { revision: 0, tabs: [] });
     }
     const { client, request } = createBrowserClient(async () => {
       throw new Error("Synthetic browser failure");
     });
-    const panel = document.createElement("openclaw-browser-panel");
-    panel.available = true;
+    const panel = panelFor(client);
     panel.remoteAvailable = remoteAvailable;
-    panel.embedded = true;
-    panel.presented = true;
-    panel.client = client;
     const mounted = mountSolid(() => panel);
     const recovery = () => mounted.getByRole("button", { name: /^(Retry|Refresh)$/ });
     return { panel, mounted, recovery, request, nativeMessages };

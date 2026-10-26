@@ -31,6 +31,11 @@ function expectFrame(panel: BrowserPanel, index: number, url = PAGE_URL, metrics
   const expected = { dataUrl: `blob:frame-${index}`, url };
   expect(panel.view).toMatchObject(metrics ? { ...expected, metrics } : expected);
 }
+type Calls = (path: string) => unknown[];
+async function advance(ms: number, calls: Calls, streams: number) {
+  await vi.advanceTimersByTimeAsync(ms);
+  expect(calls("/screencast")).toHaveLength(streams);
+}
 describe("Browser panel streaming", () => {
   const { setup, sockets, createdUrls, revokedUrls } = streamFixture(TestScreencastSocket);
 
@@ -105,8 +110,7 @@ describe("Browser panel streaming", () => {
     socket.disconnect(1006);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls("/screenshot")).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(calls("/screencast")).toHaveLength(2);
+    await advance(10_000, calls, 2);
     sockets[1]!.disconnect(1006);
     await flush();
     expect(calls("/screenshot")).toHaveLength(1);
@@ -114,8 +118,7 @@ describe("Browser panel streaming", () => {
     await flush();
     expect(controller.view?.dataUrl).toMatch(/^data:/);
     expect(controller.loading).toBe(false);
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(calls("/screencast")).toHaveLength(3);
+    await advance(10_000, calls, 3);
     sockets[2]!.disconnect(1006);
     await flush();
     expect(calls("/screenshot")).toHaveLength(2);
@@ -305,14 +308,11 @@ describe("Browser panel streaming", () => {
     sockets[1]!.disconnect(1006);
     await flush();
     expect(calls("/screenshot")).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(9999);
-    expect(calls("/screencast")).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(calls("/screencast")).toHaveLength(3);
+    await advance(9999, calls, 2);
+    await advance(1, calls, 3);
     await receive(sockets[2]!, screencastFrame(NEXT_URL));
     expect(controller.view?.url).toBe(NEXT_URL);
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(calls("/screencast")).toHaveLength(3);
+    await advance(20_000, calls, 3);
   });
 
   it("does not replace a capture entered while the recovery screenshot is pending", async () => {
@@ -346,8 +346,7 @@ describe("Browser panel streaming", () => {
     await vi.advanceTimersByTimeAsync(0);
     const screenshots = calls("/screenshot").length;
     invalidate(state);
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(calls("/screencast")).toHaveLength(1);
+    await advance(20_000, calls, 1);
     expect(calls("/screenshot")).toHaveLength(screenshots);
   });
 
@@ -454,14 +453,11 @@ describe("Browser panel streaming", () => {
     });
     width = 640;
     controller.handleViewportResize(width, 300);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(calls("/screencast")).toHaveLength(1);
+    await advance(300, calls, 1);
     width = 800;
     controller.handleViewportResize(width, 1200);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(calls("/screencast")).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(9400);
-    expect(calls("/screencast")).toHaveLength(2);
+    await advance(300, calls, 1);
+    await advance(9400, calls, 2);
     expect(calls("/screencast")[1]?.[1]).toMatchObject({
       body: { maxWidth: 1600, maxHeight: 2000 },
     });
@@ -574,10 +570,8 @@ describe("Browser panel stream startup", () => {
         await flush();
         expect(controller.view).toBe(fallback);
       }
-      await vi.advanceTimersByTimeAsync(9999);
-      expect(calls("/screencast")).toHaveLength(1);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(calls("/screencast")).toHaveLength(2);
+      await advance(9999, calls, 1);
+      await advance(1, calls, 2);
     },
   );
 
