@@ -4,6 +4,7 @@ import { addGatewayClientOptions } from "./gateway-rpc.js";
 import type { GatewayRpcOpts } from "./gateway-rpc.types.js";
 
 const callGatewayMock = vi.fn(async () => ({ ok: true }));
+// mock-isolation: Exercise CLI request construction without a real Gateway connection.
 vi.mock("../gateway/call.js", () => ({
   callGateway: callGatewayMock,
   isImplicitLocalGatewayTarget: vi.fn(async () => true),

@@ -8,7 +8,7 @@ import { buildXaiVideoGenerationProvider } from "./video-generation-provider.js"
 
 vi.hoisted(() => vi.resetModules());
 vi.unmock("openclaw/plugin-sdk/provider-http");
-// Synthetic credentials only; never consult host auth storage.
+// mock-isolation: Synthetic credentials only; never consult host auth storage.
 vi.mock("openclaw/plugin-sdk/provider-auth-runtime", () => ({
   resolveApiKeyForProvider: async () => ({ apiKey: "test-xai-key" }),
 }));
