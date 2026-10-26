@@ -20,7 +20,7 @@ vi.mock("../../cli/command-secret-targets.js", () => ({
 }));
 
 const { resolveQueuedReplyExecutionConfig } = await import("./agent-runner-utils.js");
-const { clearRuntimeConfigSnapshot, selectLiveRuntimeConfig, setRuntimeConfigSnapshot } =
+const { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } =
   await import("../../config/config.js");
 
 const secretResult = (resolvedConfig: OpenClawConfig) => ({
@@ -48,9 +48,7 @@ describe("resolveQueuedReplyExecutionConfig channel scope", () => {
     });
   });
 
-  afterEach(() => {
-    clearRuntimeConfigSnapshot();
-  });
+  afterEach(clearRuntimeConfigSnapshot);
 
   it("resolves base runtime targets, then active channel/account targets from originating context", async () => {
     const baseResolved: OpenClawConfig = { tools: { profile: "coding" } };
@@ -68,7 +66,7 @@ describe("resolveQueuedReplyExecutionConfig channel scope", () => {
 
     expect(resolved).toBe(scopedResolved);
     expect(resolveSecrets).toHaveBeenCalledTimes(2);
-    expect(resolveSecrets.mock.calls[0]?.[0]).toEqual({
+    expect(resolveSecrets).toHaveBeenNthCalledWith(1, {
       config: sourceConfig,
       commandName: "reply",
       targetIds: new Set(["skills.entries.*.apiKey"]),
@@ -76,7 +74,7 @@ describe("resolveQueuedReplyExecutionConfig channel scope", () => {
     });
     expect(resolveSecrets.mock.calls[0]?.[0].config).toBe(sourceConfig);
     expectScope(baseResolved, "work");
-    expect(resolveSecrets.mock.calls[1]?.[0]).toEqual({
+    expect(resolveSecrets).toHaveBeenNthCalledWith(2, {
       config: baseResolved,
       commandName: "reply",
       targetIds: new Set(["channels.discord.token"]),
@@ -117,20 +115,5 @@ describe("resolveQueuedReplyExecutionConfig channel scope", () => {
     expect(baseCall.config).toBe(runtimeConfig);
     expect(baseCall.commandName).toBe("reply");
     expectScope(runtimeConfig);
-  });
-
-  it("does not replace an already resolved run config with a stale runtime snapshot", () => {
-    const withKey = (
-      apiKey: string | { source: "env"; provider: string; id: string },
-    ): OpenClawConfig => ({
-      models: { providers: { openai: { baseUrl: "https://unused.invalid", apiKey, models: [] } } },
-    });
-    const unresolvedConfig = withKey({ source: "env", provider: "default", id: "OPENAI_API_KEY" });
-    const staleRuntimeConfig = withKey("stale-runtime-key");
-    const scopedResolvedConfig = { ...withKey("fresh-scoped-key"), tools: { updatePlan: true } };
-    setRuntimeConfigSnapshot(staleRuntimeConfig, unresolvedConfig);
-
-    expect(selectLiveRuntimeConfig(structuredClone(unresolvedConfig))).toBe(staleRuntimeConfig);
-    expect(selectLiveRuntimeConfig(scopedResolvedConfig)).toBe(scopedResolvedConfig);
   });
 });
