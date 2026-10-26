@@ -58,35 +58,42 @@ describe("createChannelRunQueue", () => {
     await second.promise;
   });
 
-  it("updates run status and routes async errors", async () => {
-    const taskError = new Error("boom");
-    const setStatus = vi.fn();
-    const onError = vi.fn();
-    const queue = createChannelRunQueue({ setStatus, onError });
+  it.each([false, true])(
+    "updates run status and contains reporting errors (throws=%s)",
+    async (throws) => {
+      const taskError = new Error("boom");
+      const setStatus = vi.fn();
+      const onError = vi.fn(() => {
+        if (throws) {
+          throw new Error("report failed");
+        }
+      });
+      const queue = createChannelRunQueue({ setStatus, onError });
 
-    queue.enqueue("key", async () => {
-      throw taskError;
-    });
+      queue.enqueue("key", async () => {
+        throw taskError;
+      });
 
-    await flushAsyncWork();
+      await flushAsyncWork();
 
-    expect(setStatus).toHaveBeenCalledTimes(3);
-    const [initialStatus, busyStatus, finalStatus] = setStatus.mock.calls.map(([status]) => status);
-    expect(initialStatus).toEqual({ activeRuns: 0, busy: false, activeRunStartedAt: null });
-    expect(busyStatus).toMatchObject({
-      activeRuns: 1,
-      busy: true,
-      lastRunActivityAt: expect.any(Number),
-      activeRunStartedAt: expect.any(Number),
-    });
-    expect(finalStatus).toMatchObject({
-      activeRuns: 0,
-      busy: false,
-      lastRunActivityAt: expect.any(Number),
-      activeRunStartedAt: null,
-    });
-    expect(onError).toHaveBeenCalledWith(taskError);
-  });
+      expect(setStatus.mock.calls.map(([status]) => status)).toEqual([
+        { activeRuns: 0, busy: false, activeRunStartedAt: null },
+        expect.objectContaining({
+          activeRuns: 1,
+          busy: true,
+          lastRunActivityAt: expect.any(Number),
+          activeRunStartedAt: expect.any(Number),
+        }),
+        expect.objectContaining({
+          activeRuns: 0,
+          busy: false,
+          lastRunActivityAt: expect.any(Number),
+          activeRunStartedAt: null,
+        }),
+      ]);
+      expect(onError).toHaveBeenCalledWith(taskError);
+    },
+  );
 
   it.each([
     { done: "second", remaining: "first", startedAt: 1_000 },
@@ -111,21 +118,6 @@ describe("createChannelRunQueue", () => {
       }
     },
   );
-
-  it("contains reporting hook errors", async () => {
-    const taskError = new Error("boom");
-    const onError = vi.fn(() => {
-      throw new Error("report failed");
-    });
-    const queue = createChannelRunQueue({ onError });
-
-    queue.enqueue("key", async () => {
-      throw taskError;
-    });
-
-    await flushAsyncWork();
-    expect(onError).toHaveBeenCalledWith(taskError);
-  });
 
   it("skips queued work after deactivation", async () => {
     const first = createDeferred();

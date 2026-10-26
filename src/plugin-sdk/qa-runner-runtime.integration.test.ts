@@ -10,6 +10,14 @@ import {
 import { listQaRunnerCliContributions } from "./qa-runner-runtime.js";
 
 const tempDirs = createTempDirTracker();
+const writeSource = (dir: string, file: string, source: string) =>
+  fs.writeFileSync(path.join(dir, file), source, "utf8");
+const writeRegistration = (dir: string, file: string, command: string, extra = "") =>
+  writeSource(
+    dir,
+    file,
+    `export const qaRunnerCliRegistrations = [{ commandName: ${JSON.stringify(command)}, register() {}, ${extra} }];`,
+  );
 
 function resetQaRunnerRuntimeState() {
   resetFacadeRuntimeStateForTest();
@@ -40,7 +48,7 @@ function writePlugin(
       ...(install ? { install: { npmSpec: `@openclaw/${id}` } } : {}),
     },
   });
-  fs.writeFileSync(path.join(pluginDir, "index.js"), "export default {};\n", "utf8");
+  writeSource(pluginDir, "index.js", "export default {};\n");
   return pluginDir;
 }
 
@@ -67,23 +75,16 @@ afterEach(() => {
 
 it("loads an activated qa runner from a linked plugin path without a bundled install fallback", async () => {
   const pluginDir = linkedPlugin("qa-linked", "linked", "Run the linked QA lane");
-  fs.writeFileSync(
-    path.join(pluginDir, "runtime-api.js"),
+  writeSource(
+    pluginDir,
+    "runtime-api.js",
     'throw new Error("general runtime surface must not load during QA discovery");\n',
-    "utf8",
   );
-  fs.writeFileSync(
-    path.join(pluginDir, "qa-runner-api.js"),
-    [
-      "export const qaRunnerCliRegistrations = [",
-      "  {",
-      '    commandName: "linked",',
-      '    adapterFactory: { id: "linked", matches() { return true; }, async create(context) { return { id: "linked", label: "Linked", accountId: "sut", requiredPluginIds: [], supportedActions: [], async sendInbound(input) { return await context.messages.addInboundMessage(input); }, createGatewayConfig() { return {}; }, async waitReady() {}, buildAgentDelivery({ target }) { return { channel: "linked", to: target, replyChannel: "linked", replyTo: target }; }, async handleAction() {}, createReportNotes() { return []; } }; } },',
-      "    register() {}",
-      "  }",
-      "];",
-    ].join("\n"),
-    "utf8",
+  writeRegistration(
+    pluginDir,
+    "qa-runner-api.js",
+    "linked",
+    'adapterFactory: { id: "linked", matches() { return true; }, async create() {} },',
   );
 
   const contributions = listQaRunnerCliContributions();
@@ -95,9 +96,7 @@ it("loads an activated qa runner from a linked plugin path without a bundled ins
       status: "available",
       registration: {
         commandName: "linked",
-        adapterFactory: expect.objectContaining({
-          id: "linked",
-        }),
+        adapterFactory: expect.objectContaining({ id: "linked" }),
         register: expect.any(Function),
       },
     },
@@ -106,18 +105,7 @@ it("loads an activated qa runner from a linked plugin path without a bundled ins
 
 it("requires linked runners to expose the dedicated QA surface", () => {
   const pluginDir = linkedPlugin("qa-legacy", "legacy");
-  fs.writeFileSync(
-    path.join(pluginDir, "runtime-api.js"),
-    [
-      "export const qaRunnerCliRegistrations = [",
-      "  {",
-      '    commandName: "legacy",',
-      "    register() {}",
-      "  }",
-      "];",
-    ].join("\n"),
-    "utf8",
-  );
+  writeRegistration(pluginDir, "runtime-api.js", "legacy");
 
   expect(() => listQaRunnerCliContributions()).toThrow(
     "Unable to resolve bundled plugin public surface qa-legacy/qa-runner-api.js",

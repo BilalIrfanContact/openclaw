@@ -15,6 +15,7 @@ function parseAllowed(raw: string, name: string, maxPayloadBytes?: number) {
   return parse(raw, { allowedToolNames: [name], maxPayloadBytes });
 }
 const image = { type: "image" };
+const text = (value: string) => ({ type: "text", text: value });
 
 describe("extractToolPayload", () => {
   it("returns undefined for missing results", () => {
@@ -24,21 +25,18 @@ describe("extractToolPayload", () => {
 
   it("prefers explicit details payloads", () => {
     expect(
-      extractToolPayload({
-        details: { ok: true },
-        content: [{ type: "text", text: '{"ignored":true}' }],
-      }),
-    ).toEqual({ ok: true });
+      extractToolPayload({ details: { ok: true }, content: [text('{"ignored":true}')] }),
+    ).toEqual({
+      ok: true,
+    });
   });
 
   it("parses JSON text blocks and falls back to raw text, content, or the whole result", () => {
-    expect(
-      extractToolPayload({
-        content: [image, { type: "text", text: '{"ok":true,"count":2}' }],
-      }),
-    ).toEqual({ ok: true, count: 2 });
-
-    expect(extractToolPayload({ content: [{ type: "text", text: "not json" }] })).toBe("not json");
+    expect(extractToolPayload({ content: [image, text('{"ok":true,"count":2}')] })).toEqual({
+      ok: true,
+      count: 2,
+    });
+    expect(extractToolPayload({ content: [text("not json")] })).toBe("not json");
 
     const content = [image];
     expect(extractToolPayload({ content })).toBe(content);
@@ -54,16 +52,16 @@ describe("parseStandalonePlainTextToolCallBlocks", () => {
   });
 
   it("counts XML body whitespace against the UTF-8 payload cap", () => {
-    const immediate = "<function=get_system_info></function>";
-    expect(parseAllowed(immediate, "get_system_info", 0)?.[0]?.arguments).toEqual({});
+    expect(parseAllowed(xmlCall("get_system_info"), "get_system_info", 0)?.[0]?.arguments).toEqual(
+      {},
+    );
 
     const oversizedBody = "\u00a0".repeat(129);
-    const oversized = `<function=get_system_info>${oversizedBody}</function>`;
-    expect(new TextEncoder().encode(oversizedBody).byteLength).toBe(258);
+    const oversized = xmlCall("get_system_info", oversizedBody);
     expect(parseAllowed(oversized, "get_system_info", 256)).toBeNull();
     expectStripped(oversized);
 
-    const parameter = "<parameter=value>x</parameter>";
+    const parameter = xmlParameter("value", "x");
     const trailingBody = "\u00a0".repeat(2);
     const parameterBytes = new TextEncoder().encode(parameter).byteLength;
     expect(
@@ -76,7 +74,7 @@ describe("parseStandalonePlainTextToolCallBlocks", () => {
   });
 
   it("preserves __proto__ as an own XML argument property", () => {
-    const raw = "<function=write><parameter=__proto__>value</parameter></function>";
+    const raw = xmlCall("write", xmlParameter("__proto__", "value"));
     const args = parse(raw)?.[0]?.arguments;
 
     expect(Object.getPrototypeOf(args)).toBe(Object.prototype);
@@ -98,19 +96,15 @@ describe("parseStandalonePlainTextToolCallBlocks", () => {
   });
 
   it("finds XML parameter close tags without lowercased string offsets", () => {
-    const dottedCapitalI = "\u0130";
-    const raw = xmlCall("write", `\n${xmlParameter("content", `\n${dottedCapitalI}\n`)}\n`);
+    const raw = xmlCall("write", `\n${xmlParameter("content", "\n\u0130\n")}\n`);
     const blocks = parseAllowed(raw, "write");
 
-    expect(blocks?.[0]?.arguments).toEqual({ content: dottedCapitalI });
+    expect(blocks?.[0]?.arguments).toEqual({ content: "\u0130" });
   });
 
   it("counts serialized JSON payload limits in UTF-8 bytes", () => {
     const payload = JSON.stringify({ content: "é".repeat(20) });
     const raw = ["[write]", payload, "[/write]"].join("\n");
-    expect(payload.length).toBeLessThan(48);
-    expect(new TextEncoder().encode(payload).byteLength).toBeGreaterThan(48);
-
     expect(parseAllowed(raw, "write", 48)).toBeNull();
   });
 
