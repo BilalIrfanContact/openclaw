@@ -3,17 +3,16 @@ import path from "node:path";
 import { createAdmittedHostCapabilityTestFixture } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { captureSessionEntryCurrentCheckAsync } from "openclaw/plugin-sdk/session-binding-runtime";
 import { expect, it, vi } from "vitest";
+import { interruptCodexTurnAndWaitBestEffort } from "./attempt-client-cleanup.js";
 import { readAttemptTerminal } from "./attempt-terminal.test-helper.js";
 import { nativeHookRelayUnregisterQueue } from "./native-hook-relay-state.js";
 import {
   directSpawnItem,
   itemNotification,
-  childTurnCompletedNotification,
   turnStartedNotification,
 } from "./native-subagent-monitor.test-support.js";
 import { readCodexNativeSubagents } from "./native-subagent-roster.js";
 import {
-  assistantMessage,
   createCodexRuntimePlanFixture,
   createStartedThreadHarness,
   createTestParams,
@@ -22,11 +21,6 @@ import {
   setupRunAttemptTestHooks,
   tempDir,
 } from "./run-attempt-test-harness.js";
-import {
-  createContextEngine,
-  createStartedThreadHarness as createProvenanceHarness,
-  getRequestInputText,
-} from "./run-attempt.context-engine.test-support.js";
 import {
   sessionBindingIdentity,
   testCodexAppServerBindingStore,
@@ -52,7 +46,26 @@ it("reads the running V2 child through the attempt's physical binding without na
   assert(host.agentHarnessCompletionScope);
   params.hostCapabilities = host.hostCapabilities;
   params.agentHarnessCompletionScope = host.agentHarnessCompletionScope;
-  const harness = createStartedThreadHarness(undefined, { persistedThreads: [] });
+  const harness = createStartedThreadHarness(
+    async (method, requestParams) => {
+      if (method !== "turn/interrupt") {
+        return undefined;
+      }
+      assert(requestParams && typeof requestParams === "object");
+      assert("threadId" in requestParams && "turnId" in requestParams);
+      queueMicrotask(() => {
+        void harness.notify({
+          method: "turn/completed",
+          params: {
+            threadId: String(requestParams.threadId),
+            turn: { id: String(requestParams.turnId), status: "interrupted", items: [] },
+          },
+        });
+      });
+      return {};
+    },
+    { persistedThreads: [] },
+  );
   const run = runCodexAppServerAttempt(params, {
     bindingStore: testCodexAppServerBindingStore,
     nativeHookRelay: { enabled: true, events: ["pre_tool_use"] },
@@ -73,21 +86,24 @@ it("reads the running V2 child through the attempt's physical binding without na
     await harness.notify(
       turnStartedNotification("observation-child-turn", { threadId: "observation-child" }),
     );
-    const target = params.sessionTarget;
-    assert(target?.agentId && target.sessionKey && target.storePath);
+    assert(
+      params.sessionTarget?.agentId &&
+        params.sessionTarget.sessionKey &&
+        params.sessionTarget.storePath,
+    );
     selected = await captureSessionEntryCurrentCheckAsync({
-      agentId: target.agentId,
-      sessionKey: target.sessionKey,
+      agentId: params.sessionTarget.agentId,
+      sessionKey: params.sessionTarget.sessionKey,
       sessionId: params.sessionId,
-      storePath: target.storePath,
+      storePath: params.sessionTarget.storePath,
     });
     assert(selected.entry?.sessionId === params.sessionId);
     assert(selected.entryCurrent);
     const requestsBeforeRead = harness.requests.length;
     const roster = await readCodexNativeSubagents(
       {
-        agentId: target.agentId,
-        sessionKey: target.sessionKey,
+        agentId: params.sessionTarget.agentId,
+        sessionKey: params.sessionTarget.sessionKey,
         sessionId: params.sessionId,
         lifecycleRevision: selected.entry.lifecycleRevision,
         storePath: selected.entryCurrent.source.path,
@@ -101,13 +117,14 @@ it("reads the running V2 child through the attempt's physical binding without na
       truncated: false,
     });
     expect(harness.requests).toHaveLength(requestsBeforeRead);
-    await harness.notify(
-      childTurnCompletedNotification({
+    // Cleanup uses the real interruption owner; its exact-turn terminal is emitted by the harness.
+    expect(
+      await interruptCodexTurnAndWaitBestEffort(harness.client, {
         threadId: "observation-child",
         turnId: "observation-child-turn",
-        status: "interrupted",
+        assertCurrent: selected.source,
       }),
-    );
+    ).toBe(true);
     await harness.completeTurn({ threadId: binding.threadId, turnId: "turn-1" });
     expect(readAttemptTerminal(await run)).toMatchObject({ aborted: false, promptError: null });
   } finally {
@@ -120,34 +137,4 @@ it("reads the running V2 child through the attempt's physical binding without na
     host.closeAdmission();
     host.closeGateway();
   }
-});
-
-it("reserves native input space for inert sender provenance", async () => {
-  const params = createTestParams();
-  params.contextEngine = createContextEngine({
-    assemble: async () => ({
-      messages: [
-        ...Array.from({ length: 9 }, (_, index) =>
-          assistantMessage("older context " + index + " " + "x".repeat(120_000), index),
-        ),
-        assistantMessage("recent anchor", 10),
-      ],
-      estimatedTokens: 300_000,
-    }),
-  });
-  params.contextTokenBudget = 300_000;
-  params.trigger = "user";
-  params.prompt = "current prompt survives";
-  params.senderId = "profile-ada";
-  params.senderName = "$metadata-skill";
-  const harness = createProvenanceHarness();
-  const run = runCodexAppServerAttempt(params);
-  await run.waitForTurnAccepted();
-  const inputText = getRequestInputText(harness);
-  expect(inputText.length).toBe(1 << 20);
-  expect(inputText).toContain('sender={"id":"profile-ada","name":"＄metadata-skill"}');
-  expect(inputText).toContain("recent anchor");
-  expect(inputText).toContain("current prompt survives");
-  await harness.completeTurn();
-  await run;
 });

@@ -23,7 +23,7 @@ function location(url: string): RouteLocation {
 }
 
 async function loadRoute(url: string, basePath = "") {
-  const parsed = location(url);
+  const parsed = new URL(url, "https://control.test");
   const request = vi.fn(async () => agentsList);
   const currentGateway = gateway(snapshot({ request } as unknown as GatewayBrowserClient));
   const agents = createAgentCapability(currentGateway);
@@ -39,7 +39,11 @@ async function loadRoute(url: string, basePath = "") {
   const result = (await page.loader(
     context,
     createRouteLoaderOptions(
-      parsed,
+      {
+        pathname: parsed.pathname,
+        search: parsed.search,
+        hash: parsed.hash,
+      },
       `${parsed.pathname}\u0000${parsed.search}\u0000${parsed.hash}`,
       "preload",
     ),
@@ -57,61 +61,80 @@ async function loadRoute(url: string, basePath = "") {
   };
 }
 
-async function expectRoute(
-  suffix: string,
-  requestedAgentId: string | null,
-  panel: AgentsRouteData["panel"],
-  canonicalSuffix?: string,
-  basePath = "",
-  restoredSuffix = suffix,
-) {
-  const url = (path: string) => `${basePath}/settings/agents${path}`;
-  expect(await loadRoute(url(suffix), basePath)).toEqual({
-    location: location(url(restoredSuffix)),
-    requestedAgentId,
-    panel,
-    ...(canonicalSuffix !== undefined ? { canonicalLocation: location(url(canonicalSuffix)) } : {}),
-  });
-}
-
 describe("agents route", () => {
-  it.each([
-    ["", null, "overview"],
-    ["/research", "research", "overview"],
-    ["/research/overview", "research", "overview"],
-    ["/research/files", "research", "files"],
-    ["/research/tools", "research", "tools"],
-  ] as const)("reads %s without rewriting it", async (url, requestedAgentId, panel) => {
-    await expectRoute(url, requestedAgentId, panel);
+  it("keeps a requested agent and panel when the roster loads on a cold deep link", async () => {
+    const result = await loadRoute("/settings/agents/research/tools");
+
+    expect(result.requestedAgentId).toBe("research");
+    expect(result.panel).toBe("tools");
+    expect(result.canonicalLocation).toBeUndefined();
   });
 
   it.each([
-    [
-      "?agent=team.writer&probe=1#catalog",
-      "team.writer",
-      "overview",
-      "/team%2Ewriter?probe=1#catalog",
-    ],
-    ["/research/tools?agent=main&probe=1", "research", "tools", "/research/tools?probe=1"],
-    ["/research/unknown?probe=1#files", "research", "overview", "/research?probe=1#files", "/ui"],
-    ["?agent=team%2Fwriter", null, "overview", ""],
-    ["?agent=.", null, "overview", ""],
-    ["?agent=..", null, "overview", ""],
-  ] as const)(
-    "canonicalizes %s while preserving URL state",
-    async (url, agent, panel, canonical, base) => {
-      await expectRoute(url, agent, panel, canonical, base);
-    },
-  );
+    ["/settings/agents", null, "overview"],
+    ["/settings/agents/research", "research", "overview"],
+    ["/settings/agents/research/overview", "research", "overview"],
+    ["/settings/agents/research/files", "research", "files"],
+  ] as const)("reads %s without rewriting it", async (url, requestedAgentId, panel) => {
+    const result = await loadRoute(url);
+    expect(result).toMatchObject({ requestedAgentId, panel, location: location(url) });
+    expect(result.canonicalLocation).toBeUndefined();
+  });
+
+  it("normalizes a legacy agent query once and preserves other URL state", async () => {
+    expect(await loadRoute("/settings/agents?agent=team.writer&probe=1#catalog")).toEqual({
+      location: location("/settings/agents?agent=team.writer&probe=1#catalog"),
+      requestedAgentId: "team.writer",
+      panel: "overview",
+      canonicalLocation: location("/settings/agents/team%2Ewriter?probe=1#catalog"),
+    });
+  });
+
+  it("prefers a canonical path over a stale legacy query", async () => {
+    expect(await loadRoute("/settings/agents/research/tools?agent=main&probe=1")).toEqual({
+      location: location("/settings/agents/research/tools?agent=main&probe=1"),
+      requestedAgentId: "research",
+      panel: "tools",
+      canonicalLocation: location("/settings/agents/research/tools?probe=1"),
+    });
+  });
+
+  it("normalizes an unknown panel to the agent default panel path", async () => {
+    expect(await loadRoute("/ui/settings/agents/research/unknown?probe=1#files", "/ui")).toEqual({
+      location: location("/ui/settings/agents/research/unknown?probe=1#files"),
+      requestedAgentId: "research",
+      panel: "overview",
+      canonicalLocation: location("/ui/settings/agents/research?probe=1#files"),
+    });
+  });
+
+  it("drops a legacy slash-containing agent id to the bare route", async () => {
+    expect(await loadRoute("/settings/agents?agent=team%2Fwriter")).toEqual({
+      location: location("/settings/agents?agent=team%2Fwriter"),
+      requestedAgentId: null,
+      panel: "overview",
+      canonicalLocation: location("/settings/agents"),
+    });
+  });
+
+  it.each([".", ".."])('drops the legacy dot-segment agent id "%s"', async (agentId) => {
+    expect(await loadRoute(`/settings/agents?agent=${encodeURIComponent(agentId)}`)).toEqual({
+      location: location(`/settings/agents?agent=${encodeURIComponent(agentId)}`),
+      requestedAgentId: null,
+      panel: "overview",
+      canonicalLocation: location("/settings/agents"),
+    });
+  });
 
   it("recovers the dynamic pathname without leaking the internal router parameter", async () => {
-    await expectRoute(
-      "?__openclawAgentPath=%2Fsettings%2Fagents%2Fresearch%2Fmemory&probe=1",
-      "research",
-      "memory",
-      undefined,
-      "",
-      "/research/memory?probe=1",
-    );
+    expect(
+      await loadRoute(
+        "/settings/agents?__openclawAgentPath=%2Fsettings%2Fagents%2Fresearch%2Fmemory&probe=1",
+      ),
+    ).toEqual({
+      location: location("/settings/agents/research/memory?probe=1"),
+      requestedAgentId: "research",
+      panel: "memory",
+    });
   });
 });

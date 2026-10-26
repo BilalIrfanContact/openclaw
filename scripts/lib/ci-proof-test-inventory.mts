@@ -4192,6 +4192,7 @@ const PR_EXEMPT_RUNTIME_TEST_FILES = [
   "extensions/codex/harness.test.ts",
   "extensions/codex/src/app-server/bounded-turn.clock.test.ts",
   "extensions/codex/src/app-server/compact.native.test.ts",
+  "extensions/codex/src/app-server/native-provenance.test.ts",
   "extensions/codex/src/app-server/native-subagent-submission-store.test.ts",
   "extensions/codex/src/app-server/run-attempt-connection.environment.test.ts",
   "extensions/codex/src/app-server/run-attempt-connection.test.ts",
