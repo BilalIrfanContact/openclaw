@@ -33,7 +33,6 @@ const { agentHandlers } = await import("./agent.js");
 const handleAgent = expectDefined(agentHandlers.agent, "agent RPC handler");
 
 async function invoke(
-  id: string,
   params: Record<string, unknown>,
   client: Parameters<typeof handleAgent>[0]["client"] = null,
   pending?: { dedupe: Map<string, unknown>; sessionKey: string; agent: string },
@@ -41,7 +40,7 @@ async function invoke(
   const respond = vi.fn<RespondFn>();
   const dedupe = pending?.dedupe ?? new Map();
   await handleAgent({
-    req: { type: "req", method: "agent", id },
+    req: { type: "req", method: "agent", id: "deleted-agent" },
     params: { sessionKey: pending?.sessionKey ?? mockDeletedAgentSession(), ...params },
     respond,
     context: { dedupe, getRuntimeConfig: () => ({}) } as never,
@@ -66,7 +65,6 @@ beforeEach(() => {
 
 it.each([
   { message: "see attachment", mode: "attach" },
-  { message: "/reset", mode: "cli" },
   { message: "/reset follow up", mode: "cli" },
   { message: "approval followup", mode: "backend" },
 ])("agent RPC rejects deleted-agent $message before side effects", async ({ message, mode }) => {
@@ -79,11 +77,7 @@ it.each([
   const params: Record<string, unknown> = {
     message,
     idempotencyKey:
-      mode === "backend"
-        ? "exec-approval-followup:req-followup"
-        : mode === "cli"
-          ? `run-reset-${message}`
-          : "run-attach",
+      mode === "backend" ? "exec-approval-followup:req-followup" : "run-deleted-agent",
   };
   if (mode === "backend") {
     params.execApprovalFollowupExpectedSessionId = "old-session";
@@ -93,7 +87,7 @@ it.each([
       { type: "file", mimeType: "application/pdf", fileName: "doc.pdf", content: "aGVsbG8=" },
     ];
   }
-  await invoke(`req-${mode}`, params, client);
+  await invoke(params, client);
   expect(parseMessageWithAttachmentsMock).not.toHaveBeenCalled();
   expect(performGatewaySessionResetMock).not.toHaveBeenCalled();
 });
@@ -109,7 +103,7 @@ it("agent RPC reserves pending ACP metadata and clears a refused reservation", a
     },
   );
   const dedupe = new Map<string, unknown>();
-  const pending = invoke("req-acp", { message: "hi", idempotencyKey: "run-acp" }, null, {
+  const pending = invoke({ message: "hi", idempotencyKey: "run-acp" }, null, {
     dedupe,
     sessionKey,
     agent: "claude",

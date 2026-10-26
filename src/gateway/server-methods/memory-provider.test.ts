@@ -1,5 +1,4 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { createRemoteControlUiIngressTestContext } from "../remote-control-ui.test-support.js";
 import {
@@ -13,12 +12,10 @@ const mocks = vi.hoisted(() => ({
   acquire: vi.fn(),
   capture: vi.fn(),
   legacy: vi.fn(),
-  resolveBackend: vi.fn(),
 }));
 vi.mock("../../plugins/memory-runtime.js", () => ({
   getActiveMemoryProviderCore: mocks.acquire,
   getActiveMemorySearchManagerCore: mocks.legacy,
-  resolveActiveMemoryBackendConfig: mocks.resolveBackend,
 }));
 // mock-isolation: a single-user Gateway; shared-Gateway policy is covered by the authority test.
 vi.mock("../../state/user-profile-list.js", () => ({
@@ -30,13 +27,11 @@ vi.mock("../operator-run-authority.js", () => ({
 
 import { memorySearchHandlers } from "./memory-search.js";
 
-const config: OpenClawConfig = { agents: { entries: { main: {} } } };
+const config = { agents: { entries: { main: {} } } };
 const reference = { providerId: "records", id: "claim:42", revision: "r3" };
 
 function syntheticClient(): NonNullable<GatewayRequestHandlerOptions["client"]> {
-  return { ...operatorClient(), internal: { syntheticClient: true } } as NonNullable<
-    GatewayRequestHandlerOptions["client"]
-  >;
+  return { ...operatorClient(), internal: { syntheticClient: true } };
 }
 
 async function invoke(
@@ -62,7 +57,6 @@ let release: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.resolveBackend.mockReturnValue({ backend: "builtin" });
   assertCurrent = vi.fn();
   release = vi.fn();
   mocks.capture.mockResolvedValue({

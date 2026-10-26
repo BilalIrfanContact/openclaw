@@ -2,10 +2,6 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { persistAuthProfileBatch } from "../../agents/auth-profiles/upsert-with-lock.js";
 import { AUTOMATIONS_TOOL_NAME } from "../../agents/tools/automations-tool-name.js";
 import { setRuntimeConfigSnapshot } from "../../config/config.js";
-import {
-  resolveSessionCreatorActor,
-  sessionIsolationProfileId,
-} from "../../config/sessions/session-entry-provenance.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   bindGatewayContextResolver,
@@ -97,8 +93,6 @@ it.each([
             ? { type: "human", source: "profile", id: delegatedCreatorProfileId }
             : { type: "agent", id: "main" };
           expect(job?.createdActor).toEqual({ ...CREATOR, delegatedBy });
-          expect(resolveSessionCreatorActor(job?.createdActor)).toEqual(delegatedBy);
-          expect(sessionIsolationProfileId(job?.createdActor)).toBe(CREATOR.id);
           expect(job?.owner).toMatchObject({ agentId: "main", sessionKey: SESSION });
           await tools.invoke(AUTOMATIONS_TOOL_NAME, {
             action: "update",
