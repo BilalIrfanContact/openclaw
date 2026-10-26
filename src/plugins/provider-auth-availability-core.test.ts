@@ -73,19 +73,17 @@ describe("capability-aware provider auth", () => {
     await expect(auth.resolveProviderAuthProfileApiKey(media)).resolves.toBe("openai:key");
   });
 
-  it("checks the persisted selected key instead of a profile id or runtime overlay", async () => {
-    const params = {
-      ...configured("openai:key"),
-      store: authProfiles({ "openai:key": keyCredential("runtime-overlay") }),
-    };
-    const acceptsApiKey = (key: string) => key === "synthetic-key";
-    expect(await isConfigured({ ...params, acceptsApiKey })).toBe(true);
+  it.each([
+    [["synthetic-key"], true],
+    [["runtime-overlay", "openai:key"], false],
+  ] as const)("checks the persisted selected key against %j", async (accepted, expected) => {
     await expect(
       isConfigured({
-        ...params,
-        acceptsApiKey: (key) => ["runtime-overlay", "openai:key"].includes(key),
+        ...configured("openai:key"),
+        store: authProfiles({ "openai:key": keyCredential("runtime-overlay") }),
+        acceptsApiKey: (key) => accepted.some((value) => value === key),
       }),
-    ).resolves.toBe(false);
+    ).resolves.toBe(expected);
   });
 
   it("answers config-only availability without opening an auth store", async () => {

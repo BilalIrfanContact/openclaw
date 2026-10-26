@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, onTestFinished } from "vitest";
 import { getSessionBindingService } from "../infra/outbound/session-binding-service.js";
 import { drainGlobalSingletonLifecycleState } from "../shared/global-singleton.js";
 import {
@@ -8,7 +8,7 @@ import {
   closeOpenClawStateDatabaseForTest,
 } from "../state/openclaw-state-db.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
-import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
+import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import {
   detachPluginConversationBinding as detach,
   getCurrentPluginConversationBinding as current,
@@ -20,7 +20,6 @@ import {
   restoreActivePluginRegistrySnapshot,
   setActivePluginRegistry,
 } from "./runtime.js";
-import { cleanupTrackedTempDirs, makeTrackedTempDir } from "./test-helpers/fs-fixtures.js";
 
 const channel = "binding-test";
 function installGenericBindingChannel(): void {
@@ -45,26 +44,21 @@ async function approve(
   await expect(resolveApproval(choice)).resolves.toMatchObject({ status: "approved" });
 }
 
-const tempDirs: string[] = [];
-let restoreEnv: () => void;
-let registrySnapshot: ReturnType<typeof captureActivePluginRegistrySnapshot>;
-
 beforeEach(async () => {
-  const envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
-  restoreEnv = () => envSnapshot.restore();
-  registrySnapshot = captureActivePluginRegistrySnapshot();
+  const registrySnapshot = captureActivePluginRegistrySnapshot();
   await drainGlobalSingletonLifecycleState();
   await closeState();
-  setTestEnvValue("OPENCLAW_STATE_DIR", makeTrackedTempDir("plugin-binding-sqlite", tempDirs));
+  const state = await createOpenClawTestState({
+    label: "plugin-binding-sqlite",
+    layout: "state-only",
+  });
+  onTestFinished(async () => {
+    await drainGlobalSingletonLifecycleState();
+    await closeState();
+    restoreActivePluginRegistrySnapshot(registrySnapshot);
+    await state.cleanup();
+  });
   installGenericBindingChannel();
-});
-
-afterEach(async () => {
-  await drainGlobalSingletonLifecycleState();
-  await closeState();
-  restoreActivePluginRegistrySnapshot(registrySnapshot);
-  restoreEnv();
-  cleanupTrackedTempDirs(tempDirs);
 });
 
 it("keeps approved opaque targets and persistent grants usable across restart", async () => {
