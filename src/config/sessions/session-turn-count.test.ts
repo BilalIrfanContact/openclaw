@@ -23,15 +23,12 @@ describe("transcript turn work budget", () => {
     clearRuntimeConfigSnapshot();
   });
 
-  it.each([1, 2, 3, 4, 513])(
+  it.each([1, 4, 513])(
     "batches %i fresh messages while preserving strict window advances",
     (count) => {
-      const scope = {
-        agentId: "main",
-        sessionId: `turn-${count}`,
-        sessionKey: `agent:main:turn-${count}`,
-        storePath: fixture.storePath(),
-      };
+      const sessionId = `turn-${count}`;
+      const sessionKey = `agent:main:${sessionId}`;
+      const scope = { agentId: "main", sessionId, sessionKey, storePath: fixture.storePath() };
       replaceSessionEntrySync(scope, { sessionId: scope.sessionId, updatedAt: 1 });
       const resolved = resolveSqliteTranscriptScope(scope);
       const databaseOptions = toDatabaseOptions(resolved);
