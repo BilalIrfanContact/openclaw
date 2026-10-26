@@ -133,7 +133,7 @@ const scenarios = interactionScenarios.filter((step) => {
   }
   return selectedIds
     ? selectedIds.includes(step.id)
-    : !step.resourceOnly || values["resource-counts"];
+    : !step.explicitOnly && (!step.resourceOnly || values["resource-counts"]);
 });
 if (!scenarios.length || selectedIds?.some((id) => !scenarios.some((step) => step.id === id))) {
   throw new Error("Unknown or empty interaction steps");
