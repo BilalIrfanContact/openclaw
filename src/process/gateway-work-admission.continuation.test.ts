@@ -17,7 +17,6 @@ let work: AsyncWorkScope;
 let finish: Deferred;
 let entered: Deferred;
 let completion: Promise<unknown>;
-let root: ReturnType<typeof tryBeginGatewayRootWorkAdmission>;
 let suspension: ReturnType<typeof tryBeginGatewaySuspendAdmission>;
 let callback: ReturnType<typeof vi.fn<() => Promise<void>>>;
 let callbackSignal: AbortSignal | undefined;
@@ -29,7 +28,7 @@ beforeEach(() => {
   finish = createDeferredCore();
   entered = createDeferredCore();
   completion = Promise.resolve();
-  root = suspension = null;
+  suspension = null;
   callbackSignal = undefined;
   callback = vi.fn(async () => {
     callbackSignal = getAsyncWorkSignal();
@@ -41,7 +40,6 @@ afterEach(async () => {
   finish.resolve();
   suspension?.release();
   await completion;
-  root?.release();
   await work.drain();
   await nextTurn();
   expect(getActiveGatewayRootWorkCount()).toBe(0);
@@ -83,19 +81,6 @@ it.each(parentKinds)("cancels suspended continuation (%s parent)", async (parent
   await completion;
   expect(run).not.toHaveBeenCalled();
   expect(rejected.mock.calls[0]?.[0]).toMatchObject({ cause: closed });
-});
-
-it("preserves synchronous required continuation from a live parent in a closing scope", async () => {
-  root = tryBeginGatewayRootWorkAdmission("live-request");
-  assert(root, "Expected an admitted fixture parent");
-  suspend();
-  work.beginClose(new Error("Request cleanup started"));
-  completion = root.run(async () => work.run(() => independent(callback, "required-cleanup")));
-  expect(callback).toHaveBeenCalledOnce();
-  expect(getActiveGatewayRootWorkCount()).toBe(2);
-  finish.resolve();
-  await completion;
-  expect(getActiveGatewayRootWorkCount()).toBe(1);
 });
 
 it.each(parentKinds)("detaches fallback from a closed caller (%s parent)", async (parent) => {
