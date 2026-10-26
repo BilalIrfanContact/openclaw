@@ -32,7 +32,9 @@ describe("runtime tool input schema projection", () => {
       $dynamicAnchor: "root",
       $dynamicRef: "#root",
       anyOf: [{ $dynamicAnchor: "branch" }, { properties: { "": { $dynamicRef: "#empty" } } }],
+      $defs: { $dynamicAnchor: { type: "string" } },
       properties: {
+        $dynamicRef: { type: "string" },
         target: { $dynamicRef: "#target" },
         "literal.dot[0]": { $dynamicAnchor: "literal" },
       },
@@ -91,16 +93,6 @@ describe("runtime tool input schema projection", () => {
       value: "finite",
     },
   ])("ignores non-JSON Number tags (%#)", expectFiniteDefault);
-
-  it("does not report schema map field names as dynamic JSON Schema keywords", () => {
-    expect(
-      projectRuntimeToolInputSchema({
-        type: "object",
-        $defs: { $dynamicAnchor: { type: "string" } },
-        properties: { $dynamicRef: { type: "string" } },
-      }).violations,
-    ).toEqual([]);
-  });
 
   it("keeps tools whose examples contain literal schema documents", () => {
     const instance = {

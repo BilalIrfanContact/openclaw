@@ -7,6 +7,7 @@ import { toToolDefinitions } from "./agent-tool-definition-adapter.js";
 import { finalizeAgentTools } from "./agent-tools.finalize.js";
 import { createCoreCodingTools } from "./core-coding-tools.js";
 import { prepareCoreToolPolicy, projectAgentToolDefinition } from "./prepared-tool-surface.js";
+import { fakeTool } from "./test-helpers/fake-tool.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 describe("prepared core tool policy", () => {
@@ -120,9 +121,7 @@ it("issues byte-identical definitions to the local session adapter", () => {
   const tools = finalizeAgentTools({
     tools: [
       {
-        name: "sample",
-        label: "Sample",
-        description: "A canonical tool.",
+        ...fakeTool("sample", "A canonical tool."),
         parameters: {
           type: "object",
           properties: { value: { type: "string" } },
@@ -130,7 +129,6 @@ it("issues byte-identical definitions to the local session adapter", () => {
         },
         hideFromChannelProgress: true,
         executionMode: "sequential",
-        execute: async () => ({ content: [], details: {} }),
       },
     ],
     modelProvider: "openai",
