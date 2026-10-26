@@ -2,19 +2,13 @@ import { createSignal } from "solid-js";
 import { expect, vi } from "vitest";
 import { mountSolid, type MountSolidOptions } from "../../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
-import {
-  isModelPickerOptionSelected,
-  type ChatModelPickerOption,
-} from "./chat-model-picker-options.ts";
 import { ChatModelPicker, type ChatModelPickerParams } from "./chat-model-picker.tsx";
 
-type PickerProps = Omit<ChatModelPickerParams, "getModelOptions" | "triggerModelOption"> & {
-  modelOptions: ChatModelPickerOption[];
-};
+type PickerProps = ChatModelPickerParams;
 export function modelControlSelector(name: string, value?: string) {
   return `[data-chat-model-${name}${value === undefined ? "" : `="${value}"`}]`;
 }
-type Option = ChatModelPickerOption;
+type Option = PickerProps["modelOptions"][number];
 export function modelOption(provider: string, id: string, overrides: Partial<Option> = {}): Option {
   return {
     provider,
@@ -38,16 +32,6 @@ export function modelPickerProps(overrides: Partial<PickerProps> = {}): PickerPr
     ...overrides,
   };
 }
-export function modelPickerParams(props: PickerProps): ChatModelPickerParams {
-  const { modelOptions, ...params } = props;
-  return {
-    ...params,
-    getModelOptions: () => modelOptions,
-    triggerModelOption: modelOptions.find((option) =>
-      isModelPickerOptionSelected(option, params.selectedModelValue, params.selectedAgentRuntime),
-    ),
-  };
-}
 export function mountModelPicker(params: Partial<PickerProps>, options?: MountSolidOptions) {
   let update!: (next: PickerProps) => void;
   const view = mountSolid(() => {
@@ -56,7 +40,7 @@ export function mountModelPicker(params: Partial<PickerProps>, options?: MountSo
       setProps(() => next);
       flush();
     };
-    return <ChatModelPicker {...modelPickerParams(props())} />;
+    return <ChatModelPicker {...props()} />;
   }, options);
   flush();
   return { ...view, update };

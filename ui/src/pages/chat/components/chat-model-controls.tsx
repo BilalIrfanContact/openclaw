@@ -1,6 +1,5 @@
 import { createMemo, type Accessor } from "solid-js";
 import { resolveModelRuntimeRoute } from "../../../../../src/shared/model-runtime-route.js";
-import type { ModelCatalogEntry } from "../../../api/types.ts";
 import { registerModelControlsEnglish } from "../../../i18n/locales/en-model-controls.ts";
 import {
   normalizeChatModelProviderId,
@@ -54,19 +53,19 @@ const MODEL_SELECTION_SCOPE_LABELS = new Map([
 
 function resolveCatalogTriggerStatus(
   state: ChatModelCatalogState,
-  hasOptions: boolean,
+  optionCount: number,
   selectionKnown: boolean,
 ): string | undefined {
   if (state.status === "offline") {
     return undefined;
   }
   if (state.status === "error") {
-    return !hasOptions ? t("chat.modelControls.modelsUnavailable") : undefined;
+    return optionCount === 0 ? t("chat.modelControls.modelsUnavailable") : undefined;
   }
   if (!state.hasSnapshot && ["idle", "loading"].includes(state.status)) {
     return selectionKnown ? undefined : t("chat.modelControls.loadingModels");
   }
-  if (state.hasSnapshot && !hasOptions) {
+  if (state.hasSnapshot && optionCount === 0) {
     return t("chat.modelControls.noModelsAvailable");
   }
   return undefined;
@@ -201,25 +200,11 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         ? t("chat.modelControls.defaultWithModel", { model: canonicalDefaultLabel })
         : defaultLabel;
     const normalizedDefaultModel = defaultModel.trim().toLowerCase();
-    // A persisted pin can match a changed default; equality cannot establish inheritance.
-    const selectedAgentRuntime =
-      selectedRuntimeOverride ??
-      selectedSession?.agentRuntime?.id ??
-      catalog.entry(currentOverride || defaultModel)?.agentRuntime?.id;
-    const defaultRuntime =
-      defaultCatalogEntry?.agentRuntime?.id ?? sessionsResult?.defaults?.agentRuntime?.id;
-    // A default model can still have a runtime pin; only the configured model/runtime pair inherits Default.
-    const pickerValue =
-      modelOverrideSource === null &&
-      (!selectedAgentRuntime || selectedAgentRuntime === defaultRuntime)
-        ? ""
-        : currentOverride || defaultModel;
-    const isDefaultOption = (value: string, entry: ModelCatalogEntry | undefined) =>
-      value.trim().toLowerCase() === normalizedDefaultModel ||
-      (entry !== undefined && entry === defaultCatalogEntry);
-    const modelOptionFamily = (option: (typeof selectOptions)[number]): ChatModelPickerOption[] => {
+    const modelOptions: ChatModelPickerOption[] = selectOptions.flatMap((option) => {
       const catalogEntry = catalog.entry(option.value);
-      const isDefault = isDefaultOption(option.value, catalogEntry);
+      const isDefault =
+        option.value.trim().toLowerCase() === normalizedDefaultModel ||
+        (catalogEntry !== undefined && catalogEntry === defaultCatalogEntry);
       // Anthropic route labels need the resolved runtime even when it was not explicitly pinned.
       const agentRuntime = catalogEntry?.agentRuntime;
       const agentRuntimeId =
@@ -286,93 +271,73 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         });
       }
       return options;
-    };
+    });
     // Only a pin recorded on the session row makes Default a reset target: New Session
     // drafts have no row, and a local optimistic override is not yet a recorded pin.
     const sessionModelPinned =
       selectedSession?.modelOverrideSource === "user" ||
       (!runtimeSelectionLocked && isSessionRuntimePinned(selectedSession?.agentRuntime));
-    // A recorded pin keeps Default available even when the catalog omits it.
-    const syntheticDefault: ChatModelPickerOption | undefined =
+    // That pin must stay clearable even when the configured default is absent from
+    // this catalog. Without it the row has no job (an agent-scoped catalog may
+    // legitimately omit the Gateway default), so nothing is synthesized.
+    if (
       defaultModel &&
       (sessionModelPinned || policy?.restricted) &&
       !retired &&
       !uninitialized &&
-      !selectOptions.some((option) => isDefaultOption(option.value, catalog.entry(option.value)))
-        ? {
-            commitValue: "",
-            isDefault: true,
-            value: defaultModel,
-            label: formatPickerModelLabel(pickerDefaultLabel),
-            provider: catalog.provider(defaultModel, defaultProviderHint),
-          }
-        : undefined;
+      !modelOptions.some((option) => option.isDefault)
+    ) {
+      modelOptions.unshift({
+        commitValue: "",
+        isDefault: true,
+        value: defaultModel,
+        label: formatPickerModelLabel(pickerDefaultLabel),
+        provider: catalog.provider(defaultModel, defaultProviderHint),
+      });
+    }
     const currentCatalogEntry = catalog.entry(currentOverride);
-    const syntheticCurrent: ChatModelPickerOption | undefined =
+    if (
       currentOverride &&
       (!catalogOwnsChoices || currentCatalogEntry) &&
       currentCatalogEntry?.manualSelectionAllowed !== false &&
-      (selectOptions.length > 0 || syntheticDefault) &&
-      syntheticDefault?.value !== currentOverride &&
-      !selectOptions.some((option) => option.value === currentOverride)
-        ? {
-            commitValue: currentOverride,
-            contextTokens: currentCatalogEntry?.contextTokens,
-            contextWindow: currentCatalogEntry?.contextWindow,
-            supportsTools: currentCatalogEntry?.supportsTools,
-            disabled: currentCatalogEntry?.available === false,
-            unavailableReason:
-              currentCatalogEntry?.available === false
-                ? currentCatalogEntry.unavailableReason
-                : undefined,
-            isDefault: false,
-            value: currentOverride,
-            label: resolveChatModelPickerLabel(
-              currentCatalogEntry,
-              currentCatalogEntry?.name.trim() || currentOverride,
-            ),
-            provider: catalog.provider(currentOverride, currentProviderHint),
-          }
-        : undefined;
-    const findModelOption = (value: string) => {
-      const matches = (option: ChatModelPickerOption) =>
-        isModelPickerOptionSelected(option, value, selectedAgentRuntime);
-      if (syntheticDefault && matches(syntheticDefault)) {
-        return syntheticDefault;
-      }
-      for (const option of selectOptions) {
-        if (
-          option.value !== value &&
-          !(value === "" && isDefaultOption(option.value, catalog.entry(option.value)))
-        ) {
-          continue;
-        }
-        const match = modelOptionFamily(option).find(matches);
-        if (match) {
-          return match;
-        }
-      }
-      return syntheticCurrent && matches(syntheticCurrent) ? syntheticCurrent : undefined;
-    };
-    const activeModelOption = findModelOption(pickerValue);
-    const triggerModelOption =
-      triggerModelValue && triggerModelValue !== pickerValue
-        ? findModelOption(triggerModelValue)
-        : activeModelOption;
-    const hasModelOptions =
-      selectOptions.length > 0 || Boolean(syntheticDefault || syntheticCurrent);
-    const hasSelectableModel =
-      Boolean(syntheticDefault || (syntheticCurrent && !syntheticCurrent.disabled)) ||
-      selectOptions.some(
-        (option) =>
-          !option.disabled ||
-          (!runtimeSelectionLocked &&
-            catalog
-              .entry(option.value)
-              ?.runtimeChoices?.some(
-                (choice) => choice.manualSelectionAllowed !== false && choice.available !== false,
-              )),
-      );
+      modelOptions.length > 0 &&
+      !modelOptions.some((option) => option.value === currentOverride)
+    ) {
+      modelOptions.push({
+        commitValue: currentOverride,
+        contextTokens: currentCatalogEntry?.contextTokens,
+        contextWindow: currentCatalogEntry?.contextWindow,
+        supportsTools: currentCatalogEntry?.supportsTools,
+        disabled: currentCatalogEntry?.available === false,
+        unavailableReason:
+          currentCatalogEntry?.available === false
+            ? currentCatalogEntry.unavailableReason
+            : undefined,
+        isDefault: false,
+        value: currentOverride,
+        label: resolveChatModelPickerLabel(
+          currentCatalogEntry,
+          currentCatalogEntry?.name.trim() || currentOverride,
+        ),
+        provider: catalog.provider(currentOverride, currentProviderHint),
+      });
+    }
+    // A persisted pin can match a changed default; equality cannot establish inheritance.
+    const selectedAgentRuntime =
+      selectedRuntimeOverride ??
+      selectedSession?.agentRuntime?.id ??
+      catalog.entry(currentOverride || defaultModel)?.agentRuntime?.id;
+    const defaultRuntime =
+      defaultCatalogEntry?.agentRuntime?.id ?? sessionsResult?.defaults?.agentRuntime?.id;
+    // A default model can still have a runtime pin; only the configured model/runtime pair inherits Default.
+    const pickerValue =
+      modelOverrideSource === null &&
+      (!selectedAgentRuntime || selectedAgentRuntime === defaultRuntime)
+        ? ""
+        : currentOverride || defaultModel;
+    const activeModelOption = modelOptions.find((option) =>
+      isModelPickerOptionSelected(option, pickerValue, selectedAgentRuntime),
+    );
     const activeSessionModel = activeSession?.model
       ? catalog.entry(
           resolvePreferredServerChatModelValue(
@@ -397,15 +362,16 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       Boolean(activeSessionRuntime) && activeSessionRuntime === activeOptionRuntime;
     // Missing or mismatched current-selection provenance cannot bind the cached
     // session window. Even matching provenance is useful only after the switch settles.
-    const activeContextTokens =
+    if (
       !modelSwitching &&
       activeModelOption &&
       activeSession?.contextTokens &&
       activeRuntimeMatches &&
       activeSessionModel !== undefined &&
       activeSessionModel === activeOptionModel
-        ? activeSession.contextTokens
-        : undefined;
+    ) {
+      activeModelOption.contextTokens = activeSession.contextTokens;
+    }
     // The preference label uses its selected runtime, not an executing fallback.
     const triggerRuntime = selectedAgentRuntime ?? defaultRuntime;
     // A lock prevents model changes; the concrete selection still owns its label.
@@ -423,24 +389,6 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
             ),
             triggerModelValue || defaultModel ? triggerRuntime : null,
           );
-    const buildModelOptions = () => {
-      const options = selectOptions.flatMap(modelOptionFamily);
-      if (syntheticDefault) {
-        options.unshift(syntheticDefault);
-      }
-      if (syntheticCurrent) {
-        options.push(syntheticCurrent);
-      }
-      if (activeContextTokens !== undefined) {
-        const active = options.find((option) =>
-          isModelPickerOptionSelected(option, pickerValue, selectedAgentRuntime),
-        );
-        if (active) {
-          active.contextTokens = activeContextTokens;
-        }
-      }
-      return options;
-    };
     return {
       catalog,
       policy,
@@ -452,20 +400,16 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       defaultModel,
       modelOverrideSource,
       activeSession,
-      buildModelOptions,
-      hasModelOptions,
-      hasSelectableModel,
+      modelOptions,
       activeModelOption,
-      triggerModelOption,
       pickerValue,
       selectedAgentRuntime,
       sessionModelPinned,
       committedModelLabel,
+      triggerModelValue,
       triggerRuntime,
     };
   });
-  // The retained panel starts observing this only after its first open.
-  const modelOptions = createMemo(() => selection().buildModelOptions(), { lazy: true });
   // Capture fields so refreshed wrappers and unrelated frames do not rescan the catalog.
   const fastModeInputs = createMemo(
     () => {
@@ -532,14 +476,13 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       defaultModel,
       modelOverrideSource,
       activeSession,
-      hasModelOptions,
-      hasSelectableModel,
+      modelOptions,
       activeModelOption,
-      triggerModelOption,
       pickerValue,
       selectedAgentRuntime,
       sessionModelPinned,
       committedModelLabel,
+      triggerModelValue,
       triggerRuntime,
     } = selection();
     const catalogState = props.modelCatalogState;
@@ -563,14 +506,14 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       currentOverride || (modelOverrideSource === null && defaultModel),
     );
     const catalogTriggerStatus = retired
-      ? resolveCatalogTriggerStatus(catalogState, false, false)
+      ? resolveCatalogTriggerStatus(catalogState, 0, false)
       : policy?.restricted && !currentOverride && !defaultModel
         ? t(
-            hasModelOptions
+            modelOptions.length
               ? "chat.modelControls.selectionRequired"
               : "chat.modelControls.noPermittedModels",
           )
-        : resolveCatalogTriggerStatus(catalogState, hasModelOptions, selectionKnown);
+        : resolveCatalogTriggerStatus(catalogState, modelOptions.length, selectionKnown);
     const hasResolvableModel =
       catalogState.hasSnapshot &&
       (catalogState.status === "ready" ||
@@ -578,7 +521,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         catalogState.status === "loading" ||
         catalogState.status === "offline") &&
       activeModelOption?.disabled !== true &&
-      hasSelectableModel;
+      modelOptions.some((option) => !option.disabled);
     const busy = props.sending || Boolean(props.activeRunId) || props.stream !== null;
     const modelControlsDisabled =
       !props.connected || props.modelSwitching || !props.gatewayAvailable;
@@ -660,14 +603,14 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
           : selectionScopeLabel
             ? t(selectionScopeLabel)
             : undefined,
-        getModelOptions: modelOptions,
-        triggerModelOption,
+        modelOptions,
         targetGroups: props.modelPickerTargetGroups,
         selectedModelValue: pickerValue,
         selectedAgentRuntime,
         sessionModelPinned,
         sessionKey: props.sessionKey,
         triggerModelLabel: formatPickerModelLabel(committedModelLabel),
+        triggerModelValue: triggerModelValue || undefined,
         triggerStatusLabel: props.modelSelectionLocked ? undefined : catalogTriggerStatus,
         triggerLoading:
           !props.modelSelectionLocked && catalogLoadingWithoutSnapshot && !selectionKnown,

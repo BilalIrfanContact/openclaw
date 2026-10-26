@@ -11,7 +11,6 @@ import { focusComposerFromChrome } from "./chat-composer-dom.ts";
 import {
   modelControlSelector,
   modelOption,
-  modelPickerParams,
   modelPickerProps,
   waitForModelMenu,
 } from "./chat-model-picker.test-support.tsx";
@@ -60,7 +59,7 @@ function mountPicker(optionsReady = true) {
           <div class="agent-chat__composer-combobox">
             <textarea ref={(element) => (composer = element)} />
           </div>
-          <ChatModelPicker {...modelPickerParams(props())} />
+          <ChatModelPicker {...props()} />
         </div>
       );
     },
