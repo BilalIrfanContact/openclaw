@@ -53,41 +53,36 @@ describe("createSandboxBridgeReadFile", () => {
     }
   });
 
-  it("rewrites inbound media URIs before direct sandbox resolution", async () => {
+  it.each([true, false])("resolves only staged inbound media (staged=%s)", async (staged) => {
     const resolvePath = vi.fn(({ filePath }: { filePath: string }) => ({
       hostPath: `${root}/${filePath}`,
       relativePath: filePath,
       containerPath: `/sandbox/${filePath}`,
     }));
-    const stat = vi.fn<SandboxFsBridge["stat"]>(async () => ({
-      type: "file",
-      size: 1,
-      mtimeMs: 1,
-    }));
-    const resolved = await resolveSandboxedBridgeMediaPath({
+    const stat = vi.fn<SandboxFsBridge["stat"]>(async ({ filePath }) =>
+      staged && filePath === "media/inbound/photo.png"
+        ? { type: "file", size: 1, mtimeMs: 1 }
+        : null,
+    );
+    const result = resolveSandboxedBridgeMediaPath({
       sandbox: sandbox({ resolvePath, stat }),
       mediaPath: "media://inbound/photo.png",
       inboundFallbackDir: "media/inbound",
     });
-
+    if (!staged) {
+      await expect(result).rejects.toThrow(
+        "Sandbox media reference is not staged: media://inbound/photo.png",
+      );
+      expect(resolvePath).not.toHaveBeenCalled();
+      return;
+    }
+    const resolved = await result;
     expect(stat).toHaveBeenCalledWith({ filePath: "media/inbound/photo.png", cwd: root });
     expect(resolvePath).toHaveBeenCalledWith({ filePath: "media/inbound/photo.png", cwd: root });
     expect(resolved).toEqual({
       resolved: "/tmp/sandbox-root/media/inbound/photo.png",
       rewrittenFrom: "media://inbound/photo.png",
     });
-  });
-
-  it("rejects missing staged inbound media URIs before direct sandbox resolution", async () => {
-    const resolvePath = vi.fn();
-    await expect(
-      resolveSandboxedBridgeMediaPath({
-        sandbox: sandbox({ resolvePath, stat: vi.fn(async () => null) }),
-        mediaPath: "media://inbound/missing.png",
-        inboundFallbackDir: "media/inbound",
-      }),
-    ).rejects.toThrow("Sandbox media reference is not staged: media://inbound/missing.png");
-    expect(resolvePath).not.toHaveBeenCalled();
   });
 });
 
