@@ -47,6 +47,22 @@ const privateAcl = {
   groupWritable: false,
 };
 
+async function readHosts(): Promise<SecureFileReadResult> {
+  const hosts = path.join(profileDir, "hosts.yml");
+  const identity = await fs.stat(hosts, { bigint: true });
+  return {
+    buffer: await fs.readFile(hosts),
+    realPath: hosts,
+    stat: await fs.stat(hosts),
+    exactIdentity: { dev: identity.dev, ino: identity.ino },
+  };
+}
+
+const expectUnavailable = () =>
+  expect(readGitHubExecToken(profileDir)).rejects.toThrow(
+    "GitHub Identity credential is unavailable or insecure",
+  );
+
 beforeEach(async () => {
   profileDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "github-exec-acl-")));
   // Windows admission must use ACLs, not Node's synthetic POSIX mode bits.
@@ -56,13 +72,7 @@ beforeEach(async () => {
     mode: 0o600,
   });
   permissions.inspect.mockReset().mockResolvedValue(privateAcl);
-  const identity = await fs.stat(hosts, { bigint: true });
-  permissions.read.mockReset().mockResolvedValue({
-    buffer: Buffer.from("github.com:\n  oauth_token: synthetic-windows-token\n"),
-    realPath: hosts,
-    stat: await fs.stat(hosts),
-    exactIdentity: { dev: identity.dev, ino: identity.ino },
-  });
+  permissions.read.mockReset().mockImplementation(readHosts);
   platformMock = mockProcessPlatform("win32");
 });
 
@@ -76,16 +86,6 @@ describe("GitHub exec Windows directory ownership", () => {
   it("creates a launchable profile beneath an inherited non-private Windows directory", async () => {
     await fs.rm(profileDir, { recursive: true });
     permissions.inspect.mockResolvedValue({ ...privateAcl, groupReadable: true });
-    permissions.read.mockImplementation(async () => {
-      const hosts = path.join(profileDir, "hosts.yml");
-      const identity = await fs.stat(hosts, { bigint: true });
-      return {
-        buffer: await fs.readFile(hosts),
-        realPath: hosts,
-        stat: await fs.stat(hosts),
-        exactIdentity: { dev: identity.dev, ino: identity.ino },
-      };
-    });
 
     await writeManagedGitHubProfileFiles(profileDir, {
       login: "worker-fixture",
@@ -116,9 +116,7 @@ describe("GitHub exec Windows directory ownership", () => {
     { reason: "world write", change: { worldWritable: true } },
   ])("rejects $reason before reading credentials", async ({ change }) => {
     permissions.inspect.mockResolvedValue({ ...privateAcl, ...change });
-    await expect(readGitHubExecToken(profileDir)).rejects.toThrow(
-      "GitHub Identity credential is unavailable or insecure",
-    );
+    await expectUnavailable();
     expect(permissions.read).not.toHaveBeenCalled();
   });
 
@@ -126,9 +124,7 @@ describe("GitHub exec Windows directory ownership", () => {
     permissions.inspect
       .mockResolvedValueOnce(privateAcl)
       .mockResolvedValueOnce({ ...privateAcl, worldReadable: true });
-    await expect(readGitHubExecToken(profileDir)).rejects.toThrow(
-      "GitHub Identity credential is unavailable or insecure",
-    );
+    await expectUnavailable();
     expect(permissions.read).toHaveBeenCalledOnce();
   });
 });
