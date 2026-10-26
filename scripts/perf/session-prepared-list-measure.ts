@@ -363,7 +363,7 @@ try {
   const golden = {
     initial: initialGolden,
     final: await capture(),
-    responses: responses?.digest("hex"),
+    ...(responses ? { responses: responses.digest("hex") } : {}),
   };
   if (values.golden) {
     assert.deepEqual(golden, JSON.parse(readFileSync(values.golden, "utf8")));
