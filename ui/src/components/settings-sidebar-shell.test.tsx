@@ -2,7 +2,7 @@
 
 import { createRouter, definePage } from "@openclaw/uirouter";
 import { onSettled } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.ts";
 import { ShellOwner } from "../app/app-host.tsx";
 import { bootstrapApplication } from "../app/bootstrap.ts";
@@ -43,18 +43,13 @@ async function setup() {
   const runtime = bootstrapApplication();
   const lifecycle = new AbortController();
   const router = createRouter({
-    routes: [
+    routes: ["Appearance", "Advanced"].map((label) =>
       definePage({
-        id: "appearance",
-        path: "/settings/appearance",
-        component: () => ({ renderSolid: () => <p>Appearance content</p> }),
+        id: label.toLowerCase(),
+        path: `/settings/${label.toLowerCase()}`,
+        component: () => ({ renderSolid: () => <p>{label} content</p> }),
       }),
-      definePage({
-        id: "advanced",
-        path: "/settings/advanced",
-        component: () => ({ renderSolid: () => <p>Advanced content</p> }),
-      }),
-    ],
+    ),
   });
   const context = Object.assign(runtime.context, {
     gateway,
@@ -86,53 +81,42 @@ async function setup() {
     expect(request).toHaveBeenCalledWith("config.set", expect.anything());
     expect(view.queryByText("Saving…")).not.toBeNull();
   });
-  return {
-    view,
-    outlet,
-    router,
-    context,
-    publish,
-    lifecycle,
-    held,
-    runtimeConfig,
-    async dispose() {
-      lifecycle.abort();
-      held.resolve({ config: { count: 2 }, hash: "saved" });
-      await held.promise.catch(() => undefined);
-      flush();
-      view.unmount();
-      outlet.dispose();
-      router.stop();
-      runtimeConfig.dispose();
-      runtime.stop();
-    },
+  const dispose = async () => {
+    lifecycle.abort();
+    held.resolve({ config: { count: 2 }, hash: "saved" });
+    await held.promise.catch(() => undefined);
+    flush();
+    view.unmount();
+    outlet.dispose();
+    router.stop();
+    runtimeConfig.dispose();
+    runtime.stop();
   };
+  return { view, outlet, router, context, publish, lifecycle, held, dispose };
 }
 
-describe("Settings save command lifetime", () => {
-  it.each(["route", "connection", "shutdown"] as const)(
-    "releases a held Save on %s retirement and consumes its late failure",
-    async (retirement) => {
-      const page = await setup();
-      try {
-        if (retirement === "route") {
-          await page.router.navigate("advanced", page.context);
-          await waitForSolid(() => expect(page.outlet.textContent).toContain("Advanced content"));
-        } else if (retirement === "connection") {
-          page.publish(false);
-        } else {
-          page.lifecycle.abort();
-        }
-        await waitForSolid(() =>
-          expect(page.view.container.querySelector('[aria-busy="true"]')).toBeNull(),
-        );
-        page.held.reject(new Error("Synthetic retired settings save failed"));
-        await page.held.promise.catch(() => undefined);
-        flush();
-        expect(page.view.container.querySelector('[role="alert"]')).toBeNull();
-      } finally {
-        await page.dispose();
+it.each(["route", "connection", "shutdown"] as const)(
+  "releases a held Save on %s retirement and consumes its late failure",
+  async (retirement) => {
+    const page = await setup();
+    try {
+      if (retirement === "route") {
+        await page.router.navigate("advanced", page.context);
+        await waitForSolid(() => expect(page.outlet.textContent).toContain("Advanced content"));
+      } else if (retirement === "connection") {
+        page.publish(false);
+      } else {
+        page.lifecycle.abort();
       }
-    },
-  );
-});
+      await waitForSolid(() =>
+        expect(page.view.container.querySelector('[aria-busy="true"]')).toBeNull(),
+      );
+      page.held.reject(new Error("Synthetic retired settings save failed"));
+      await page.held.promise.catch(() => undefined);
+      flush();
+      expect(page.view.container.querySelector('[role="alert"]')).toBeNull();
+    } finally {
+      await page.dispose();
+    }
+  },
+);

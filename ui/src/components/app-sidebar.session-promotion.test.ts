@@ -79,17 +79,6 @@ async function mountFamily() {
   return { sidebar, sessions, family, patches };
 }
 
-function expectHistoryIdentity({
-  parent,
-  child,
-}: Awaited<ReturnType<typeof mountFamily>>["family"]) {
-  expect(child).toMatchObject({
-    sessionId: "child-id",
-    parentSessionKey: parent.key,
-    spawnedBy: parent.key,
-  });
-}
-
 it.each(["existing group", "new group"])(
   "keeps an archived parent's child independent after moving to a %s",
   async (action) => {
@@ -116,7 +105,11 @@ it.each(["existing group", "new group"])(
         isChild: false,
         sidebarRoot: true,
       });
-      expectHistoryIdentity(family);
+      expect(family.child).toMatchObject({
+        sessionId: "child-id",
+        parentSessionKey: family.parent.key,
+        spawnedBy: family.parent.key,
+      });
       sidebar.sidebarEntries = [];
       sidebar.onUpdateSidebarEntries = (entries) => {
         sidebar.sidebarEntries = entries;

@@ -29,23 +29,25 @@ async function fixture() {
   const { sidebar } = await mountSidebar(gateway.gateway, sessions.sessions);
   sidebar.connected = true;
   await sidebar.updateComplete;
-  return { gateway, sessions, sidebar };
+  const modal = createModalDialogTestFixture();
+  const row = sidebar.findSidebarSessionByKey("agent:main:draft")!;
+  const rename = () =>
+    modal.track(runSessionAction(sidebar.sessionOrganizer, row, { kind: "rename" }));
+  return { gateway, sessions, sidebar, modal, rename };
 }
 
 it.each(["rename", "new group", "rename group"] as const)(
   "keeps a %s draft through same-client reconnect but retires it on identity change",
   async (kind) => {
-    const { gateway, sessions, sidebar } = await fixture();
-    const modal = createModalDialogTestFixture();
-    const row = sidebar.findSidebarSessionByKey("agent:main:draft")!;
+    const { gateway, sessions, sidebar, modal, rename } = await fixture();
     const open = () =>
-      modal.track(
-        kind === "rename"
-          ? runSessionAction(sidebar.sessionOrganizer, row, { kind: "rename" })
-          : kind === "new group"
-            ? createSessionGroup(sidebar.sessionOrganizer)
-            : renameSessionGroupFromMenu(sidebar.sessionOrganizer, "Drafts"),
-      );
+      kind === "rename"
+        ? rename()
+        : modal.track(
+            kind === "new group"
+              ? createSessionGroup(sidebar.sessionOrganizer)
+              : renameSessionGroupFromMenu(sidebar.sessionOrganizer, "Drafts"),
+          );
     try {
       const completion = open();
       const input = await waitForInputDialog();
@@ -66,9 +68,9 @@ it.each(["rename", "new group", "rename group"] as const)(
       input
         .closest("form")!
         .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-      expect(sessions.patch).not.toHaveBeenCalled();
-      expect(sessions.groupsPut).not.toHaveBeenCalled();
-      expect(sessions.groupsRename).not.toHaveBeenCalled();
+      for (const mutation of [sessions.patch, sessions.groupsPut, sessions.groupsRename]) {
+        expect(mutation).not.toHaveBeenCalled();
+      }
 
       gateway.publish({ phase: "connected", hello });
       sidebar.connected = true;
@@ -102,8 +104,7 @@ it.each(["rename", "new group", "rename group"] as const)(
 it.each(["failed", "stale"] as const)(
   "keeps the rename dialog and typed value after a %s patch",
   async (outcome) => {
-    const { gateway, sessions, sidebar } = await fixture();
-    const modal = createModalDialogTestFixture();
+    const { gateway, sessions, modal, rename } = await fixture();
     vi.spyOn(sessions.sessions, "patch").mockImplementationOnce(async () => {
       if (outcome === "stale") {
         gateway.publish({ phase: "reconnecting", hello: null });
@@ -112,13 +113,7 @@ it.each(["failed", "stale"] as const)(
       throw new Error("Rename rejected");
     });
     try {
-      void modal.track(
-        runSessionAction(
-          sidebar.sessionOrganizer,
-          sidebar.findSidebarSessionByKey("agent:main:draft")!,
-          { kind: "rename" },
-        ),
-      );
+      void rename();
       await submitInputDialog("Keep this name");
       await vi.waitFor(() =>
         expect(document.body.querySelector(".exec-approval-error")).not.toBeNull(),
