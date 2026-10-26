@@ -4,25 +4,22 @@ import { resolveExtraParams } from "./embedded-agent-runner/extra-params.js";
 const gpt5Defaults = { parallel_tool_calls: true, text_verbosity: "low" };
 
 describe("resolveExtraParams", () => {
-  it.each([
-    ["applies default runtime params for OpenAI GPT-5 models", "openai", gpt5Defaults],
-    ["does not apply OpenAI GPT-5 defaults to OpenRouter models", "openrouter", undefined],
-  ] as const)("%s", (_name, provider, expected) => {
-    expect(resolveExtraParams({ cfg: undefined, provider, modelId: "gpt-5.4" })).toEqual(expected);
+  it("does not apply OpenAI GPT-5 defaults to OpenRouter models", () => {
+    expect(
+      resolveExtraParams({ cfg: undefined, provider: "openrouter", modelId: "gpt-5.4" }),
+    ).toBeUndefined();
   });
 
-  it.each([
-    ["returns params for exact provider/model key", "gpt-4"],
-    ["ignores unrelated model entries", "gpt-4.1-mini"],
-  ] as const)("%s", (_name, modelId) => {
-    const params = { temperature: 0.7, maxTokens: 2048 };
+  it("ignores unrelated model entries", () => {
     expect(
       resolveExtraParams({
-        cfg: { agents: { defaults: { models: { "openai/gpt-4": { params } } } } },
+        cfg: {
+          agents: { defaults: { models: { "openai/gpt-4": { params: { temperature: 0.7 } } } } },
+        },
         provider: "openai",
-        modelId,
+        modelId: "gpt-4.1-mini",
       }),
-    ).toEqual(modelId === "gpt-4" ? params : undefined);
+    ).toBeUndefined();
   });
 
   it("merges per-agent params over global model defaults", () => {

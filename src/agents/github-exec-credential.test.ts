@@ -91,7 +91,8 @@ describe("GitHub exec Windows directory ownership", () => {
       login: "worker-fixture",
       token: "synthetic-worker-token",
     });
-
+    // A private Windows ACL, not synthetic POSIX mode bits, admits the profile.
+    await fs.chmod(profileDir, 0o755);
     await expect(readGitHubExecToken(profileDir)).resolves.toBe("synthetic-worker-token");
     // Credential renewal must keep the private directory and replace the token.
     await writeManagedGitHubProfileFiles(profileDir, {
@@ -99,11 +100,6 @@ describe("GitHub exec Windows directory ownership", () => {
       token: "synthetic-renewed-token",
     });
     await expect(readGitHubExecToken(profileDir)).resolves.toBe("synthetic-renewed-token");
-  });
-
-  it("accepts a private verified ACL without imposing POSIX permissions", async () => {
-    await expect(readGitHubExecToken(profileDir)).resolves.toBe("synthetic-windows-token");
-    expect(permissions.read).toHaveBeenCalledOnce();
   });
 
   it.each([

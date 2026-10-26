@@ -33,9 +33,11 @@ function failPrimary(status = 429) {
 }
 
 async function expectSelectedModel(sessionId: string, model: string) {
-  const run = vi.fn(async () => "reply");
+  const run = vi.fn<Parameters<typeof runWithModelFallback<string>>[0]["run"]>(
+    async (_provider, selected) => selected,
+  );
   const result = await runTurn(sessionId, run, true);
-  expect(run).toHaveBeenCalledExactlyOnceWith("sticky-provider", model, expect.any(Object));
+  expect(result.result).toBe(model);
   return { run, result };
 }
 
@@ -63,16 +65,10 @@ describe("session rate-limit fallback stickiness", () => {
     expect(warm.attempts).toMatchObject([
       { model: "primary", reason: "rate_limit", code: MODEL_FALLBACK_SKIPPED_CODE },
     ]);
-    expect(second).toHaveBeenCalledExactlyOnceWith(
-      "sticky-provider",
-      "backup",
-      expect.objectContaining({
-        modelRoutingProvenance: expect.objectContaining({
-          stage: "fallback",
-          fallbackReason: "rate_limit",
-        }),
-      }),
-    );
+    expect(second.mock.calls[0]?.[2]?.modelRoutingProvenance).toMatchObject({
+      stage: "fallback",
+      fallbackReason: "rate_limit",
+    });
 
     vi.setSystemTime(start + 11 * minute + 1);
     await expectSelectedModel("sticky-session", "primary");

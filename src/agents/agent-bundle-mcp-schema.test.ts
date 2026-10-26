@@ -8,6 +8,7 @@ const compileDraft = (schema: Schema) =>
     $schema: "https://json-schema.org/draft/2020-12/schema",
     ...schema,
   });
+const uri = { type: "string", format: "uri" };
 
 it("accepts draft-2020-12 tool output schemas from external MCP catalogs", () => {
   const validator = compileDraft({
@@ -20,7 +21,7 @@ it("accepts draft-2020-12 tool output schemas from external MCP catalogs", () =>
         properties: { x: { type: "string" } },
         additionalProperties: false,
       },
-      url: { type: "string", format: "uri" },
+      url: uri,
     },
     required: ["format", "metadata", "nullable", "url"],
     additionalProperties: false,
@@ -33,20 +34,12 @@ it("accepts draft-2020-12 tool output schemas from external MCP catalogs", () =>
   const dependencyValidator = compileDraft({
     type: "object",
     dependencies: {
-      url: {
-        properties: {
-          url: { type: "string", format: "uri" },
-        },
-        required: ["url"],
-      },
+      url: { properties: { url: uri }, required: ["url"] },
     },
   });
   expect(dependencyValidator({ url: "not a uri" }).valid).toBe(true);
 
-  const mapValidator = compileDraft({
-    type: "object",
-    additionalProperties: { type: "string" },
-  });
+  const mapValidator = compileDraft({ type: "object", additionalProperties: { type: "string" } });
   expect(mapValidator({ foo: "bar" }).valid).toBe(true);
   expect(mapValidator({ foo: 42 }).valid).toBe(false);
 });
@@ -56,7 +49,7 @@ it("preserves draft-07 format and non-mutating validation semantics", () => {
     $schema: "http://json-schema.org/draft-07/schema#",
     type: "object",
     properties: {
-      url: { type: "string", format: "uri" },
+      url: uri,
       count: { type: "integer", default: 7 },
     },
     required: ["url"],
@@ -72,24 +65,20 @@ it("preserves draft-07 format and non-mutating validation semantics", () => {
   expect(schema).toEqual(originalSchema);
 });
 
-it.each<{ name: string; properties: Schema["properties"]; message: string }>([
-  {
-    name: "malformed annotation at its original path",
-    properties: {
-      node: {
-        type: ["object", "null"],
-        // Deliberately malformed external schema must reach runtime shape validation.
-        $defs: { Leaf: { type: "string", format: 42 as never } },
-      },
+it.each<[string, Schema["properties"]]>([
+  [
+    "<schema>.properties.node.$defs.Leaf.format",
+    {
+      node: { type: ["object", "null"], $defs: { Leaf: { type: "string", format: 42 as never } } },
     },
-    message: "<schema>.properties.node.$defs.Leaf.format",
-  },
-  {
-    name: "compiler failure attributed to the MCP schema",
-    properties: { value: { type: "string", pattern: "[" } },
-    message: "Invalid MCP draft-2020-12 JSON Schema: Invalid regular expression",
-  },
-])("reports $name", ({ properties, message }) => {
+  ],
+  [
+    "Invalid MCP draft-2020-12 JSON Schema: Invalid regular expression",
+    {
+      value: { type: "string", pattern: "[" },
+    },
+  ],
+])("reports %s", (message, properties) => {
   expect(() => compileDraft({ type: "object", properties })).toThrow(
     expect.objectContaining({
       message: expect.stringContaining(message),
