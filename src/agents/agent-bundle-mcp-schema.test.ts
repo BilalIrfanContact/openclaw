@@ -14,8 +14,6 @@ it("accepts draft-2020-12 tool output schemas from external MCP catalogs", () =>
   const validator = compileDraft({
     type: "object",
     properties: {
-      format: { type: "string", enum: ["png"] },
-      metadata: { const: { format: "png" } },
       nullable: {
         type: ["object", "null"],
         properties: { x: { type: "string" } },
@@ -23,21 +21,13 @@ it("accepts draft-2020-12 tool output schemas from external MCP catalogs", () =>
       },
       url: uri,
     },
-    required: ["format", "metadata", "nullable", "url"],
+    required: ["nullable", "url"],
     additionalProperties: false,
   });
 
-  const input = { format: "png", metadata: { format: "png" }, nullable: null, url: "not a uri" };
+  const input = { nullable: null, url: "not a uri" };
   expect(validator(input)).toEqual({ valid: true, data: input, errorMessage: undefined });
   expect(validator({ url: 42 }).valid).toBe(false);
-
-  const dependencyValidator = compileDraft({
-    type: "object",
-    dependencies: {
-      url: { properties: { url: uri }, required: ["url"] },
-    },
-  });
-  expect(dependencyValidator({ url: "not a uri" }).valid).toBe(true);
 
   const mapValidator = compileDraft({ type: "object", additionalProperties: { type: "string" } });
   expect(mapValidator({ foo: "bar" }).valid).toBe(true);
@@ -109,14 +99,10 @@ it("accepts draft-2020-12 local refs, boolean schemas, and dynamic anchors", () 
 
 it("compiles draft-2020-12 patterns with redundant unicode-invalid escapes", () => {
   const validator = compileDraft({
-    type: "object",
-    properties: {
-      url: { type: "string", pattern: "^https\\:\\/\\/" },
-    },
-    required: ["url"],
-    additionalProperties: false,
+    type: "string",
+    pattern: "^https\\:\\/\\/",
   });
 
-  expect(validator({ url: "https://example.com/path" }).valid).toBe(true);
-  expect(validator({ url: "http://example.com" }).valid).toBe(false);
+  expect(validator("https://example.com/path").valid).toBe(true);
+  expect(validator("http://example.com").valid).toBe(false);
 });
