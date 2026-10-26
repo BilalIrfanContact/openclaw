@@ -16,8 +16,6 @@ import {
   readScheduledOccurrenceAutomationsScope,
   readScheduledSenderBit,
   readScheduledToolOptions,
-  readScheduledToolTargets,
-  type ScheduledToolTargets,
 } from "../cron/execution-context-registry.js";
 import {
   DEFAULT_GATEWAY_HTTP_TOOL_DENY,
@@ -155,8 +153,6 @@ export function resolveGatewaySenderAuthority(
 type GatewayScheduledToolAccess = Readonly<{
   /** Tool-construction options read from the run's context. */
   toolOptions: ReturnType<typeof readScheduledToolOptions> & { cronSelfRemoveOnlyJobId?: string };
-  /** Where a scheduled occurrence runs; undefined for ingress turns and unscheduled runs. */
-  placement?: ScheduledToolTargets["placement"];
   /** Owner-only tools the surface denies for a sender bit. */
   ownerOnlyDeny: (senderIsOwner: boolean | undefined, sessionPortal: boolean) => string[];
 }>;
@@ -182,7 +178,6 @@ function resolveGatewayScheduledToolAccess(
       ...readScheduledToolOptions(params.admittedRunContext, params.toolsAllow),
       ...(selfJobId ? { cronSelfRemoveOnlyJobId: selfJobId } : {}),
     },
-    placement: readScheduledToolTargets(params.admittedRunContext)?.placement,
     ownerOnlyDeny: (senderIsOwner, sessionPortal) => [
       // Sessions owns its own action gates; portal and a self-scoped automations
       // tool are scoped exceptions.

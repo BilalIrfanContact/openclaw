@@ -12,18 +12,6 @@ import type {
 const AUTOMATION_YIELD_UNSUPPORTED_ERROR =
   "Automation turns cannot use sessions_yield because no requester continuation is available. Finish this turn so the scheduler can handle child output under the job's delivery policy.";
 
-type ScheduledPlacement = NonNullable<ScheduledToolTargets["placement"]>;
-
-// Requester settlement never resumes a scheduled occurrence, whatever its
-// placement: a `session:` run is refused like an isolated one. Runs without an
-// execution context fall back to the cron session-key shape.
-function isScheduledYieldRequester(
-  requesterSessionKey: string | undefined,
-  placement: ScheduledPlacement | undefined,
-): boolean {
-  return placement !== undefined || isCronSessionKey(requesterSessionKey);
-}
-
 const SWARM_COLLECTOR_YIELD_UNSUPPORTED_ERROR =
   "Collector runs cannot use sessions_yield because their results are collected explicitly instead of announced. Finish this turn so the collected result is recorded for whoever waits on this run.";
 
@@ -31,9 +19,8 @@ const SWARM_COLLECTOR_YIELD_UNSUPPORTED_ERROR =
 export function filterRequesterYieldTools<T extends { name: string }>(
   tools: T[],
   requesterSessionKey: string | undefined,
-  scheduledPlacement?: ScheduledPlacement,
 ): T[] {
-  return isScheduledYieldRequester(requesterSessionKey, scheduledPlacement)
+  return isCronSessionKey(requesterSessionKey)
     ? tools.filter((tool) => tool.name !== "sessions_yield")
     : tools;
 }
@@ -51,9 +38,13 @@ export function createRequesterYieldCallback(params: {
   scheduledToolTargets?: Pick<ScheduledToolTargets, "placement">;
   claimYieldCompletion?: () => SessionsYieldRuntimeClaim | Promise<SessionsYieldRuntimeClaim>;
 }): YieldCompletionClaim | undefined {
-  // Reject before checking claims or writing yield intent.
+  // Requester settlement never resumes a scheduled occurrence, whatever its
+  // placement. A `session:` run keeps the tool definition, so its session's tool
+  // catalog (and native CLI session reuse) stays stable, but the call is refused
+  // like an isolated run's. Reject before checking claims or writing yield intent.
   if (
-    isScheduledYieldRequester(params.requesterSessionKey, params.scheduledToolTargets?.placement)
+    isCronSessionKey(params.requesterSessionKey) ||
+    params.scheduledToolTargets?.placement !== undefined
   ) {
     return () => ({ error: AUTOMATION_YIELD_UNSUPPORTED_ERROR });
   }

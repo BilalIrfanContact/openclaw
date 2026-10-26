@@ -7,15 +7,22 @@ import { replaceSessionEntrySync } from "../config/sessions/session-accessor.js"
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { CronStoredJob } from "./types.js";
 
-// Records every automations Gateway RPC; cron.list answers with the run's job and
-// a sibling, so a self-scoped list proves the sibling is filtered out.
-const gatewayDispatches = vi.hoisted((): string[] => []);
-vi.mock("../agents/tools/cron-tool-gateway.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../agents/tools/cron-tool-gateway.js")>()),
-  createCronToolGatewayCaller: () => async (method: string) => {
-    gatewayDispatches.push(method);
+// Stands in for the Gateway transport under the automations tool's real request
+// guard: records every dispatched RPC, answers cron.list with the run's job and a
+// sibling, and can hold cron.get open so a test can close the run mid-call.
+const gateway = vi.hoisted(() => ({
+  dispatches: [] as { method: string; params: unknown }[],
+  holdGet: undefined as Promise<void> | undefined,
+}));
+vi.mock("../agents/tools/gateway.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agents/tools/gateway.js")>()),
+  callGatewayTool: async (method: string, _opts: unknown, params: unknown) => {
+    gateway.dispatches.push({ method, params });
+    if (method === "cron.get") {
+      await gateway.holdGet;
+    }
     if (method !== "cron.list") {
-      throw new Error(`unexpected Gateway call ${method}`);
+      return { ok: true };
     }
     const jobs = [{ id: "job-1" }, { id: "sibling-job" }];
     return {
@@ -30,6 +37,9 @@ vi.mock("../agents/tools/cron-tool-gateway.js", async (importOriginal) => ({
   },
 }));
 
+const { claimAgentRunContext, releaseAgentRunContext } =
+  await import("../infra/agent-run-registry.js");
+const { resolveAdmittedRunActiveAssertion } = await import("../agents/admitted-run-context.js");
 const { createOpenClawCodingToolsInternalAsync } = await import("../agents/agent-tools.js");
 const { resolveGatewayScopedTools } = await import("../gateway/tool-resolution.js");
 const { admitScheduledOccurrence } = await import("./execution-context-admission.js");
@@ -41,6 +51,8 @@ const RUN_KEY = "agent:main:cron:job-1:run:s1";
 const PROFILE = { type: "human", source: "profile", id: "profile-requester" } as const;
 const CFG: OpenClawConfig = {};
 const SCOPE_ERROR = "Automations tool is restricted to the current automation.";
+const YIELD_ERROR = "Automation turns cannot use sessions_yield";
+const dispatched = () => gateway.dispatches.map((call) => call.method);
 
 function job(overrides: Partial<CronStoredJob>): CronStoredJob {
   return {
@@ -101,7 +113,8 @@ useWidgetHarness();
 
 beforeEach(() => {
   setRuntimeConfigSnapshot(CFG);
-  gatewayDispatches.length = 0;
+  gateway.dispatches.length = 0;
+  gateway.holdGet = undefined;
   replaceSessionEntrySync(
     { sessionKey: PARENT_KEY },
     { sessionId: "parent-session", lifecycleRevision: "rev-1", updatedAt: Date.now() },
@@ -174,6 +187,7 @@ async function embeddedTools(run: Run) {
     operationalRunInstance: run.admitted.operationalRunInstance,
     ...(run.senderIsOwner !== undefined ? { senderIsOwner: run.senderIsOwner } : {}),
     runtimeToolAllowlist: run.toolsAllow,
+    onYield: () => {},
     toolConstructionPlan: {
       includeBaseCodingTools: false,
       includeShellTools: false,
@@ -196,8 +210,38 @@ async function cliTools(run: Run) {
     surface: "loopback",
     admittedRunContext: run.admitted,
     toolsAllow: run.toolsAllow,
+    onYield: () => {},
   });
   return scoped.tools;
+}
+
+// Registers the run's automation invocation the way the cron runner does before
+// the runtime starts (src/cron/isolated-agent/run.ts). The returned close settles
+// it the same way: the invocation is marked closed, then the context released.
+function claimAutomationRun(run: Run) {
+  const assertAdmitted = resolveAdmittedRunActiveAssertion(run.admitted);
+  if (!assertAdmitted) {
+    throw new Error("expected an admitted run assertion");
+  }
+  const invocation: { nextCheckEnabled: boolean; assertCurrent: () => void; closed?: boolean } = {
+    nextCheckEnabled: false,
+    assertCurrent: assertAdmitted,
+  };
+  const claim = claimAgentRunContext(
+    "run-1",
+    { sessionKey: run.runKey, cronRunsByJobId: new Map([["job-1", invocation]]) },
+    { trackOwner: true, ownsContext: true },
+  );
+  let released = false;
+  const close = () => {
+    if (!released) {
+      released = true;
+      invocation.closed = true;
+      releaseAgentRunContext("run-1", claim);
+    }
+  };
+  settles.push(close);
+  return close;
 }
 
 function readActionEnum(tool: AnyAgentTool): string[] {
@@ -233,17 +277,26 @@ describe("scheduled automations scope", () => {
           SCOPE_ERROR,
         );
       }
-      expect(gatewayDispatches).toEqual([]);
+      expect(dispatched()).toEqual([]);
       const listed = await automations!.execute("list", { action: "list" }, undefined, undefined);
       const jobs = (listed.details as { jobs?: { id: string }[] }).jobs ?? [];
       expect(jobs.map((listedJob) => listedJob.id)).toEqual(["job-1"]);
-      expect(gatewayDispatches).toEqual(["cron.list"]);
+      expect(dispatched()).toEqual(["cron.list"]);
     });
 
-    it.each(["embedded", "cli"] as const)("%s run gets no sessions_yield", async (runtime) => {
+    it.each(["embedded", "cli"] as const)("%s run cannot yield", async (runtime) => {
       const run = await admitRun(entry.job, entry.runKey, ["*"]);
       const tools = runtime === "embedded" ? await embeddedTools(run) : await cliTools(run);
-      expect(tools.map((tool) => tool.name)).not.toContain("sessions_yield");
+      const yieldTool = tools.find((tool) => tool.name === "sessions_yield");
+      if (entry.placement !== "in-session") {
+        expect(yieldTool).toBeUndefined();
+        return;
+      }
+      // An in-session run keeps the definition so its session's tool catalog is
+      // stable, and the call is refused.
+      expect(yieldTool).toBeDefined();
+      const result = await yieldTool!.execute("yield", {}, undefined, undefined);
+      expect(JSON.stringify(result.details)).toContain(YIELD_ERROR);
     });
   });
 
@@ -259,7 +312,25 @@ describe("scheduled automations scope", () => {
         expect((result.details as { gated?: boolean } | undefined)?.gated).toBe(true);
       }
     }
-    expect(gatewayDispatches).toEqual([]);
+    expect(dispatched()).toEqual([]);
+  });
+
+  it("a session: run keeps its session's CLI tool catalog", async () => {
+    const run = await admitRun(job({ sessionTarget: `session:${PARENT_KEY}` }), PARENT_KEY, ["*"]);
+    const scheduled = (await cliTools(run)).map((tool) => tool.name);
+    const ordinary = (
+      await resolveGatewayScopedTools({
+        cfg: CFG,
+        sessionKey: PARENT_KEY,
+        sessionId: "parent-session",
+        runId: "turn-1",
+        senderIsOwner: true,
+        surface: "loopback",
+        onYield: () => {},
+      })
+    ).tools.map((tool) => tool.name);
+    expect(scheduled).toContain("sessions_yield");
+    expect(ordinary).toContain("sessions_yield");
   });
 
   it("control: a session turn without a scheduled context keeps sessions_yield", async () => {
@@ -278,5 +349,47 @@ describe("scheduled automations scope", () => {
       },
     });
     expect(tools.map((tool) => tool.name)).toContain("sessions_yield");
+  });
+});
+
+describe("retained CLI self-management authority", () => {
+  async function cliAutomations() {
+    const run = await admitRun(job({ ...linked, createdActor: PROFILE }), RUN_KEY, ["*"]);
+    const release = claimAutomationRun(run);
+    const automations = (await cliTools(run)).find((tool) => tool.name === AUTOMATIONS_TOOL_NAME);
+    expect(automations).toBeDefined();
+    return { automations: automations!, release };
+  }
+
+  it("removes its own job while the run is current", async () => {
+    const { automations } = await cliAutomations();
+    await automations.execute("remove", { action: "remove", jobId: "job-1" }, undefined, undefined);
+    expect(gateway.dispatches).toEqual([{ method: "cron.remove", params: { id: "job-1" } }]);
+  });
+
+  it("refuses its own job's removal after the run closes, before any Gateway call", async () => {
+    const { automations, release } = await cliAutomations();
+    release();
+    expect(await callError(automations, { action: "remove", jobId: "job-1" })).toContain(
+      "Automation invocation is no longer active",
+    );
+    expect(dispatched()).toEqual([]);
+  });
+
+  it("refuses the result and the next mutation when the run closes during an awaited call", async () => {
+    const { automations, release } = await cliAutomations();
+    let resume = () => {};
+    gateway.holdGet = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const pending = callError(automations, { action: "get", jobId: "job-1" });
+    await vi.waitFor(() => expect(dispatched()).toEqual(["cron.get"]));
+    release();
+    resume();
+    expect(await pending).toContain("Automation invocation is no longer active");
+    expect(await callError(automations, { action: "remove", jobId: "job-1" })).toContain(
+      "Automation invocation is no longer active",
+    );
+    expect(dispatched()).toEqual(["cron.get"]);
   });
 });

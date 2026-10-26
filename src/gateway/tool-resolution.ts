@@ -717,15 +717,10 @@ export async function resolveGatewayScopedTools(
     (tool) => getPluginToolMeta(tool),
     nativeCapture,
   );
-  const yieldFilteredTools = filterRequesterYieldTools(
-    tools,
-    params.sessionKey,
-    scheduledTools.placement,
-  );
 
   return {
     agentId: sessionAgentId,
-    tools: applyToolAvailabilityDescriptions(yieldFilteredTools),
+    tools: applyToolAvailabilityDescriptions(filterRequesterYieldTools(tools, params.sessionKey)),
     workspaceDir,
     // Only the MCP owner knows which tools survived its grant and schema gates.
     captureFinalCronCreatorTools: cronCreatorToolAllowlistCaptureRef

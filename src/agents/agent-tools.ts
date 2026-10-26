@@ -232,7 +232,7 @@ function* assembleOpenClawCodingTools(
     ...(attachmentReadRoot ? { readOnlyRoots: [attachmentReadRoot] } : {}),
   };
   options?.recordToolPrepStage?.("workspace-policy");
-  // An admitted scheduled run's exec pin and placement come from its execution context.
+  // An admitted scheduled run's exec pin comes from its execution context.
   const scheduled = readScheduledToolTargets(options);
   const scheduledExecTarget = (scheduled ?? options?.scheduledToolPolicy)?.execTarget;
   const effectiveExecPolicy = projectEffectiveExecPolicy({
@@ -644,7 +644,7 @@ function* assembleOpenClawCodingTools(
   };
   const finalizedTools = finalizeAgentTools({
     ...options,
-    tools: filterRequesterYieldTools(authorizedTools, executionSessionKey, scheduled?.placement),
+    tools: filterRequesterYieldTools(authorizedTools, executionSessionKey),
     wrapBeforeToolCallHook: preparedTools
       ? (tool) =>
           options?.wrapBeforeToolCallHook !== false &&
