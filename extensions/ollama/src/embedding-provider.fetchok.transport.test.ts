@@ -140,6 +140,9 @@ describe("Ollama embedding provider real transport", () => {
     digest = undefined;
     const embeddingOnly = await create();
     expect(embeddingOnly.runtime?.cacheKeyData).not.toHaveProperty("modelDigest");
+    if (!embeddingOnly.provider) {
+      throw new Error("Expected fixture embedding provider");
+    }
     await expect(embeddingOnly.provider.embed("hello", { inputType: "query" })).resolves.toEqual([
       1, 0,
     ]);
