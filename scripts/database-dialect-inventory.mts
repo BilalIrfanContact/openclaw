@@ -19,7 +19,7 @@ type DialectSite = DialectMatch & { line: number; column: number };
 export type DialectInventoryRow = { file: string; matches: DialectSite[] };
 export type DialectInventoryCache = Map<string, { text: string; matches: DialectSite[] }>;
 const roots = ["src", "extensions", "packages"];
-const SQL_STATEMENT =
+export const SQL_STATEMENT =
   /^[\s(]*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|VACUUM|ATTACH|DETACH|ANALYZE|REINDEX|EXPLAIN)\b/u;
 
 export function productionFile(file: string) {

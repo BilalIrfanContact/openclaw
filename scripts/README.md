@@ -379,9 +379,10 @@ it. The complete semantic program is preserved on cache misses.
 `pnpm check:database-dialect-ratchet` also runs `check-sql-portability.mts`.
 It rejects multi-argument `fn("max" | "min", [...])` (including `fn.agg`),
 equivalent raw SQL, and negative literal LIMITs in production `src`, `extensions`,
-and `packages` code. Use the existing database-engine expression helpers. This
+and `packages` code and SQL source files. Use the existing database-engine expression helpers. This
 is a syntax check: it does not infer the values of variable argument lists or
 prove general control-flow reachability.
+The existing `--staged` mode checks the index, including this portability guard.
 
 A physically SQLite-only owner or an explicitly `!postgres`-guarded expression
 can put `/* pg-sqlite-only: <specific owner or guard reason> */` immediately before
