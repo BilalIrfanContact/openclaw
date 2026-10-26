@@ -1,6 +1,5 @@
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
-import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { resetGlobalHookRunner } from "openclaw/plugin-sdk/hook-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -10,6 +9,7 @@ import {
   emitReplayGroup,
   transcriptMessages,
 } from "./attempt-transcript-journal.test-helpers.js";
+import { createAttemptGate } from "./attempt.test-support.js";
 
 afterEach(() => {
   resetGlobalHookRunner();
@@ -62,20 +62,16 @@ describe("Copilot caller-owned transcript", () => {
     "rejects a manager rebound to %s while user resolution is awaited",
     async (destination) => {
       const { manager, recorder, target, attempt, journal, bridge } = await memoryFixture();
-      const resolved = createDeferred<Extract<AgentMessage, { role: "user" }>>();
-      const started = createDeferred<void>();
-      recorder.resolveMessage.mockImplementation(async () => {
-        started.resolve();
-        return await resolved.promise;
-      });
+      const resolution = createAttemptGate<Extract<AgentMessage, { role: "user" }>>();
+      recorder.resolveMessage.mockImplementation(resolution.wait);
       const persistence = journal.persistInitialUser();
-      await started.promise;
+      await resolution.entered;
       if (destination === "durable") {
         await manager.setSessionTargetAsync(target);
       } else {
         manager.newSession();
       }
-      resolved.resolve({ role: "user", content: attempt.prompt, timestamp: 1 });
+      resolution.release({ role: "user", content: attempt.prompt, timestamp: 1 });
 
       await expect(persistence).rejects.toThrow("caller-owned transcript changed");
       bridge.detach();

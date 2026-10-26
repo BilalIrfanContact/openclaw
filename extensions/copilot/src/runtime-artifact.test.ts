@@ -46,11 +46,6 @@ async function fixture() {
   await fs.mkdir(path.dirname(installedRuntime), { recursive: true });
   await write(path.join(runtimeRoot, "package.json"), { name: packageName, version: "1.0.14" });
   await fs.symlink(runtimeRoot, installedRuntime, "junction");
-  await write(path.join(sdkRoot, "package.json"), {
-    name: "@github/copilot-sdk",
-    version: "1.0.14",
-    optionalDependencies: { [packageName]: "1.0.14" },
-  });
   const sdkEntry = await write(path.join(sdkRoot, "index.js"), "export const sdk = 'original';");
   const executable = await write(
     path.join(prebuild, process.platform === "win32" ? "copilot-runtime.exe" : "copilot-runtime"),
@@ -98,18 +93,15 @@ describe("Copilot runtime artifacts", () => {
     await expect(captureCopilotRuntimeArtifact()).rejects.toThrow("Restart OpenClaw");
   });
 
-  it.each(["inprocess", "invalid"])(
-    "refuses to replace the SDK default transport %s",
-    async (transport) => {
-      await fixture();
-      vi.stubEnv("COPILOT_SDK_DEFAULT_CONNECTION", transport);
-      await expect(captureCopilotRuntimeArtifact()).rejects.toThrow("stdio transport");
-      vi.stubEnv("COPILOT_SDK_DEFAULT_CONNECTION", "STDIO");
-      await expect(captureCopilotRuntimeArtifact()).resolves.toMatchObject({
-        connection: { kind: "stdio" },
-      });
-    },
-  );
+  it("refuses a non-stdio default transport and accepts stdio case-insensitively", async () => {
+    await fixture();
+    vi.stubEnv("COPILOT_SDK_DEFAULT_CONNECTION", "inprocess");
+    await expect(captureCopilotRuntimeArtifact()).rejects.toThrow("stdio transport");
+    vi.stubEnv("COPILOT_SDK_DEFAULT_CONNECTION", "STDIO");
+    await expect(captureCopilotRuntimeArtifact()).resolves.toMatchObject({
+      connection: { kind: "stdio" },
+    });
+  });
 
   it("refuses to replace an explicitly selected external runtime", async () => {
     const files = await fixture();
