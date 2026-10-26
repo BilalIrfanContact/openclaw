@@ -18,6 +18,8 @@ function expectUnchanged(channels: OpenClawConfig["channels"]) {
     changes: [],
   });
 }
+const migrate = (channels: OpenClawConfig["channels"]) =>
+  maybeRepairGroupAllowFromFallback({ channels });
 
 describe("doctor group allowFrom fallback migration", () => {
   it.each(["disabled", "allowlist", "open"] as const)(
@@ -57,31 +59,27 @@ describe("doctor group allowFrom fallback migration", () => {
   );
 
   it("migrates absent lists with explicit policy overrides", () => {
-    const cfg: OpenClawConfig = {
-      channels: {
-        defaults: { groupPolicy: "disabled" },
-        telegram: { groupPolicy: "allowlist", allowFrom: ["123"] },
-        signal: {
-          groupPolicy: "disabled",
-          allowFrom: ["parent-user"],
-          accounts: { work: { groupPolicy: "allowlist", allowFrom: ["work-user"] } },
-        },
+    const channels: OpenClawConfig["channels"] = {
+      defaults: { groupPolicy: "disabled" },
+      telegram: { groupPolicy: "allowlist", allowFrom: ["123"] },
+      signal: {
+        groupPolicy: "disabled",
+        allowFrom: ["parent-user"],
+        accounts: { work: { groupPolicy: "allowlist", allowFrom: ["work-user"] } },
       },
     };
-    const result = maybeRepairGroupAllowFromFallback(cfg);
+    const result = migrate(channels);
 
     expect(result.config.channels?.telegram?.groupAllowFrom).toEqual(["123"]);
     expect(result.config.channels?.signal?.groupAllowFrom).toBeUndefined();
     expect(result.config.channels?.signal?.accounts?.work?.groupAllowFrom).toEqual(["work-user"]);
     expect(maybeRepairGroupAllowFromFallback(result.config).changes).toEqual([]);
-    expect(cfg.channels?.telegram?.groupAllowFrom).toBeUndefined();
+    expect(channels.telegram?.groupAllowFrom).toBeUndefined();
   });
 
   it("copies fallback allowFrom into explicit groupAllowFrom", () => {
-    const result = maybeRepairGroupAllowFromFallback({
-      channels: {
-        telegram: { allowFrom: [123, "accessGroup:ops", "123"], groupPolicy: "allowlist" },
-      },
+    const result = migrate({
+      telegram: { allowFrom: [123, "accessGroup:ops", "123"], groupPolicy: "allowlist" },
     });
 
     expect(result.changes).toEqual([
@@ -91,14 +89,12 @@ describe("doctor group allowFrom fallback migration", () => {
   });
 
   it("preserves account-scoped fallback without broadening to the channel", () => {
-    const result = maybeRepairGroupAllowFromFallback({
-      channels: {
-        signal: {
-          allowFrom: ["parent"],
-          accounts: {
-            work: { allowFrom: ["work-user"] },
-            personal: { groupAllowFrom: ["personal-user"], allowFrom: ["ignored"] },
-          },
+    const result = migrate({
+      signal: {
+        allowFrom: ["parent"],
+        accounts: {
+          work: { allowFrom: ["work-user"] },
+          personal: { groupAllowFrom: ["personal-user"], allowFrom: ["ignored"] },
         },
       },
     });
@@ -107,11 +103,13 @@ describe("doctor group allowFrom fallback migration", () => {
       "channels.signal.groupAllowFrom: copied 1 sender entry from allowFrom for explicit group allowlist.",
       "channels.signal.accounts.work.groupAllowFrom: copied 1 sender entry from allowFrom for explicit group allowlist.",
     ]);
-    expect(result.config.channels?.signal?.groupAllowFrom).toEqual(["parent"]);
-    expect(result.config.channels?.signal?.accounts?.work?.groupAllowFrom).toEqual(["work-user"]);
-    expect(result.config.channels?.signal?.accounts?.personal?.groupAllowFrom).toEqual([
-      "personal-user",
-    ]);
+    expect(result.config.channels?.signal).toMatchObject({
+      groupAllowFrom: ["parent"],
+      accounts: {
+        work: { groupAllowFrom: ["work-user"] },
+        personal: { groupAllowFrom: ["personal-user"] },
+      },
+    });
   });
 
   it("does not shadow an inherited channel group allowlist for accounts", () => {

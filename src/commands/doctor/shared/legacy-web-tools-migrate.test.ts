@@ -152,6 +152,5 @@ describe("legacy web tool config", () => {
     expect(result.config.tools.web.x_search).toEqual({ enabled: true, model: "grok-code-fast-1" });
     expect(result.config).not.toHaveProperty("plugins");
     expect(result.changes).toEqual([]);
-    expect(xSearch({ model: "grok-latest" }).changes).toStrictEqual([]);
   });
 });

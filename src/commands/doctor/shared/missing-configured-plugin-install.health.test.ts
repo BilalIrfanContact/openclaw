@@ -4,7 +4,10 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../../config/types.js";
-import { channelPluginEntry } from "./missing-configured-plugin-install.test-helpers.js";
+import {
+  channelPluginEntry,
+  configuredPlugin,
+} from "./missing-configured-plugin-install.test-helpers.js";
 
 const { mocks, testEnv, tempDirs, setupPluginInstallSuite } =
   await import("./missing-configured-plugin-install.suite.test-support.js");
@@ -42,25 +45,23 @@ describe("configured plugin install health findings", () => {
         });
       }
       mocks.listChannelPluginCatalogEntries.mockReturnValue([
-        deferred
-          ? channelPluginEntry({ id: pluginId, label: "Discord", npmSpec })
-          : {
-              id: pluginId,
-              pluginId,
-              meta: { label: "Matrix" },
-              install: { npmSpec, expectedIntegrity: "sha512-test" },
-              trustedSourceLinkedOfficialInstall: true,
-            },
+        {
+          ...channelPluginEntry({ id: pluginId, label: deferred ? "Discord" : "Matrix", npmSpec }),
+          ...(!deferred && {
+            install: { npmSpec, expectedIntegrity: "sha512-test" },
+            trustedSourceLinkedOfficialInstall: true,
+          }),
+        },
       ]);
-      const cfg: OpenClawConfig = deferred
-        ? {
-            plugins: { entries: { [pluginId]: { enabled: true } } },
-            channels: { discord: { enabled: true } },
-          }
-        : {
-            update: { channel: "beta" },
-            channels: { matrix: { enabled: true, homeserver: "https://matrix.example.org" } },
-          };
+      const cfg: OpenClawConfig = {
+        ...(deferred ? configuredPlugin(pluginId) : { update: { channel: "beta" } }),
+        channels: {
+          [pluginId]: {
+            enabled: true,
+            ...(!deferred && { homeserver: "https://matrix.example.org" }),
+          },
+        },
+      };
       const env = deferred
         ? {
             ...testEnv,
@@ -105,19 +106,14 @@ describe("configured plugin install health findings", () => {
     async (source, spec, resolvedSpec, installSpec, command) => {
       const installPath = tempDirs.make("openclaw-doctor-empty-plugin-");
       mocks.loadInstalledPluginIndexInstallRecords.mockResolvedValue({
-        demo: {
-          source,
-          spec,
-          resolvedSpec,
-          installPath,
-        },
+        demo: { source, spec, resolvedSpec, installPath },
       });
       mocks.listChannelPluginCatalogEntries.mockReturnValue([
         channelPluginEntry({ id: "demo", label: "Demo", npmSpec: "@example/catalog-demo" }),
       ]);
 
       const issues = await detect({
-        plugins: { entries: { demo: { enabled: true } } },
+        ...configuredPlugin("demo"),
         channels: { demo: { enabled: true } },
       });
 

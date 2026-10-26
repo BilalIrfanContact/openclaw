@@ -1,4 +1,3 @@
-// Config mutation state tests cover doctor mutation tracking and final state reporting.
 import { describe, expect, it } from "vitest";
 import {
   retainLegacyDefaultAgentId,
@@ -17,13 +16,8 @@ import type { DoctorConfigMutationState } from "./config-mutation-state.js";
 
 const DOCTOR_FIX_HINT = 'Run "openclaw doctor --fix" to apply these changes.';
 
-function emptyMutationState(): DoctorConfigMutationState {
-  return {
-    cfg: { channels: {} },
-    candidate: { channels: {} },
-    pendingChanges: false,
-    fixHints: [],
-  };
+function emptyMutationState(cfg: OpenClawConfig = { channels: {} }): DoctorConfigMutationState {
+  return { cfg, candidate: structuredClone(cfg), pendingChanges: false, fixHints: [] };
 }
 
 function enabledSignalMutation() {
@@ -37,19 +31,16 @@ describe("doctor config mutation state", () => {
   it.each([false, true])(
     "retains credential sources through repair preparation (repair=%s)",
     async (shouldRepair) => {
-      const cfg: OpenClawConfig = {
-        channels: {
-          telegram: {
-            accounts: {
-              env: { botToken: "synthetic-token" },
-              literal: { botToken: "synthetic-token" },
-              escaped: { botToken: "${DOCTOR_TOKEN}" },
-              replaced: { botToken: "old-token" },
-              removed: { botToken: "old-token" },
-            },
-          },
-        },
-      };
+      const accounts = Object.fromEntries(
+        Object.entries({
+          env: "synthetic-token",
+          literal: "synthetic-token",
+          escaped: "${DOCTOR_TOKEN}",
+          replaced: "old-token",
+          removed: "old-token",
+        }).map(([id, botToken]) => [id, { botToken }]),
+      );
+      const cfg: OpenClawConfig = { channels: { telegram: { accounts } } };
       const path = (account: string) => `channels.telegram.accounts.${account}.botToken`;
       setConfigResolutionFacts(
         cfg,
@@ -86,35 +77,20 @@ describe("doctor config mutation state", () => {
     },
   );
 
-  it("updates candidate and fix hints in preview mode", () => {
+  it.each([false, true])("updates config and fix hints (repair=%s)", (shouldRepair) => {
+    const mutation = enabledSignalMutation();
     const next = applyDoctorConfigMutation({
       state: emptyMutationState(),
-      mutation: enabledSignalMutation(),
-      shouldRepair: false,
+      mutation,
+      shouldRepair,
       fixHint: DOCTOR_FIX_HINT,
     });
 
     expect(next).toEqual({
-      cfg: { channels: {} },
-      candidate: { channels: { signal: { enabled: true } } },
+      cfg: shouldRepair ? mutation.config : { channels: {} },
+      candidate: mutation.config,
       pendingChanges: true,
-      fixHints: ['Run "openclaw doctor --fix" to apply these changes.'],
-    });
-  });
-
-  it("updates cfg directly in repair mode", () => {
-    const next = applyDoctorConfigMutation({
-      state: emptyMutationState(),
-      mutation: enabledSignalMutation(),
-      shouldRepair: true,
-      fixHint: DOCTOR_FIX_HINT,
-    });
-
-    expect(next).toEqual({
-      cfg: { channels: { signal: { enabled: true } } },
-      candidate: { channels: { signal: { enabled: true } } },
-      pendingChanges: true,
-      fixHints: [],
+      fixHints: shouldRepair ? [] : [DOCTOR_FIX_HINT],
     });
   });
 

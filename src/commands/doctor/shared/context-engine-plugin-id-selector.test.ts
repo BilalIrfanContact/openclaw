@@ -30,13 +30,21 @@ function config(contextEngine: string, plugins: OpenClawConfig["plugins"] = {}):
   };
 }
 
+const owner = plugin("vendor-plugin", ["MiXeD-Engine"]);
+const selected = config("vendor-plugin");
+const notEnabled = "is not independently enabled";
+function choice(
+  name: string,
+  policy: OpenClawConfig["plugins"],
+  records = [owner],
+  message = notEnabled,
+): [string, OpenClawConfig, PluginManifestRecord[], string] {
+  return [name, config("vendor-plugin", policy), records, message];
+}
+
 describe("findContextEnginePluginIdSelector", () => {
   it("replaces a released installer's plugin-ID selector with the single declared engine", () => {
-    expect(
-      findContextEnginePluginIdSelector(config("Vendor-Plugin"), [
-        plugin("vendor-plugin", ["MiXeD-Engine"]),
-      ]),
-    ).toEqual({
+    expect(findContextEnginePluginIdSelector(config("Vendor-Plugin"), [owner])).toEqual({
       kind: "replace",
       selector: "Vendor-Plugin",
       pluginId: "vendor-plugin",
@@ -48,31 +56,27 @@ describe("findContextEnginePluginIdSelector", () => {
     expect(
       findContextEnginePluginIdSelector(
         config("vendor-plugin", { allow: ["vendor-plugin"], entries: {} }),
-        [plugin("vendor-plugin", ["MiXeD-Engine"])],
+        [owner],
       ),
     ).toMatchObject({ kind: "replace", engineId: "MiXeD-Engine" });
   });
 
   it.each([
-    ["an explicit engine", config("MiXeD-Engine"), [plugin("vendor-plugin", ["MiXeD-Engine"])]],
+    ["an explicit engine", config("MiXeD-Engine"), [owner]],
     [
       "a plugin ID that is also a declared engine",
-      config("vendor-plugin"),
+      selected,
       [plugin("vendor-plugin", ["other"]), plugin("other-owner", ["vendor-plugin"])],
     ],
-    ["an undeclared equal-ID plugin", config("vendor-plugin"), [plugin("vendor-plugin")]],
+    ["an undeclared equal-ID plugin", selected, [plugin("vendor-plugin")]],
     [
       "a non-engine plugin declaration",
-      config("vendor-plugin"),
+      selected,
       [plugin("vendor-plugin", ["MiXeD-Engine"], "memory")],
     ],
     ["legacy", config("legacy"), [plugin("legacy", ["MiXeD-Engine"])]],
     ["none", config("none"), [plugin("none", ["MiXeD-Engine"])]],
-    [
-      "disabled plugins",
-      config("vendor-plugin", { enabled: false }),
-      [plugin("vendor-plugin", ["MiXeD-Engine"])],
-    ],
+    ["disabled plugins", config("vendor-plugin", { enabled: false }), [owner]],
   ] satisfies Array<[string, OpenClawConfig, PluginManifestRecord[]]>)(
     "leaves %s unchanged",
     (_name, cfg, plugins) => {
@@ -81,50 +85,34 @@ describe("findContextEnginePluginIdSelector", () => {
   );
 
   it.each([
-    [
+    choice(
       "multiple declared engines",
-      config("vendor-plugin"),
+      {},
       [plugin("vendor-plugin", ["engine-a", "engine-b"])],
       "set plugins.slots.contextEngine to one of: engine-a, engine-b",
-    ],
-    [
+    ),
+    choice(
       "an owner that is not independently enabled",
-      config("vendor-plugin", { entries: {} }),
-      [plugin("vendor-plugin", ["MiXeD-Engine"])],
+      { entries: {} },
+      [owner],
       'Enable plugins.entries.vendor-plugin or resolve the conflict, then set plugins.slots.contextEngine to "MiXeD-Engine"',
-    ],
-    [
+    ),
+    choice(
       "a case-equal engine outside a restrictive allowlist",
-      config("vendor-plugin", { allow: ["other"], entries: {} }),
+      { allow: ["other"], entries: {} },
       [plugin("vendor-plugin", ["Vendor-Plugin"])],
-      "is not independently enabled",
-    ],
-    [
-      "an enabled owner outside a restrictive allowlist",
-      config("vendor-plugin", { allow: ["other"] }),
-      [plugin("vendor-plugin", ["MiXeD-Engine"])],
-      "is not independently enabled",
-    ],
-    [
-      "a denied owner",
-      config("vendor-plugin", { deny: ["vendor-plugin"] }),
-      [plugin("vendor-plugin", ["MiXeD-Engine"])],
-      "is not independently enabled",
-    ],
-    [
+    ),
+    choice("an enabled owner outside a restrictive allowlist", { allow: ["other"] }),
+    choice("a denied owner", { deny: ["vendor-plugin"] }),
+    choice(
       "another eligible owner of the same engine",
-      config("vendor-plugin", {
-        entries: { "vendor-plugin": { enabled: true }, rival: { enabled: true } },
-      }),
-      [plugin("vendor-plugin", ["MiXeD-Engine"]), plugin("rival", ["MiXeD-Engine"])],
+      { entries: { "vendor-plugin": { enabled: true }, rival: { enabled: true } } },
+      [owner, plugin("rival", ["MiXeD-Engine"])],
       "another eligible plugin declares the same engine",
-    ],
-  ] satisfies Array<[string, OpenClawConfig, PluginManifestRecord[], string]>)(
-    "keeps the selector and asks for a choice with %s",
-    (_name, cfg, plugins, message) => {
-      const finding = findContextEnginePluginIdSelector(cfg, plugins);
-      expect(finding?.kind).toBe("choose");
-      expect(finding && "message" in finding ? finding.message : "").toContain(message);
-    },
-  );
+    ),
+  ])("keeps the selector and asks for a choice with %s", (_name, cfg, plugins, message) => {
+    const finding = findContextEnginePluginIdSelector(cfg, plugins);
+    expect(finding?.kind).toBe("choose");
+    expect(finding && "message" in finding ? finding.message : "").toContain(message);
+  });
 });

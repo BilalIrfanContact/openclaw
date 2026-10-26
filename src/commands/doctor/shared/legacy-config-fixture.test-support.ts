@@ -23,36 +23,31 @@ vi.mock("../../../plugins/setup-registry.js", () => ({
 }));
 
 vi.mock("../../../plugins/manifest-registry.js", () => {
-  const plugin = (id: string, webSearchProvider: string) => {
-    const rootDir = `/plugins/${id}`;
-    return {
-      id,
-      origin: "bundled",
-      channels: [],
-      providers: [],
-      cliBackends: [],
-      skills: [],
-      hooks: [],
-      contracts: { webSearchProviders: [webSearchProvider] },
-      rootDir,
-      source: `${rootDir}/index.ts`,
-      manifestPath: `${rootDir}/openclaw.plugin.json`,
-    };
-  };
+  const owners = { brave: "brave", gemini: "google", firecrawl: "firecrawl" };
+  const plugins = () =>
+    Object.entries(owners).map(([webSearchProvider, id]) => {
+      const rootDir = `/plugins/${id}`;
+      return {
+        id,
+        origin: "bundled",
+        channels: [],
+        providers: [],
+        cliBackends: [],
+        skills: [],
+        hooks: [],
+        contracts: { webSearchProviders: [webSearchProvider] },
+        rootDir,
+        source: `${rootDir}/index.ts`,
+        manifestPath: `${rootDir}/openclaw.plugin.json`,
+      };
+    });
   return {
     loadPluginManifestRegistryCore: () => ({
       diagnostics: [],
-      plugins: [
-        plugin("brave", "brave"),
-        plugin("google", "gemini"),
-        plugin("firecrawl", "firecrawl"),
-      ],
+      plugins: plugins(),
     }),
     resolveManifestContractOwnerPluginId: ({ value }: { value: string }): string | undefined => {
-      if (value === "gemini") {
-        return "google";
-      }
-      return value === "brave" || value === "firecrawl" ? value : undefined;
+      return Object.entries(owners).find(([provider]) => provider === value)?.[1];
     },
   };
 });
