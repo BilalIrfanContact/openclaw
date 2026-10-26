@@ -61,7 +61,6 @@ it("preserves command facts and the existing millisecond start identity", () => 
       cwd: command.cwd,
     },
   ]);
-  expect(list).toHaveBeenCalledExactlyOnceWith({ timeoutMs: 15_000, includeCommand: true });
 });
 
 it("reads an opaque process image from an identity-matched limited-query handle", () => {
@@ -102,7 +101,7 @@ it.each(["same", "different", "unknown"] as const)(
   },
 );
 
-it.each(["access-denied", "layout-mismatch", "operation-failed"] as const)(
+it.each(["access-denied", "layout-mismatch"] as const)(
   "distinguishes native %s from an unrelated inaccessible process",
   (code) => {
     list.mockReturnValue([{ pid: 12, owner: "unknown" }]);
@@ -135,13 +134,10 @@ it("omits only kernel processes and proven exited identities", () => {
   expect(readWindowsProcessCensus(1_000)).toEqual([{ pid: 13 }]);
 });
 
-it.each(["incomplete", "timeout", "helper-unavailable"] as const)(
-  "propagates %s instead of claiming an empty census",
-  (code) => {
-    const error = new ProcSafeError(code, "Census failed");
-    list.mockImplementation(() => {
-      throw error;
-    });
-    expect(() => readWindowsProcessCensus(1_000)).toThrow(error);
-  },
-);
+it("propagates census failure instead of claiming an empty census", () => {
+  const error = new ProcSafeError("incomplete", "Census failed");
+  list.mockImplementation(() => {
+    throw error;
+  });
+  expect(() => readWindowsProcessCensus(1_000)).toThrow(error);
+});

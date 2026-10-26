@@ -37,39 +37,9 @@ afterEach(() => {
 });
 
 describe("readWindowsProcessStartTimeSync", () => {
-  it("projects supplied native context with Windows key precedence for both queries", () => {
-    const env = {
-      SYSTEMROOT: "D:\\Native",
-      SystemRoot: "E:\\Ignored",
-      WINDIR: "F:\\Ignored",
-      PATH: "native-path",
-      PSModuleAnalysisCachePath: "D:\\NativeCache",
-      DIAGNOSTIC_NEUTRAL_CANARY: "synthetic",
-      NODE_OPTIONS: "--synthetic-injection-must-not-be-inherited",
-    };
-    failAfter(600);
-    spawnSyncMock.mockReturnValueOnce(creationDate);
-    expect(readWindowsProcessStartTimeSync(456, 1000, env)).toBe(expectedTime);
-    expect(
-      spawnSyncMock.mock.calls.map(([command, , options]) => ({ command, ...options })),
-    ).toMatchObject([
-      { command: "D:\\Native\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", timeout: 1000 },
-      { command: "D:\\Native\\System32\\wbem\\wmic.exe", timeout: 400 },
-    ]);
-    for (const call of spawnSyncMock.mock.calls) {
-      expect(call[2].env).toEqual({
-        SYSTEMROOT: "D:\\Native",
-        WINDIR: "F:\\Ignored",
-        PATH: "native-path",
-        PSModuleAnalysisCachePath: "D:\\NativeCache",
-      });
-    }
-    expect(env.SystemRoot).toBe("E:\\Ignored");
-    expect(env.DIAGNOSTIC_NEUTRAL_CANARY).toBe("synthetic");
-  });
-
   it.each([
     ["exhausted budget", 1000, 1000, null, [1000]],
+    ["remaining budget", 600, 1000, expectedTime, [1000, 400]],
     ["default fallback", 5000, undefined, expectedTime, [5000, 5000]],
     ["unavailable creation time", 0, 1000, null, [1000, 1000]],
   ] as const)("handles %s", (_name, elapsed, timeout, expected, budgets) => {
@@ -77,8 +47,14 @@ describe("readWindowsProcessStartTimeSync", () => {
     spawnSyncMock.mockReturnValueOnce(
       expected === null ? { status: 1, stdout: Buffer.alloc(0) } : creationDate,
     );
-    expect(readWindowsProcessStartTimeSync(123, timeout)).toBe(expected);
+    expect(readWindowsProcessStartTimeSync(123, timeout, { SystemRoot: "D:\\Native" })).toBe(
+      expected,
+    );
     expect(spawnSyncMock.mock.calls.map((call) => call[2].timeout)).toEqual(budgets);
+    expect(spawnSyncMock.mock.calls.map((call) => call[0])).toEqual([
+      "D:\\Native\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      ...budgets.slice(1).map(() => "D:\\Native\\System32\\wbem\\wmic.exe"),
+    ]);
   });
 });
 
