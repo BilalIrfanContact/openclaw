@@ -51,12 +51,8 @@ it.each([
         },
       }),
     );
-    let settled = false;
-    const result = attempt
-      .catch(() => {})
-      .finally(() => {
-        settled = true;
-      });
+    const settled = vi.fn();
+    const result = attempt.catch(() => {}).finally(settled);
     try {
       expect(
         await Promise.race([
@@ -64,7 +60,7 @@ it.each([
           result.then(() => "settled"),
         ]),
       ).toBe("cleanup-started");
-      expect(settled).toBe(false);
+      expect(settled).not.toHaveBeenCalled();
       expect(toolSignal?.aborted).toBe(true);
       expect(cleanup).toHaveBeenCalledExactlyOnceWith("error");
       held.resolve();

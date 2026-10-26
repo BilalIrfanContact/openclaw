@@ -57,53 +57,43 @@ function orderedCleanup(order: string[], abortSettlePromise: Promise<unknown>, f
   };
 }
 
-it("waits for aborted prompt settlement and disposes even when the subsequent flush fails", async () => {
-  const order: string[] = [];
-  const settle = createDeferred();
-
-  const cleanupPromise = (await loadCleanup()).cleanupEmbeddedAttemptResources({
-    removeToolResultContextGuard: () => {
-      order.push("guard");
-    },
-    ...orderedCleanup(order, settle.promise, true),
-  });
-
-  await Promise.resolve();
-
-  expect(order).toEqual(["guard"]);
-
-  settle.resolve();
-  await cleanupPromise;
-
-  expect(order).toEqual(["guard", "flush", "dispose"]);
-});
-
-it.each([
-  { override: "0x10", fast: undefined, timeoutMs: 2_000 },
-  { override: "10ms", fast: "1", timeoutMs: 250 },
+it.each<{
+  name: string;
+  override: string;
+  fast?: string;
+  timeoutMs?: number;
+}>([
+  { name: "settled prompt and failed flush", override: "1250" },
+  { name: "invalid hex override", override: "0x10", timeoutMs: 2_000 },
+  { name: "invalid partial override in fast mode", override: "10ms", fast: "1", timeoutMs: 250 },
 ])(
-  "continues cleanup after $timeoutMs ms with override=$override and fast=$fast",
+  "settles or bounds the prompt before disposing: $name",
   async ({ override, fast, timeoutMs }) => {
     vi.stubEnv("OPENCLAW_EMBEDDED_ABORT_SETTLE_TIMEOUT_MS", override);
     vi.stubEnv("OPENCLAW_TEST_FAST", fast);
-    const timeoutCleanup = await loadCleanup();
     const order: string[] = [];
-
-    const cleanupPromise = timeoutCleanup.cleanupEmbeddedAttemptResources(
-      orderedCleanup(order, new Promise(() => {})),
-    );
-
-    await vi.advanceTimersByTimeAsync(timeoutMs - 1);
-    expect(order).toEqual([]);
+    const settle = createDeferred();
+    const cleanupPromise = (await loadCleanup()).cleanupEmbeddedAttemptResources({
+      ...orderedCleanup(order, settle.promise, timeoutMs === undefined),
+      removeToolResultContextGuard: () => {
+        order.push("guard");
+      },
+    });
+    await vi.advanceTimersByTimeAsync(timeoutMs === undefined ? 0 : timeoutMs - 1);
+    expect(order).toEqual(["guard"]);
     expect(mocks.warn).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1);
+    if (timeoutMs === undefined) {
+      settle.resolve();
+    } else {
+      await vi.advanceTimersByTimeAsync(1);
+    }
     await cleanupPromise;
-
-    expect(order).toEqual(["flush", "dispose"]);
-    expect(mocks.warn).toHaveBeenCalledExactlyOnceWith(
-      `agent cleanup timed out: runId=run-1 sessionId=session-1 step=embedded-abort-settle timeoutMs=${timeoutMs}`,
-    );
+    expect(order).toEqual(["guard", "flush", "dispose"]);
+    if (timeoutMs !== undefined) {
+      expect(mocks.warn).toHaveBeenCalledExactlyOnceWith(
+        `agent cleanup timed out: runId=run-1 sessionId=session-1 step=embedded-abort-settle timeoutMs=${timeoutMs}`,
+      );
+    }
     expect(vi.getTimerCount()).toBe(0);
   },
 );

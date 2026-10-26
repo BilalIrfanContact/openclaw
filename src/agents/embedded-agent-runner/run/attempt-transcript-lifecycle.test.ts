@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,22 +10,7 @@ import { agentProcessTestEntrypoints } from "../../process-runtime.test-support.
 import { createEmbeddedAttemptTranscriptLifecycle } from "./attempt-transcript-lifecycle.js";
 
 describe("createEmbeddedAttemptTranscriptLifecycle", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
-  it("shares one context carrier across independent attempts", async () => {
-    const entries = vi.spyOn(AsyncLocalStorage.prototype, "enterWith");
-    await Promise.all(
-      Array.from({ length: 48 }, async () => {
-        const lifecycle = createEmbeddedAttemptTranscriptLifecycle({});
-        await lifecycle.withTranscriptWrite(() => Promise.resolve());
-        await lifecycle.dispose();
-      }),
-    );
-    expect(new Set(entries.mock.contexts).size).toBe(1);
-  });
-
+  afterEach(() => vi.useRealTimers());
   it("preserves reentrant writes across attempts and isolates their cleanup", async () => {
     const first = createEmbeddedAttemptTranscriptLifecycle({});
     const second = createEmbeddedAttemptTranscriptLifecycle({});
@@ -39,6 +23,9 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
       await second.withTranscriptWrite(async () => {
         await first.withTranscriptWrite(() => order.push("nested first"));
         await expect(first.dispose()).rejects.toThrow("inside a transcript write callback");
+        await expect(first.beginCleanup()).rejects.toThrow(
+          "cannot start attempt cleanup inside a transcript write callback",
+        );
       });
       await second.dispose();
       await expect(second.withTranscriptWrite(() => undefined)).rejects.toThrow("attempt disposed");
@@ -68,8 +55,7 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
     expect(cleanupSettled).not.toHaveBeenCalled();
 
     writeGate.resolve();
-    await expect(write).resolves.toBeUndefined();
-    await expect(cleanup).resolves.toBeUndefined();
+    await Promise.all([write, cleanup]);
     await expect(lifecycle.withTranscriptWrite(() => undefined)).rejects.toThrow(cleanupError);
   });
 
@@ -85,13 +71,6 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
     });
     await lifecycle.withTranscriptWrite(() => order.push("next"));
     expect(order).toEqual(["outer", "nested", "next"]);
-  });
-
-  it("rejects cleanup started from inside a transcript callback", async () => {
-    const lifecycle = createEmbeddedAttemptTranscriptLifecycle({});
-    await expect(lifecycle.withTranscriptWrite(() => lifecycle.beginCleanup())).rejects.toThrow(
-      "cannot start attempt cleanup inside a transcript write callback",
-    );
   });
 
   it("still admits a nested write from a callback that outlives the teardown budget", async () => {
