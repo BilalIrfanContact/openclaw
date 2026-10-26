@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import {
   retainLegacyDefaultAgentId,
   tryGetLegacyDefaultAgentId,
@@ -26,97 +26,80 @@ function enabledSignalMutation() {
     changes: ["enabled signal"],
   };
 }
+const token = (botToken: string) => ({ botToken });
 
-describe("doctor config mutation state", () => {
-  it.each([false, true])(
-    "retains credential sources through repair preparation (repair=%s)",
-    async (shouldRepair) => {
-      const accounts = Object.fromEntries(
-        Object.entries({
-          env: "synthetic-token",
-          literal: "synthetic-token",
-          escaped: "${DOCTOR_TOKEN}",
-          replaced: "old-token",
-          removed: "old-token",
-        }).map(([id, botToken]) => [id, { botToken }]),
-      );
-      const cfg: OpenClawConfig = { channels: { telegram: { accounts } } };
-      const path = (account: string) => `channels.telegram.accounts.${account}.botToken`;
-      setConfigResolutionFacts(
-        cfg,
-        createConfigResolutionFacts(
-          [],
-          new Map(),
-          "default",
-          new Map(["env", "replaced", "removed"].map((account) => [path(account), "DOCTOR_TOKEN"])),
-        ),
-      );
-      const candidate = await retainHeartbeatMigrationInput(cfg, undefined);
-      expect(getResolvedConfigEnvSecretRef(candidate, path("env"))?.id).toBe("DOCTOR_TOKEN");
-      const rewritten = structuredClone(candidate);
-      rewritten.channels!.telegram!.accounts!.replaced = { botToken: "new-token" };
-      rewritten.channels!.telegram!.accounts!.moved = { botToken: "old-token" };
-      delete rewritten.channels!.telegram!.accounts!.removed;
-      const next = applyDoctorConfigMutation({
-        state: { cfg, candidate, pendingChanges: false, fixHints: [] },
-        mutation: { config: rewritten, changes: ["repair credentials"] },
-        shouldRepair,
-      });
-      const refs = ["env", "literal", "escaped", "replaced", "removed", "moved"].map(
-        (account) =>
-          resolveConfigSecretRef({
-            config: next.candidate,
-            path: path(account),
-            value: next.candidate.channels?.telegram?.accounts?.[account]?.botToken,
-            includeResolved: true,
-          })?.id ?? null,
-      );
-      expect(refs).toEqual(["DOCTOR_TOKEN", null, null, null, null, null]);
-      expect(next.cfg).toBe(shouldRepair ? rewritten : cfg);
-      expect(getResolvedConfigEnvSecretRef(cfg, path("replaced"))?.id).toBe("DOCTOR_TOKEN");
-    },
-  );
-
-  it.each([false, true])("updates config and fix hints (repair=%s)", (shouldRepair) => {
-    const mutation = enabledSignalMutation();
+it.each([false, true])(
+  "retains credential sources through repair preparation (repair=%s)",
+  async (shouldRepair) => {
+    const accounts = {
+      env: token("synthetic-token"),
+      literal: token("synthetic-token"),
+      escaped: token("${DOCTOR_TOKEN}"),
+      replaced: token("old-token"),
+      removed: token("old-token"),
+    };
+    const cfg: OpenClawConfig = { channels: { telegram: { accounts } } };
+    const path = (account: string) => `channels.telegram.accounts.${account}.botToken`;
+    setConfigResolutionFacts(
+      cfg,
+      createConfigResolutionFacts(
+        [],
+        new Map(),
+        "default",
+        new Map(["env", "replaced", "removed"].map((account) => [path(account), "DOCTOR_TOKEN"])),
+      ),
+    );
+    const candidate = await retainHeartbeatMigrationInput(cfg, undefined);
+    expect(getResolvedConfigEnvSecretRef(candidate, path("env"))?.id).toBe("DOCTOR_TOKEN");
+    const rewritten = structuredClone(candidate);
+    const rewrittenAccounts = rewritten.channels!.telegram!.accounts!;
+    rewrittenAccounts.replaced = token("new-token");
+    rewrittenAccounts.moved = token("old-token");
+    delete rewrittenAccounts.removed;
     const next = applyDoctorConfigMutation({
-      state: emptyMutationState(),
-      mutation,
+      state: { cfg, candidate, pendingChanges: false, fixHints: [] },
+      mutation: { config: rewritten, changes: ["repair credentials"] },
       shouldRepair,
-      fixHint: DOCTOR_FIX_HINT,
     });
+    const refs = ["env", "literal", "escaped", "replaced", "removed", "moved"].map(
+      (account) =>
+        resolveConfigSecretRef({
+          config: next.candidate,
+          path: path(account),
+          value: next.candidate.channels?.telegram?.accounts?.[account]?.botToken,
+          includeResolved: true,
+        })?.id ?? null,
+    );
+    expect(refs).toEqual(["DOCTOR_TOKEN", null, null, null, null, null]);
+    expect(next.cfg).toBe(shouldRepair ? rewritten : cfg);
+    expect(getResolvedConfigEnvSecretRef(cfg, path("replaced"))?.id).toBe("DOCTOR_TOKEN");
+  },
+);
 
-    expect(next).toEqual({
-      cfg: shouldRepair ? mutation.config : { channels: {} },
-      candidate: mutation.config,
-      pendingChanges: true,
-      fixHints: shouldRepair ? [] : [DOCTOR_FIX_HINT],
-    });
-  });
-
-  it("stays unchanged when there are no changes", () => {
-    const state = emptyMutationState();
-
-    expect(
-      applyDoctorConfigMutation({
-        state,
-        mutation: { ...enabledSignalMutation(), changes: [] },
-        shouldRepair: false,
-      }),
-    ).toBe(state);
-  });
-
-  it("carries the upgrade-only owner across repair mutations", () => {
-    const state = emptyMutationState();
-    retainLegacyDefaultAgentId(state.candidate, "ops");
-
-    const next = applyDoctorConfigMutation({
+it.each([false, true])("updates config and fix hints (repair=%s)", (shouldRepair) => {
+  const state = emptyMutationState();
+  expect(
+    applyDoctorConfigMutation({
       state,
-      mutation: enabledSignalMutation(),
-      shouldRepair: true,
-    });
-
-    expect(tryGetLegacyDefaultAgentId(next.candidate)).toBe("ops");
-    expect(tryGetLegacyDefaultAgentId(next.cfg)).toBe("ops");
+      mutation: { ...enabledSignalMutation(), changes: [] },
+      shouldRepair,
+    }),
+  ).toBe(state);
+  retainLegacyDefaultAgentId(state.candidate, "ops");
+  const mutation = enabledSignalMutation();
+  const next = applyDoctorConfigMutation({
+    state,
+    mutation,
+    shouldRepair,
+    fixHint: DOCTOR_FIX_HINT,
   });
+
+  expect(next).toEqual({
+    cfg: shouldRepair ? mutation.config : { channels: {} },
+    candidate: mutation.config,
+    pendingChanges: true,
+    fixHints: shouldRepair ? [] : [DOCTOR_FIX_HINT],
+  });
+  expect(tryGetLegacyDefaultAgentId(next.candidate)).toBe("ops");
+  expect(tryGetLegacyDefaultAgentId(next.cfg)).toBe(shouldRepair ? "ops" : undefined);
 });
