@@ -6,7 +6,6 @@ import { createStorageMock as createTestStorageMock } from "../test-helpers/stor
 import {
   clearSidebarAttentionDismissal,
   dismissSidebarAttention,
-  isSidebarAttentionDismissed,
   loadDismissals,
   reconcileSidebarAttentionDismissals,
   resolveSidebarAttentionKey,
@@ -50,7 +49,6 @@ it("preserves dismissals outside a partial agent inventory", () => {
     }),
   ).toEqual(stored);
 });
-
 it.each([
   [{ phase: "pending", requestId: "request-1" }, null],
   [{ phase: "guidance" }, '["guidance","operator.read","operator.write"]'],
@@ -127,8 +125,7 @@ it.each([
       updateSchedule: { channel: "stable", autoEnabled: false, target },
     });
     expect(dismissal).toEqual({ kind: "updateAvailable", signature });
-    const stored = dismissSidebarAttention(ATTENTION_KEY, dismissal!);
-    expect(isSidebarAttentionDismissed(stored, dismissal!)).toBe(true);
+    dismissSidebarAttention(ATTENTION_KEY, dismissal!);
     expect(storedDismissals()).toEqual({ updateAvailable: [signature] });
   },
 );

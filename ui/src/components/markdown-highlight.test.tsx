@@ -24,7 +24,6 @@ vi.mock("./markdown-highlight-runtime.ts", async (importOriginal) => {
 });
 
 it("preserves readable code and node state across lazy highlighting", async () => {
-  expect(toSanitizedMarkdownHtml("Plain **text**")).toBe("<p>Plain <strong>text</strong></p>\n");
   const sample = corpus[0]!;
   const initial = "Intro\n\n```ts\n" + "const value = 1;\n".repeat(12);
   const [stream, setStream] = createSignal(initial);

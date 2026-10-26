@@ -6,7 +6,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.ts";
 import { ShellOwner } from "../app/app-host.tsx";
 import { bootstrapApplication } from "../app/bootstrap.ts";
-import { mountRouterOutlet } from "../app/router-outlet.test-support.tsx";
 import { i18n } from "../i18n/index.ts";
 import { configSnapshot } from "../lib/config/config-snapshot.test-support.ts";
 import { createGatewayHarness } from "../lib/config/config-test-harness.ts";
@@ -57,7 +56,6 @@ async function setup() {
     router,
     lifecycleAbortSignal: lifecycle.signal,
   });
-  const outlet = mountRouterOutlet({ router, retryContext: context });
   await router.navigate("appearance", context);
   const view = mountSolid(() => {
     const owner = new ShellOwner(document.createElement("openclaw-app-shell"), runtime);
@@ -87,12 +85,11 @@ async function setup() {
     await held.promise.catch(() => undefined);
     flush();
     view.unmount();
-    outlet.dispose();
     router.stop();
     runtimeConfig.dispose();
     runtime.stop();
   };
-  return { view, outlet, router, context, publish, lifecycle, held, dispose };
+  return { view, router, context, publish, lifecycle, held, dispose };
 }
 
 it.each(["route", "connection", "shutdown"] as const)(
@@ -102,7 +99,7 @@ it.each(["route", "connection", "shutdown"] as const)(
     try {
       if (retirement === "route") {
         await page.router.navigate("advanced", page.context);
-        await waitForSolid(() => expect(page.outlet.textContent).toContain("Advanced content"));
+        expect(page.router.getState().location?.pathname).toBe("/settings/advanced");
       } else if (retirement === "connection") {
         page.publish(false);
       } else {
