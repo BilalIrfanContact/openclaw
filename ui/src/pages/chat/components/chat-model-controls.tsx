@@ -92,27 +92,25 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
         props.modelSelectionTarget,
         props.modelAuthStatusResult,
         props.accountSelection,
-        session,
         props.agentDefaultModel,
         overrides,
         props.sessionKey,
-        props.sessionsResult,
         props.modelSwitching,
         props.selectedAgentRuntime,
         props.modelSelectionLocked,
-        // Retained rows/defaults may be enriched without replacing their container.
-        state.modelSelectionPolicy?.restricted,
-        state.modelSelectionPolicy?.defaultModel,
         session?.model,
         session?.modelProvider,
         session?.modelOverrideSource,
         session?.runtimeSelectionLocked,
         session?.contextTokens,
         session?.agentRuntime?.id,
-        session?.agentRuntime?.source,
+        isSessionRuntimePinned(session?.agentRuntime),
         defaults?.model,
         defaults?.modelProvider,
         defaults?.agentRuntime?.id,
+        // Retained policy/override objects may change without replacement.
+        state.modelSelectionPolicy?.restricted,
+        state.modelSelectionPolicy?.defaultModel,
         overrides?.[props.sessionKey],
         overrides !== undefined && Object.hasOwn(overrides, props.sessionKey),
       ] as const;
@@ -129,14 +127,22 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       modelSelectionTarget,
       modelAuthStatusResult,
       accountSelection,
-      selectedSession,
       agentDefaultModel,
       modelOverrides,
       sessionKey,
-      sessionsResult,
       modelSwitching,
       selectedRuntimeOverride,
       modelSelectionLocked,
+      sessionModel,
+      sessionProvider,
+      sessionOverrideSource,
+      sessionRuntimeLocked,
+      sessionContextTokens,
+      sessionRuntimeId,
+      sessionRuntimePinned,
+      defaultsModel,
+      defaultsProvider,
+      defaultsRuntimeId,
     ] = selectionInputs();
     const modelCatalog = catalogEntries();
     const catalog = catalogIndex();
@@ -170,12 +176,16 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       options: selectOptions,
     } = resolveChatModelSelectState(
       {
-        activeSession: selectedSession,
+        activeSession: {
+          model: sessionModel,
+          modelProvider: sessionProvider,
+          modelOverrideSource: sessionOverrideSource,
+        },
         agentDefaultModel,
         chatModelCatalog: modelCatalog,
         modelOverrides: modelOverrides ?? {},
         sessionKey,
-        sessionsResult,
+        sessionsResult: { defaults: { model: defaultsModel, modelProvider: defaultsProvider } },
         modelSelectionPolicy: policy,
         catalogRetired: retired,
         catalogInitialized: initialized,
@@ -186,13 +196,12 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       !catalogOwnsChoices || (!retired && catalog.entry(rawCurrentOverride))
         ? rawCurrentOverride
         : "";
-    const activeSession = selectedSession;
-    const runtimeSelectionLocked = activeSession?.runtimeSelectionLocked === true;
-    const currentProviderHint = activeSession?.modelProvider ?? "";
+    const runtimeSelectionLocked = sessionRuntimeLocked === true;
+    const currentProviderHint = sessionProvider ?? "";
     // This control owns the saved preference, not the model observed on a run.
     // A running turn can report its old model (or fallback) after a new choice is saved.
     const triggerModelValue = currentOverride;
-    const defaultProviderHint = sessionsResult?.defaults?.modelProvider ?? "";
+    const defaultProviderHint = defaultsProvider ?? "";
     const defaultCatalogEntry = catalog.entry(defaultModel);
     const canonicalDefaultLabel = resolveChatModelPickerLabel(defaultCatalogEntry, defaultLabel);
     const pickerDefaultLabel =
@@ -240,11 +249,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       if (agentRuntimeId) {
         pickerOption.agentRuntimeId = agentRuntimeId;
       }
-      if (
-        isDefault &&
-        isSessionRuntimePinned(selectedSession?.agentRuntime) &&
-        resolveModelRuntimeRoute(pickerOption.provider)
-      ) {
+      if (isDefault && sessionRuntimePinned && resolveModelRuntimeRoute(pickerOption.provider)) {
         // Default clears the runtime pin; session-scoped metadata describes the route being left.
         pickerOption.agentRuntimeId = undefined;
       }
@@ -275,8 +280,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     // Only a pin recorded on the session row makes Default a reset target: New Session
     // drafts have no row, and a local optimistic override is not yet a recorded pin.
     const sessionModelPinned =
-      selectedSession?.modelOverrideSource === "user" ||
-      (!runtimeSelectionLocked && isSessionRuntimePinned(selectedSession?.agentRuntime));
+      sessionOverrideSource === "user" || (!runtimeSelectionLocked && sessionRuntimePinned);
     // That pin must stay clearable even when the configured default is absent from
     // this catalog. Without it the row has no job (an agent-scoped catalog may
     // legitimately omit the Gateway default), so nothing is synthesized.
@@ -325,10 +329,9 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     // A persisted pin can match a changed default; equality cannot establish inheritance.
     const selectedAgentRuntime =
       selectedRuntimeOverride ??
-      selectedSession?.agentRuntime?.id ??
+      sessionRuntimeId ??
       catalog.entry(currentOverride || defaultModel)?.agentRuntime?.id;
-    const defaultRuntime =
-      defaultCatalogEntry?.agentRuntime?.id ?? sessionsResult?.defaults?.agentRuntime?.id;
+    const defaultRuntime = defaultCatalogEntry?.agentRuntime?.id ?? defaultsRuntimeId;
     // A default model can still have a runtime pin; only the configured model/runtime pair inherits Default.
     const pickerValue =
       modelOverrideSource === null &&
@@ -338,23 +341,18 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     const activeModelOption = modelOptions.find((option) =>
       isModelPickerOptionSelected(option, pickerValue, selectedAgentRuntime),
     );
-    const activeSessionModel = activeSession?.model
+    const activeSessionModel = sessionModel
       ? catalog.entry(
-          resolvePreferredServerChatModelValue(
-            activeSession.model,
-            activeSession.modelProvider,
-            modelCatalog,
-          ),
+          resolvePreferredServerChatModelValue(sessionModel, sessionProvider, modelCatalog),
         )
       : undefined;
     const activeOptionModel = activeModelOption
       ? catalog.entry(activeModelOption.value)
       : undefined;
-    const activeSessionRuntime = activeSession?.agentRuntime?.id.trim().toLowerCase();
+    const activeSessionRuntime = sessionRuntimeId?.trim().toLowerCase();
     const activeOptionRuntime = (
       resolveModelRuntimeEntry(activeOptionModel, activeModelOption?.agentRuntime)?.agentRuntime
-        ?.id ??
-      (activeModelOption?.isDefault ? sessionsResult?.defaults?.agentRuntime?.id : undefined)
+        ?.id ?? (activeModelOption?.isDefault ? defaultsRuntimeId : undefined)
     )
       ?.trim()
       .toLowerCase();
@@ -365,12 +363,12 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     if (
       !modelSwitching &&
       activeModelOption &&
-      activeSession?.contextTokens &&
+      sessionContextTokens &&
       activeRuntimeMatches &&
       activeSessionModel !== undefined &&
       activeSessionModel === activeOptionModel
     ) {
-      activeModelOption.contextTokens = activeSession.contextTokens;
+      activeModelOption.contextTokens = sessionContextTokens;
     }
     // The preference label uses its selected runtime, not an executing fallback.
     const triggerRuntime = selectedAgentRuntime ?? defaultRuntime;
@@ -399,7 +397,6 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       currentOverride,
       defaultModel,
       modelOverrideSource,
-      activeSession,
       modelOptions,
       activeModelOption,
       pickerValue,
@@ -475,7 +472,6 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       currentOverride,
       defaultModel,
       modelOverrideSource,
-      activeSession,
       modelOptions,
       activeModelOption,
       pickerValue,
@@ -539,7 +535,7 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
     // the defaults row can render the default model's options for a session whose
     // model declares none, then patch an invalid option id.
     const contextWindowOwner =
-      props.contextWindowTarget ?? activeSession ?? props.sessionsResult?.defaults;
+      props.contextWindowTarget ?? props.selectedSession ?? props.sessionsResult?.defaults;
     const contextWindows = contextWindowOwner?.contextWindows ?? [];
     const selectedContextWindow =
       contextWindowOwner?.contextWindow ?? contextWindowOwner?.contextWindowDefault ?? "";

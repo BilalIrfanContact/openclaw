@@ -34,7 +34,11 @@ function session(
   });
 }
 
-function modelState(params: Partial<Omit<ModelInput, "sessionKey">> = {}): ModelInput {
+function modelState(
+  params: Partial<Omit<ModelInput, "sessionKey">> & {
+    sessionsResult?: SessionsListResult | null;
+  } = {},
+): ModelInput {
   const sessionsResult = params.sessionsResult ?? createSessionsListResult();
   return {
     activeSession: params.activeSession ?? sessionsResult.sessions[0],

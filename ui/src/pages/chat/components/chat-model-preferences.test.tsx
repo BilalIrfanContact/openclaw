@@ -177,6 +177,36 @@ it("retires and restores an unavailable context-window control with its access g
   ).toBe(true);
 });
 
+it("refreshes context choices when a replaced session has unchanged model facts", async () => {
+  const sessionsResult = createSessionsListResult({ model: "primary", modelProvider: "example" });
+  const contextWindows = [
+    { id: "standard", label: "Standard", contextWindow: 100_000 },
+    { id: "extended", label: "Extended", contextWindow: 200_000 },
+  ];
+  const selectedSession = {
+    ...sessionsResult.sessions[0]!,
+    contextWindow: "standard",
+    contextWindowDefault: "standard",
+    contextWindows,
+  };
+  const onContextWindowSelect = vi.fn();
+  const view = await controls({ selectedSession, sessionsResult, onContextWindowSelect });
+  const toggle = () =>
+    expectDefined(
+      view.container.querySelector<HTMLButtonElement>("[data-chat-context-window-toggle]"),
+      "context window toggle",
+    );
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+
+  view.update({ selectedSession: { ...selectedSession, contextWindow: "extended" } });
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  toggle().click();
+  expect(onContextWindowSelect).toHaveBeenCalledExactlyOnceWith("standard", "main");
+
+  view.update({ selectedSession: { ...selectedSession, contextWindows: [] } });
+  expect(view.container.querySelector("[data-chat-context-window-toggle]")).toBeNull();
+});
+
 it("updates model selection against a retained and replaced catalog", async () => {
   const view = await controls({});
   const option = (id: string) =>
