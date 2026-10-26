@@ -22,7 +22,7 @@ const roots = ["src", "extensions", "packages"];
 const SQL_STATEMENT =
   /^[\s(]*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|VACUUM|ATTACH|DETACH|ANALYZE|REINDEX|EXPLAIN)\b/u;
 
-function productionFile(file: string) {
+export function productionFile(file: string) {
   return (
     /^(?:src|extensions|packages)\/.*\.(?:ts|mts|sql)$/u.test(file) &&
     !excluded.test(file) &&
