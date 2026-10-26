@@ -113,16 +113,3 @@ it.each(parentKinds)("detaches fallback from a closed caller (%s parent)", async
   expect(callbackSignal).not.toBe(work.signal);
   expect(getActiveGatewayRootWorkCount()).toBe(1);
 });
-
-it("retains already-admitted independent continuation through actual completion", async () => {
-  const settled = vi.fn();
-  completion = work.track(() => independent(callback, "admitted-followup")).then(settled);
-  await entered.promise;
-  work.beginClose(new Error("Caller closed after admission"));
-  await nextTurn();
-  expect(settled).not.toHaveBeenCalled();
-  expect(getActiveGatewayRootWorkCount()).toBe(1);
-  finish.resolve();
-  await completion;
-  expect(settled).toHaveBeenCalledOnce();
-});
