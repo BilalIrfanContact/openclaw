@@ -105,24 +105,23 @@ it("preserves FIFO and capacity when a queued waiter cancels after sustained tur
   let release = pool.tryAcquire();
   const cancelled: AbortController[] = [];
   const admitted: number[] = [];
+  const acquire = (index: number, signal?: AbortSignal) =>
+    pool.acquire({ signal }).then((next) => {
+      if (next) {
+        admitted.push(index);
+      }
+      return next;
+    });
   const waiting = Array.from({ length: 600 }, (_, index) => {
     const cancellation = index >= 450 && index < 500 ? new AbortController() : undefined;
     if (cancellation) {
       cancelled.push(cancellation);
     }
-    return pool.acquire(cancellation ? { signal: cancellation.signal } : {}).then((nextRelease) => {
-      if (nextRelease) {
-        admitted.push(index);
-      }
-      return nextRelease;
-    });
+    return acquire(index, cancellation?.signal);
   });
   expect(pool.pendingCount).toBe(600);
 
-  for (const [index, pending] of waiting.entries()) {
-    if (index === 280) {
-      break;
-    }
+  for (const pending of waiting.slice(0, 280)) {
     release?.();
     release = await pending;
   }
@@ -138,14 +137,7 @@ it("preserves FIFO and capacity when a queued waiter cancels after sustained tur
   expect(pool.tryAcquire()).toBeNull();
 
   for (const index of [600, 601]) {
-    waiting.push(
-      pool.acquire().then((nextRelease) => {
-        if (nextRelease) {
-          admitted.push(index);
-        }
-        return nextRelease;
-      }),
-    );
+    waiting.push(acquire(index));
   }
   expect(pool.pendingCount).toBe(272);
 

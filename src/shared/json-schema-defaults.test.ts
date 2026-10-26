@@ -2,6 +2,9 @@ import { normalizeJsonSchemaForTypeBox } from "@openclaw/normalization-core/json
 import { afterEach, describe, expect, it } from "vitest";
 import { applyJsonSchemaDefaults, findJsonSchemaShapeError } from "./json-schema-defaults.js";
 
+const shapeError = (schema: Parameters<typeof findJsonSchemaShapeError>[0], error?: string) =>
+  expect(findJsonSchemaShapeError(schema)).toBe(error && `<schema>.${error}`);
+
 describe("JSON Schema helpers", () => {
   it("combines pattern properties that collide after unicode repair", () => {
     const normalized = normalizeJsonSchemaForTypeBox({
@@ -32,52 +35,32 @@ describe("JSON Schema helpers", () => {
     const prefixItems: (boolean | { type: string })[] = Array.from({ length: 100_002 }, () => true);
     prefixItems[100_001] = { type: "string" };
 
-    expect(
-      findJsonSchemaShapeError({
-        type: "array",
-        prefixItems,
-        items: { $ref: "#/prefixItems/100001" },
-      }),
-    ).toBeUndefined();
+    shapeError({ type: "array", prefixItems, items: { $ref: "#/prefixItems/100001" } });
   });
 
   it("reports malformed percent-encoding in local ref anchors as unresolved", () => {
-    expect(findJsonSchemaShapeError({ $ref: "#foo%zz" })).toBe("<schema>.$ref: unresolved ref");
+    shapeError({ $ref: "#foo%zz" }, "$ref: unresolved ref");
   });
 
   it("rejects undefined type union entries", () => {
-    expect(findJsonSchemaShapeError({ type: ["string", undefined] })).toBe(
-      "<schema>.type: unsupported JSON Schema type",
-    );
+    shapeError({ type: ["string", undefined] }, "type: unsupported JSON Schema type");
   });
 
   it("validates primitive keyword shapes in their established error order", () => {
     for (const [schema, expected] of [
-      [{ title: 7 }, "<schema>.title: expected string"],
-      [{ maximum: "7" }, "<schema>.maximum: expected number"],
-      [{ minLength: -1 }, "<schema>.minLength: expected non-negative integer"],
-      [{ minLength: 1.5 }, "<schema>.minLength: expected non-negative integer"],
-      [{ readOnly: "false" }, "<schema>.readOnly: expected boolean"],
-      [
-        { readOnly: "false", minLength: -1, maximum: "7", title: 7 },
-        "<schema>.title: expected string",
-      ],
-      [{ readOnly: "false", minLength: -1, maximum: "7" }, "<schema>.maximum: expected number"],
-      [{ readOnly: "false", minLength: -1 }, "<schema>.minLength: expected non-negative integer"],
+      [{ title: 7 }, "title: expected string"],
+      [{ maximum: "7" }, "maximum: expected number"],
+      [{ minLength: -1 }, "minLength: expected non-negative integer"],
+      [{ minLength: 1.5 }, "minLength: expected non-negative integer"],
+      [{ readOnly: "false" }, "readOnly: expected boolean"],
+      [{ readOnly: "false", minLength: -1, maximum: "7", title: 7 }, "title: expected string"],
+      [{ readOnly: "false", minLength: -1, maximum: "7" }, "maximum: expected number"],
+      [{ readOnly: "false", minLength: -1 }, "minLength: expected non-negative integer"],
     ] as const) {
-      expect(findJsonSchemaShapeError(schema)).toBe(expected);
+      shapeError(schema, expected);
     }
-    expect(
-      findJsonSchemaShapeError({ title: "Title", maximum: 1.5, minLength: -0, readOnly: false }),
-    ).toBeUndefined();
-    expect(
-      findJsonSchemaShapeError({
-        title: undefined,
-        maximum: undefined,
-        minLength: undefined,
-        readOnly: undefined,
-      }),
-    ).toBeUndefined();
+    shapeError({ title: "Title", maximum: 1.5, minLength: -0, readOnly: false });
+    shapeError({ title: undefined, maximum: undefined, minLength: undefined, readOnly: undefined });
   });
 
   const readPollution = () => (Object.prototype as Record<string, unknown>).polluted;
@@ -97,7 +80,6 @@ describe("JSON Schema helpers", () => {
       const value = keyword === "properties" ? {} : JSON.parse('{"__proto__":{}}');
       const result = applyJsonSchemaDefaults({ type: "object", [keyword]: children }, value);
       expect(readPollution()).toBeUndefined();
-      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
       expect(Object.hasOwn(result, "polluted")).toBe(false);
     },
   );

@@ -68,8 +68,12 @@ it.each<[string, unknown, string | undefined]>([
 ])("%s", (_name, content, expected) => {
   expectPhaseText(content, expected);
 });
-it("prefers the top-level assistant phase when present", () => {
-  expect(messagePhase({ role: "assistant", phase: "commentary" })).toBe("commentary");
+it.each([
+  [{ role: "assistant", phase: "commentary" }, "commentary"],
+  [assistant([finalAnswer]), "final_answer"],
+  [assistant([commentary, finalAnswer]), undefined],
+])("resolves top-level or unanimous block phase: %j", (message, expected) => {
+  expect(messagePhase(message)).toBe(expected);
 });
 
 it("reuses a block signature parse until the live block signature changes", () => {
@@ -88,13 +92,6 @@ it("reuses a block signature parse until the live block signature changes", () =
   parseSpy.mockRestore();
 });
 
-it("resolves a single explicit phase from textSignature metadata", () => {
-  expect(messagePhase(assistant([finalAnswer]))).toBe("final_answer");
-});
-
-it("returns undefined when text blocks contain mixed explicit phases", () => {
-  expect(messagePhase(assistant([commentary, finalAnswer]))).toBeUndefined();
-});
 it("retains selected phase source", () => {
   const text = "\n\n    code";
   expectPhaseText(text, text);

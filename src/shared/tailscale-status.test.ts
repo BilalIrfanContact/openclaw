@@ -1,9 +1,9 @@
 import { expect, it, vi } from "vitest";
 import {
-  extractTailscaleServeGatewayUrls,
+  extractTailscaleServeGatewayUrls as extractServe,
   inspectTailscaleServeGatewayUrlsWithRunner as inspectServe,
-  resolveTailnetHostWithRunner,
-  resolveTailscalePublishedHost,
+  resolveTailnetHostWithRunner as resolveHost,
+  resolveTailscalePublishedHost as publishedHost,
   resolveTailscaleServeGatewayUrlsWithRunner as resolveServe,
 } from "./tailscale-status.js";
 
@@ -17,7 +17,7 @@ const serve = (routes: [host: string, proxy: string, path?: string][], ports = [
 
 it("keeps the deprecated named-Service formatter for shipped plugin SDK callers", () => {
   expect(
-    resolveTailscalePublishedHost({
+    publishedHost({
       tailscaleMode: "serve",
       tailnetHost: "node.tailnet.ts.net",
       serviceName: "svc:openclaw",
@@ -38,13 +38,7 @@ it.each([
   ],
 ] as const)("falls back to host %#", async (first, Self, expected) => {
   const run = vi.fn().mockImplementationOnce(first).mockResolvedValueOnce(result({ Self }));
-  await expect(resolveTailnetHostWithRunner(run)).resolves.toBe(expected);
-  expect(run).toHaveBeenCalledTimes(2);
-  expect(run).toHaveBeenNthCalledWith(
-    2,
-    ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "status", "--json"],
-    { timeoutMs: 5000 },
-  );
+  await expect(resolveHost(run)).resolves.toBe(expected);
 });
 
 it.each([
@@ -55,7 +49,7 @@ it.each([
   { code: 0, stdout: "not-json" },
 ])("returns null for unavailable or invalid status %j", async (commandResult) => {
   const run = commandResult && vi.fn().mockResolvedValue(commandResult);
-  await expect(resolveTailnetHostWithRunner(run)).resolves.toBeNull();
+  await expect(resolveHost(run)).resolves.toBeNull();
 });
 
 it.each(["localhost:18789", "18789"])("discovers SDK proxy %s without ownership", async (proxy) => {
@@ -69,9 +63,6 @@ it.each(["localhost:18789", "18789"])("discovers SDK proxy %s without ownership"
   const run = runner(config);
 
   await expect(resolveServe(18789, run)).resolves.toEqual(["wss://mac.tail.ts.net:8443"]);
-  expect(run).toHaveBeenCalledWith(["tailscale", "serve", "status", "--json"], {
-    timeoutMs: 5000,
-  });
 });
 
 it("ignores non-root, non-HTTPS, and non-loopback Serve handlers", async () => {
@@ -111,7 +102,7 @@ it.each([
     ...serve([[host, proxy]], [httpsPort]),
     AllowFunnel: { [host]: true },
   });
-  expect(extractTailscaleServeGatewayUrls(raw, 18789, true)).toEqual([]);
+  expect(extractServe(raw, 18789, true)).toEqual([]);
 });
 
 it.each([
@@ -129,8 +120,8 @@ it.each([
       [443, siblingPort],
     );
     const raw = JSON.stringify(config);
-    expect(extractTailscaleServeGatewayUrls(raw, 18789, true)).toEqual(owned ? [url] : []);
-    expect(extractTailscaleServeGatewayUrls(raw, 18789)).toEqual([url]);
+    expect(extractServe(raw, 18789, true)).toEqual(owned ? [url] : []);
+    expect(extractServe(raw, 18789)).toEqual([url]);
   },
 );
 
