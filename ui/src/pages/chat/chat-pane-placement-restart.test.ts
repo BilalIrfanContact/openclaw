@@ -2,10 +2,10 @@
 
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
-import type { GatewaySessionRow } from "../../api/types.ts";
 import { createSessionsListResult } from "../../test-helpers/chat-model.ts";
 import { createModalDialogTestFixture } from "../../test-helpers/modal-dialog.ts";
 import { flush } from "../../test-helpers/solid-settle.ts";
+import { row } from "./chat-outbox-recovery.test-support.ts";
 import {
   createPlacementPane,
   selectPlacementConfiguration,
@@ -62,12 +62,8 @@ it.each([
       ["operator.admin", "operator.read", "operator.write"],
       ["sessions.dispatch", "sessions.reclaim"],
     );
-    const session: GatewaySessionRow = {
-      key: "agent:main:failed-worker",
+    const session = row("agent:main:failed-worker", {
       sessionId: "failed-worker-session",
-      label: "Failed worker session",
-      kind: "direct",
-      updatedAt: 0,
       placement: {
         state: "failed",
         generation: 2,
@@ -77,7 +73,7 @@ it.each([
         recoveryError: "worker disappeared",
         recoveryAction: "restart",
       },
-    };
+    });
     state.sessionKey = session.key;
     state.currentSessionId = session.sessionId;
     state.sessionsResult = { ...createSessionsListResult(), sessions: [session] };
@@ -86,9 +82,9 @@ it.each([
 
     const restarting = dialogs.track(pane.changeHeaderPlacement(session, "recover"));
     try {
-      await dialogs.waitFor(() => {
-        expect(document.body.querySelector('[data-value="cloud:aws"]')).not.toBeNull();
-      });
+      await dialogs.waitFor(() =>
+        expect(document.body.querySelector('[data-value="cloud:aws"]')).not.toBeNull(),
+      );
       expect(document.body.textContent).toContain(
         "Changes that the previous worker did not upload may be lost.",
       );
@@ -101,10 +97,9 @@ it.each([
           "Gateway · local",
         );
       }
-      const restartButton = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
-        (button) => button.textContent?.trim() === "Restart session",
-      );
-      restartButton?.click();
+      [...document.body.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent?.trim() === "Restart session")
+        ?.click();
       const cloud = target === "cloud";
       const targetParams = cloud
         ? { profileId: "aws", os: "windows/wsl2", machineClass: "fast" }

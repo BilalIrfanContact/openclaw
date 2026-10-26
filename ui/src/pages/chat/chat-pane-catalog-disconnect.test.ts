@@ -74,15 +74,11 @@ it.each(["lookup-before", "lookup-after", "read-resolve", "read-reject"] as cons
     const lookupStage = timing.startsWith("lookup");
     const lookup = createDeferred<SessionsCatalogListResult>();
     const read = createDeferred<SessionsCatalogReadResult>();
-    const respond = (method: string) => {
-      if (method === listMethod) {
-        return lookup.promise;
-      }
-      if (method === readMethod) {
-        return read.promise;
-      }
-      return Promise.resolve({});
+    const pending: Record<string, Promise<unknown>> = {
+      [listMethod]: lookup.promise,
+      [readMethod]: read.promise,
     };
+    const respond = (method: string) => pending[method] ?? Promise.resolve({});
     const request = vi.fn(lookupStage ? respond : async (method: string) => await respond(method));
     if (lookupStage) {
       read.resolve(readResult);

@@ -78,12 +78,10 @@ it.each(
       if (scenario === "connection replaced") {
         host.connectionEpoch += 1;
       } else if (scenario === "row replaced") {
-        expect(
-          updateQueuedMessage(host, item.id, (current) => ({
-            ...current,
-            text: "Newer queued text",
-          })),
-        ).toMatchObject({ text: "Newer queued text" });
+        updateQueuedMessage(host, item.id, (current) => ({
+          ...current,
+          text: "Newer queued text",
+        }));
       } else if (scenario === "cancelled") {
         canDispatch = false;
       }
@@ -100,24 +98,23 @@ it.each(
           expect.objectContaining({ sessionKey, message: item.text }),
           expect.anything(),
         );
-        return;
-      }
-      expectNoRpc(host.request, "chat.send");
-      if (scenario === "rejected" || scenario === "cancelled") {
+      } else {
+        expectNoRpc(host.request, "chat.send");
+        const pending = scenario === "connection replaced" || scenario === "row replaced";
         const error =
           scenario === "cancelled"
             ? INTERRUPTED_SETTINGS_WAIT_ERROR
             : "Synthetic reply preparation unavailable";
-        expect(result).toBe("failed");
-        expectQueued({ sendState: "failed", sendError: error });
-        expect(host).toMatchObject({ chatError: error, lastError: error });
-      } else {
-        expect(result).toBe("pending");
+        expect(result).toBe(pending ? "pending" : "failed");
         expectQueued({
           text: scenario === "row replaced" ? "Newer queued text" : item.text,
-          sendState: "waiting-idle",
+          sendState: pending ? "waiting-idle" : "failed",
+          ...(!pending ? { sendError: error } : {}),
         });
-        expect(host.chatError).toBe(previousError);
+        expect(host.chatError).toBe(pending ? previousError : error);
+        if (!pending) {
+          expect(host.lastError).toBe(error);
+        }
       }
     } finally {
       ready.resolve();

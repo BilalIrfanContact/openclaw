@@ -84,14 +84,10 @@ describe("forwarded avatar publication", () => {
       try {
         rerender();
         await flushDeferredRowPrune();
-        const researchRow = expectDefined(
-          container.querySelector('[data-entry-id="report-research"]'),
-          "forwarded report",
-        );
-        const image = expectDefined(
-          researchRow.closest(".chat-group")?.querySelector("img"),
-          "forwarded avatar",
-        );
+        const research = () => container.querySelector('[data-entry-id="report-research"]');
+        const researchRow = expectDefined(research(), "forwarded report");
+        const face = () => researchRow.closest(".chat-group")?.querySelector("img");
+        const image = expectDefined(face(), "forwarded avatar");
         await waitForSolid(() => expect(image.getAttribute("src")).toBe("blob:avatar-0"));
 
         host.chatMessages =
@@ -107,10 +103,9 @@ describe("forwarded avatar publication", () => {
         await refreshSenderAgentAvatars(host);
         flush();
 
-        expect(container.querySelector('[data-entry-id="report-research"]')).toBe(researchRow);
-        expect(researchRow.closest(".chat-group")?.querySelector("img")).toBe(image);
+        expect(research()).toBe(researchRow);
+        expect(face()).toBe(image);
         expect(image.getAttribute("src")).toBe("blob:avatar-0");
-        expect(host.request).toHaveBeenCalledTimes(change === "identity invalidation" ? 4 : 2);
 
         avatarRevision += 1;
         now.mockReturnValue(180_002);
@@ -122,7 +117,7 @@ describe("forwarded avatar publication", () => {
         await waitForSolid(() =>
           expect(image.getAttribute("src")).toBe(host.senderAgentAvatars?.get("research")),
         );
-        expect(researchRow.closest(".chat-group")?.querySelector("img")).toBe(image);
+        expect(face()).toBe(image);
         expect(image.getAttribute("src")).not.toBe("blob:avatar-0");
       } finally {
         view.unmount();

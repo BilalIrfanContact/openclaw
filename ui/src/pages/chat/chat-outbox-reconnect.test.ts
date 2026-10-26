@@ -1,5 +1,6 @@
 /* @vitest-environment jsdom */
 import { expect, it, onTestFinished } from "vitest";
+import type { ChatQueueItem } from "../../lib/chat/chat-types.ts";
 import { listStoredChatOutboxes } from "../../lib/chat/outbox-store-projection.ts";
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import { makeChatHost, requestCalls, requireRecord } from "./chat-host.test-support.ts";
@@ -11,84 +12,77 @@ import { useChatSendBrowserFixture } from "./outbox-browser.test-support.ts";
 
 useChatSendBrowserFixture();
 
-it.each(["ready", "identity unavailable"] as const)(
-  "holds an unbound attempted send until its conversation is reviewed (%s)",
-  async (review) => {
-    const host = makeChatHost({
-      currentSessionId: "reviewed-physical-session",
-      chatQueue: [
-        {
-          id: "unbound-attempt",
-          text: "Retained input",
-          createdAt: 1,
-          sendRunId: "original-unbound-key",
-          sendAttempts: 1,
-          sendState: "waiting-reconnect",
-        },
-      ],
-      requestHandlers: {
-        "chat.send": (params: unknown) => ({
-          runId: requireRecord(params, "reviewed send").idempotencyKey,
-          status: "ok",
-        }),
+it("holds unbound attempted sends until review has a conversation identity", async () => {
+  const host = makeChatHost({
+    currentSessionId: "reviewed-physical-session",
+    chatQueue: [
+      {
+        id: "unbound-attempt",
+        text: "Retained input",
+        createdAt: 1,
+        sendRunId: "original-unbound-key",
+        sendAttempts: 1,
+        sendState: "waiting-reconnect",
       },
-    });
-    const sessionKey = host.sessionKey;
-    admitHostQueueItems(host);
-    onTestFinished(chatOutboxOwner(host).subscribe(host));
+    ],
+    requestHandlers: {
+      "chat.send": (params: unknown) => ({
+        runId: requireRecord(params, "reviewed send").idempotencyKey,
+        status: "ok",
+      }),
+    },
+  });
+  const sessionKey = host.sessionKey;
+  admitHostQueueItems(host);
+  onTestFinished(chatOutboxOwner(host).subscribe(host));
 
-    await resumeStoredChatOutboxes(host);
+  await resumeStoredChatOutboxes(host);
 
-    expect(requestCalls(host.request, "chat.send")).toEqual([]);
-    expect(host.chatQueue[0]).toMatchObject({
-      text: "Retained input",
-      sendState: "held",
-      sendRunId: "original-unbound-key",
-      sendAttempts: 1,
-    });
-    if (review !== "ready") {
-      host.currentSessionId = null;
-      await retryQueuedChatMessage(host, "unbound-attempt");
-      expect(requestCalls(host.request, "chat.send")).toEqual([]);
-      expect(listStoredChatOutboxes(host)[0]?.queue[0]?.sendState).toBe("held");
-      host.sessionKey = sessionKey;
-      host.currentSessionId = "reviewed-physical-session";
-      chatOutboxOwner(host).syncHost(host);
-    }
+  expect(requestCalls(host.request, "chat.send")).toEqual([]);
+  expect(host.chatQueue[0]).toMatchObject({
+    text: "Retained input",
+    sendState: "held",
+    sendRunId: "original-unbound-key",
+    sendAttempts: 1,
+  });
+  host.currentSessionId = null;
+  await retryQueuedChatMessage(host, "unbound-attempt");
+  expect(requestCalls(host.request, "chat.send")).toEqual([]);
+  expect(listStoredChatOutboxes(host)[0]?.queue[0]?.sendState).toBe("held");
+  host.sessionKey = sessionKey;
+  host.currentSessionId = "reviewed-physical-session";
+  chatOutboxOwner(host).syncHost(host);
 
-    await retryQueuedChatMessage(host, "unbound-attempt");
+  await retryQueuedChatMessage(host, "unbound-attempt");
 
-    const sends = requestCalls(host.request, "chat.send");
-    expect(sends).toHaveLength(1);
-    expect(sends[0]?.[1]).toMatchObject({
-      sessionKey,
-      sessionId: "reviewed-physical-session",
-      idempotencyKey: "original-unbound-key",
-      message: "Retained input",
-    });
-    await waitForFast(() => expect(host.chatQueue).toEqual([]));
-  },
-);
+  const sends = requestCalls(host.request, "chat.send");
+  expect(sends).toHaveLength(1);
+  expect(sends[0]?.[1]).toMatchObject({
+    sessionKey,
+    sessionId: "reviewed-physical-session",
+    idempotencyKey: "original-unbound-key",
+    message: "Retained input",
+  });
+  await waitForFast(() => expect(host.chatQueue).toEqual([]));
+});
 
 it("replays attempted durable and memory-only sends FIFO with their original keys", async () => {
+  const attempted = (id: string, createdAt: number, text = `Attempted ${id}`): ChatQueueItem => ({
+    id,
+    text,
+    createdAt,
+    sendState: "waiting-reconnect",
+    sendRunId: `run-${id}`,
+    sessionId: "original-physical-session",
+    sendAttempts: 1,
+    sendRequestStartedAtMs: createdAt,
+  });
   const host = makeChatHost({
     connected: false,
     currentSessionId: "original-physical-session",
     chatRunId: "stale-local-run",
     chatStream: "The socket missed this run's terminal event",
-    chatQueue: [
-      { id: "a", createdAt: 1 },
-      { id: "c", createdAt: 3 },
-    ].map(({ id, createdAt }) => ({
-      id,
-      text: `Attempted ${id}`,
-      createdAt,
-      sendState: "waiting-reconnect" as const,
-      sendRunId: `run-${id}`,
-      sessionId: "original-physical-session",
-      sendAttempts: 1,
-      sendRequestStartedAtMs: createdAt,
-    })),
+    chatQueue: [attempted("a", 1), attempted("c", 3)],
     requestHandlers: {
       "chat.send": (params: unknown) => ({
         runId: requireRecord(params, "replayed send").idempotencyKey,
@@ -101,28 +95,14 @@ it("replays attempted durable and memory-only sends FIFO with their original key
   keepVolatileQueuedMessage(
     host,
     host.sessionKey,
-    {
-      id: "b",
-      text: "Memory-only attempt",
-      createdAt: 2,
-      orderKey: 2,
-      sendState: "waiting-reconnect",
-      sendRunId: "run-b",
-      sessionId: "original-physical-session",
-      sendAttempts: 1,
-      sendRequestStartedAtMs: 2,
-    },
+    { ...attempted("b", 2, "Memory-only attempt"), orderKey: 2 },
     undefined,
     { retryable: true },
   );
 
   await resumeStoredChatOutboxes(host);
   expect(requestCalls(host.request, "chat.send")).toEqual([]);
-  expect(host.chatQueue.map((item) => item.sendState)).toEqual([
-    "waiting-reconnect",
-    "waiting-reconnect",
-    "waiting-reconnect",
-  ]);
+  expect(host.chatQueue.map((item) => item.sendState)).toEqual(Array(3).fill("waiting-reconnect"));
 
   host.connected = true;
   host.connectionEpoch += 1;

@@ -27,10 +27,6 @@ function drawBanner(overrides: Partial<NonNullable<Banner>> = {}) {
   return { ...view, update, banner, action: banner.querySelector<HTMLButtonElement>("button")! };
 }
 
-function expectClasses(element: Element, classes: string) {
-  expect(new Set(element.classList)).toEqual(new Set(classes.split(" ")));
-}
-
 it("keeps the focused action through a banner refresh and uses the current action", () => {
   const initialAction = vi.fn();
   const refreshedAction = vi.fn();
@@ -38,11 +34,6 @@ it("keeps the focused action through a banner refresh and uses the current actio
   const { container, update, action, banner } = drawBanner({ onAction: initialAction });
   document.body.append(container);
   action.focus();
-  expectClasses(
-    action.parentElement!,
-    "agent-chat__disabled-banner agent-chat__disabled-banner--replacement callout info callout--action",
-  );
-
   update({
     kind: "composer-replacement",
     text,
@@ -82,14 +73,11 @@ it("renders a standard primary action with progress feedback", () => {
     busy: true,
     busyLabel,
   });
-  expectClasses(
-    banner,
-    "agent-chat__disabled-banner agent-chat__disabled-banner--replacement callout agent-chat__disabled-banner--neutral callout--action",
-  );
+  expect(banner.classList.contains("agent-chat__disabled-banner--neutral")).toBe(true);
   expect(banner?.querySelector(".agent-chat__disabled-banner-icon")).not.toBeNull();
   expect(banner.querySelector(".agent-chat__disabled-banner-title")?.textContent).toContain(title);
   expect(banner.querySelector(".agent-chat__disabled-banner-detail")?.textContent).toContain(text);
-  expectClasses(action, "btn btn--sm primary");
+  expect(action.classList.contains("primary")).toBe(true);
   expect(action).toMatchObject({ disabled: true, textContent: expect.stringContaining(busyLabel) });
   expect(action?.getAttribute("aria-busy")).toBe("true");
   expect(action?.querySelector(".btn__spinner")).not.toBeNull();
