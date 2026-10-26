@@ -135,46 +135,79 @@ it.each(versionKeys)("serves compatible rows after failed %s rebuild", async (ve
   expect(results).toEqual(versionKey === "chunkingVersion" ? alphaResult : []);
   expect(withDatabase(dbPath, readMeta)[versionKey]).toBe(versions[versionKey] - 1);
 });
-it("re-embeds unchanged legacy-identity cache rows once on ordinary search", async () => {
-  const cfg = fixture.createConfig({
+it.each([
+  {
     model: "embeddinggemma",
-    cacheEnabled: true,
-    vectorEnabled: false,
-  });
-  const dbPath = await publishIndex(cfg);
-  // Reopen the unchanged fixture cache under the identity used before task prefixes.
-  const legacyProviderKey = withDatabase(dbPath, (db) => {
-    const meta = readMeta(db);
-    const providerKey = hashText(JSON.stringify({ provider: meta.provider, model: meta.model }));
-    delete meta.embeddingInputFormatVersion;
-    updateMeta(db, { ...meta, providerKey });
-    db.prepare("UPDATE memory_embedding_cache SET provider_key = ?").run(providerKey);
-    expect(
-      db.prepare("SELECT count(*) AS count FROM memory_embedding_cache").get()?.count,
-    ).toBeGreaterThan(0);
-    return providerKey;
-  });
-  provider.embeddedBatchTexts.length = 0;
-  provider.embeddedQueryTexts.length = 0;
+    document: /^title: none \| text: /,
+    query: "task: search result | query: alpha",
+  },
+  { model: "nvidia/Nemotron-3-Embed-8B-BF16", document: /^passage: /, query: "query: alpha" },
+])(
+  "re-embeds unchanged legacy $model cache rows once on ordinary search",
+  async ({ model, document, query }) => {
+    const cfg = fixture.createConfig({
+      model,
+      cacheEnabled: true,
+      vectorEnabled: false,
+    });
+    const dbPath = await publishIndex(cfg);
+    // Reopen the unchanged fixture cache under the identity used before task prefixes.
+    const legacyProviderKey = withDatabase(dbPath, (db) => {
+      const meta = readMeta(db);
+      const providerKey = hashText(JSON.stringify({ provider: meta.provider, model: meta.model }));
+      delete meta.embeddingInputFormatVersion;
+      updateMeta(db, { ...meta, providerKey });
+      db.prepare("UPDATE memory_embedding_cache SET provider_key = ?").run(providerKey);
+      expect(
+        db.prepare("SELECT count(*) AS count FROM memory_embedding_cache").get()?.count,
+      ).toBeGreaterThan(0);
+      return providerKey;
+    });
+    provider.embeddedBatchTexts.length = 0;
+    provider.embeddedQueryTexts.length = 0;
+    const previousBatches = provider.embedBatchCalls;
+    const manager = await fixture.getFreshManager(cfg);
+    expect(await manager.search("alpha")).toEqual(alphaResult);
+    expect(manager.status().custom?.indexIdentity).toEqual({ status: "valid" });
+    expect(provider.embedBatchCalls).toBeGreaterThan(previousBatches);
+    expect(provider).toMatchObject({
+      embeddedBatchTexts: [expect.stringMatching(document)],
+      embeddedQueryTexts: [query],
+    });
+    await closeManager(manager);
+    const upgraded = withDatabase(dbPath, readMeta);
+    expect(upgraded.embeddingInputFormatVersion).toBe(1);
+    expect(upgraded.providerKey).not.toBe(legacyProviderKey);
+    const rebuiltBatches = provider.embedBatchCalls;
+    const reopened = await fixture.getFreshManager(cfg);
+    await reopened.sync({ reason: "watch" });
+    expect(await reopened.search("alpha")).not.toEqual([]);
+    expect(provider.embedBatchCalls).toBe(rebuiltBatches);
+    expect(reopened.status().custom?.indexIdentity).toEqual({ status: "valid" });
+    await closeManager(reopened);
+    expect(withDatabase(dbPath, readMeta)).toEqual(upgraded);
+  },
+);
+
+it("re-embeds cached documents after an alias format change but reuses them for query changes", async () => {
+  const cfg = fixture.createConfig({ model: "alias", cacheEnabled: true, vectorEnabled: false });
+  const search = cfg.memory?.search;
+  if (!search) {
+    throw new Error("fixture memory search configuration is missing");
+  }
+  search.inputFormat = { query: "query: ", document: "passage: " };
+  await publishIndex(cfg);
   const previousBatches = provider.embedBatchCalls;
-  const manager = await fixture.getFreshManager(cfg);
-  expect(await manager.search("alpha")).toEqual(alphaResult);
-  expect(manager.status().custom?.indexIdentity).toEqual({ status: "valid" });
-  expect(provider.embedBatchCalls).toBeGreaterThan(previousBatches);
-  expect(provider).toMatchObject({
-    embeddedBatchTexts: [expect.stringMatching(/^title: none \| text: /)],
-    embeddedQueryTexts: ["task: search result | query: alpha"],
-  });
+  search.inputFormat = { query: "custom: ", document: "passage: " };
+  let manager = await fixture.getFreshManager(cfg);
+  await manager.sync({ reason: "cli", force: true });
+  expect(provider.embedBatchCalls).toBe(previousBatches);
   await closeManager(manager);
-  const upgraded = withDatabase(dbPath, readMeta);
-  expect(upgraded.embeddingInputFormatVersion).toBe(1);
-  expect(upgraded.providerKey).not.toBe(legacyProviderKey);
-  const rebuiltBatches = provider.embedBatchCalls;
-  const reopened = await fixture.getFreshManager(cfg);
-  await reopened.sync({ reason: "watch" });
-  expect(await reopened.search("alpha")).not.toEqual([]);
-  expect(provider.embedBatchCalls).toBe(rebuiltBatches);
-  expect(reopened.status().custom?.indexIdentity).toEqual({ status: "valid" });
-  await closeManager(reopened);
-  expect(withDatabase(dbPath, readMeta)).toEqual(upgraded);
+  search.inputFormat.document = "document: ";
+  provider.embeddedBatchTexts.length = 0;
+  manager = await fixture.getFreshManager(cfg);
+  await manager.sync({ reason: "cli", force: true });
+  expect(provider.embedBatchCalls).toBeGreaterThan(previousBatches);
+  expect(provider.embeddedBatchTexts).toEqual([expect.stringMatching(/^document: /)]);
+  expect(manager.status().custom?.indexIdentity).toEqual({ status: "valid" });
 });
