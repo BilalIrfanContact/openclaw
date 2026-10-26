@@ -1,5 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   createChannelIngressQueueForTests,
@@ -7,6 +6,7 @@ import {
   resetPluginStateStoreForTests,
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { closeOpenClawStateDatabaseAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, expect, it } from "vitest";
 import { createMatrixQaE2eeTestContext } from "./scenario-runtime-e2ee.test-helpers.js";
 import {
@@ -16,7 +16,12 @@ import {
   waitForMatrixSyncStoreWithCursor,
 } from "./scenario-runtime-state-files.js";
 
-const tempDirs: string[] = [];
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
+  afterEach(async () => {
+    await closeStores();
+    cleanup();
+  }),
+);
 const identity = { accountId: "target", userId: "@target:matrix-qa.test" };
 const context = createMatrixQaE2eeTestContext({
   sutAccountId: identity.accountId,
@@ -30,11 +35,7 @@ const openStore = (root: string, namespace: string) =>
     env: { ...process.env, OPENCLAW_STATE_DIR: root },
   });
 
-async function createStateDir() {
-  const stateDir = await mkdtemp(path.join(os.tmpdir(), "matrix-qa-sync-"));
-  tempDirs.push(stateDir);
-  return stateDir;
-}
+const createStateDir = () => tempDirs.make("matrix-qa-sync-");
 
 const syncDefaults = { metadata: identity, cursor: "other-cursor" };
 async function closeStores() {
@@ -59,11 +60,6 @@ const expectNoCursor = (stateDir: string) =>
   expect(waitCursor(stateDir, { timeoutMs: 20 })).rejects.toThrow(
     "timed out waiting for Matrix sync store cursor",
   );
-
-afterEach(async () => {
-  await closeStores();
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { force: true, recursive: true })));
-});
 
 it.each(["accountId", "userId"] as const)(
   "ignores stale sidecar %s and selects only the requested SQLite identity",
@@ -123,12 +119,10 @@ it("observes only the requested account's completed ingress event", async () => 
   const stateDir = await createStateDir();
   const eventId = "$event";
   const accountId = "sut";
-  const queue = createChannelIngressQueueForTests({ channelId: "matrix", accountId, stateDir });
-  const otherQueue = createChannelIngressQueueForTests({
-    channelId: "matrix",
-    accountId: "other",
-    stateDir,
-  });
+  const makeQueue = (id: string) =>
+    createChannelIngressQueueForTests({ channelId: "matrix", accountId: id, stateDir });
+  const queue = makeQueue(accountId);
+  const otherQueue = makeQueue("other");
   await otherQueue.complete(eventId);
   await queue.enqueue(eventId, { roomId: "!room:matrix-qa.test" });
   await expect(
