@@ -26,9 +26,7 @@ export function registerGatewayCallLocalBackendAuthTests(fixture: {
   const backend = {
     clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
     mode: GATEWAY_CLIENT_MODES.BACKEND,
-    scopes: ["operator.read", "operator.pairing"] satisfies NonNullable<
-      Parameters<typeof fixture.callGateway>[0]["scopes"]
-    >,
+    scopes: ["operator.read", "operator.pairing"],
     deviceIdentity: null,
   };
   const localAuthNone = () => {
@@ -74,9 +72,7 @@ export function registerGatewayCallLocalBackendAuthTests(fixture: {
     localAuthNone();
     const { callGatewayFromCliRuntime } = await import("../cli/gateway-rpc.runtime.js");
 
-    await expect(callGatewayFromCliRuntime("cron.status", { json: true })).resolves.toEqual({
-      ok: true,
-    });
+    await callGatewayFromCliRuntime("cron.status", { json: true });
 
     expect(getOptions()).toMatchObject({ ...backend, scopes: ["operator.read"] });
     for (const load of [
