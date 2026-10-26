@@ -42,57 +42,51 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-it.each<{
-  initial: boolean;
-  finishFirst: "first" | "second";
-  reject: boolean;
-  routeSecond: boolean;
-}>([
-  { initial: false, finishFirst: "first", reject: false, routeSecond: true },
-  { initial: false, finishFirst: "second", reject: true, routeSecond: true },
-  { initial: true, finishFirst: "first", reject: false, routeSecond: true },
-  { initial: false, finishFirst: "first", reject: false, routeSecond: false },
+it.each([
+  [false, 0, false, true],
+  [false, 1, true, true],
+  [true, 0, false, true],
+  [false, 0, false, false],
 ] as const)(
-  "settles loads ($finishFirst first, reject=$reject, routeSecond=$routeSecond) to stderr=$initial",
-  async ({ initial, finishFirst, reject, routeSecond }) => {
+  "restores stderr=%s (first=%s, reject=%s, routeSecond=%s)",
+  async (initial, finishFirst, reject, routeSecond) => {
     loggingState.forceConsoleToStderr = initial;
-    const gate = () => Promise.withResolvers<void>();
-    const started = { first: gate(), second: gate() };
-    const resume = { first: gate(), second: gate() };
+    const started = Promise.withResolvers<void>();
+    const resume = [Promise.withResolvers<void>(), Promise.withResolvers<void>()] as const;
     const captured: boolean[] = [];
     const failure = new Error("Plugin activation failed");
-    const load = async (id: keyof typeof started) => {
-      started[id].resolve();
-      await resume[id].promise;
-      captured.push(loggingState.forceConsoleToStderr);
-      if (reject && id === finishFirst) {
-        throw failure;
-      }
-    };
-    ensurePluginRegistryLoadedMock
-      .mockImplementationOnce(() => load("first"))
-      .mockImplementationOnce(() => load("second"));
+    resume.forEach((gate, id) => {
+      ensurePluginRegistryLoadedMock.mockImplementationOnce(async () => {
+        if (id === 1) {
+          started.resolve();
+        }
+        await gate.promise;
+        captured.push(loggingState.forceConsoleToStderr);
+        if (reject && id === finishFirst) {
+          throw failure;
+        }
+      });
+    });
     const start = (routeLogsToStderr: boolean) =>
       ensureCliPluginRegistryLoaded({ scope: "all", routeLogsToStderr }).then(
         () => undefined,
         (error: unknown) => error,
       );
-    const pending = { first: start(true), second: start(routeSecond) };
-    const finishLast = finishFirst === "first" ? "second" : "first";
+    const pending = [start(true), start(routeSecond)] as const;
+    const finishLast = finishFirst === 0 ? 1 : 0;
     try {
-      await Promise.all([started.first.promise, started.second.promise]);
+      await started.promise;
       expect(loggingState.forceConsoleToStderr).toBe(true);
       resume[finishFirst].resolve();
       expect(await pending[finishFirst]).toBe(reject ? failure : undefined);
-      expect(loggingState.forceConsoleToStderr).toBe(routeSecond || finishFirst === "second");
+      expect(loggingState.forceConsoleToStderr).toBe(routeSecond || finishFirst === 1);
       resume[finishLast].resolve();
       expect(await pending[finishLast]).toBeUndefined();
       expect(captured).toEqual([true, routeSecond]);
       expect(loggingState.forceConsoleToStderr).toBe(initial);
     } finally {
-      resume.first.resolve();
-      resume.second.resolve();
-      await Promise.all([pending.first, pending.second]);
+      resume.forEach((gate) => gate.resolve());
+      await Promise.all(pending);
     }
   },
 );
