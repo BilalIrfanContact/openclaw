@@ -23,7 +23,7 @@ const listMethod = "sessions.catalog.list";
 const readMethod = "sessions.catalog.read";
 const session = {
   threadId: key.threadId,
-  status: "stored",
+  status: "stored" as const,
   archived: false,
   canContinue: false,
   canArchive: false,

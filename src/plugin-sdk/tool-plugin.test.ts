@@ -81,6 +81,7 @@ describe("defineToolPlugin", () => {
       tools: (tool) => [
         tool({
           ...echoTool,
+          label: "Factory Echo",
           optional: true,
           workspaceAccess: "execute",
           factory: ({ toolContext }) =>

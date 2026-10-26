@@ -96,14 +96,16 @@ it.each(["current", "terminal", "replacement"] as const)("stop errors: %s", asyn
 });
 
 it.each([
-  { key: "agent:main:openclaw-weixin:direct:wechat-user", scope: "per-sender" },
-  { key: "global", scope: "global" },
-  { key: "agent:work:main", scope: "per-sender" },
-  { key: "agent:work:main", scope: "global" },
-] as const)("targets $key ($scope)", async ({ key, scope }) => {
+  { key: "agent:main:openclaw-weixin:direct:wechat-user", scope: "per-sender", connected: true },
+  { key: "global", scope: "global", connected: true },
+  { key: "agent:work:main", scope: "per-sender", connected: true },
+  { key: "agent:work:main", scope: "global", connected: true },
+  { key: "agent:main:telegram:direct:queued-user", scope: "per-sender", connected: false },
+] as const)("targets $key ($scope, connected: $connected)", async ({ key, scope, connected }) => {
   const host = makeChatHost({
     requestHandlers: { "sessions.abort": { abortedRunId: null, status: "aborted" } },
-    chatMessage: "/stop",
+    connected,
+    chatMessage: connected ? "/stop" : "draft",
     sessionKey: key,
     ...(key === "global" ? { assistantAgentId: "work" } : {}),
     agentsList: { defaultId: "main", mainKey: "main", scope },
@@ -113,13 +115,20 @@ it.each([
         status: "running",
         ...(key === "global" ? { agentId: "work" } : {}),
       }),
+      ...(!connected ? [row("agent:other", { hasActiveRun: true })] : []),
     ]),
   });
   await handleAbortChat(host);
-  expect(host.request).toHaveBeenCalledWith("sessions.abort", {
-    key,
-    ...(scope === "global" ? { agentId: "work" } : { clearQueued: true }),
-  });
-  expect(host.request).not.toHaveBeenCalledWith("chat.abort", expect.anything());
-  expect(host.chatMessage).toBe("");
+  if (connected) {
+    expect(host.request).toHaveBeenCalledWith("sessions.abort", {
+      key,
+      ...(scope === "global" ? { agentId: "work" } : { clearQueued: true }),
+    });
+    expect(host.request).not.toHaveBeenCalledWith("chat.abort", expect.anything());
+    expect(host.chatMessage).toBe("");
+  } else {
+    expect(host.pendingAbort).toBeUndefined();
+    expect(host.chatMessage).toBe("draft");
+    expect(host.request).not.toHaveBeenCalled();
+  }
 });

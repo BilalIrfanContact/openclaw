@@ -21,12 +21,6 @@ function fixture() {
 }
 const params = { requestId: "first", task: "Review the change" };
 const guard = { pluginId: "test-plugin", assertCurrent() {} };
-const inRequest = <T>(
-  create: Parameters<typeof withNativeSubagentRequest>[0],
-  run: () => Promise<T>,
-) => withNativeSubagentRequest(create, () => withNativeSubagentRuntimeGuard(guard, run));
-const listChildren = (options?: Parameters<NonNullable<NativeSubagentRuntime["list"]>>[0]) =>
-  expectDefined(nativeSubagentRuntime.list, "list facade")(options);
 
 describe("native subagent requester binding", () => {
   it("rejects calls without both a host request and a plugin runtime", async () => {
@@ -34,7 +28,9 @@ describe("native subagent requester binding", () => {
     const runtime = fixture();
     await withNativeSubagentRequest(
       () => runtime,
-      () => expect(nativeSubagentRuntime.spawn(params)).rejects.toThrow("requester-bound"),
+      async () => {
+        await expect(nativeSubagentRuntime.spawn(params)).rejects.toThrow("requester-bound");
+      },
     );
     expect(runtime.spawn).not.toHaveBeenCalled();
   });
@@ -48,7 +44,11 @@ describe("native subagent requester binding", () => {
         withNativeSubagentRuntimeGuard(
           { ...guard, pluginId: boundary === "plugin" ? String(index) : guard.pluginId },
           async () => {
-            await (index === 0 ? ready.promise : ready.resolve());
+            if (index === 0) {
+              await ready.promise;
+            } else {
+              ready.resolve();
+            }
             await nativeSubagentRuntime.spawn(params);
           },
         );
@@ -74,38 +74,110 @@ describe("native subagent requester binding", () => {
   );
 
   it("reports optional listing absence honestly on an older runtime", async () => {
-    await inRequest(fixture, () =>
-      expect(listChildren()).rejects.toThrow("listing is unsupported"),
+    const runtime = fixture();
+    await withNativeSubagentRequest(
+      () => runtime,
+      () =>
+        withNativeSubagentRuntimeGuard(guard, async () => {
+          await expect(expectDefined(nativeSubagentRuntime.list, "list facade")()).rejects.toThrow(
+            "listing is unsupported",
+          );
+        }),
     );
+    expect(runtime.collect).not.toHaveBeenCalled();
+    expect(runtime.spawn).not.toHaveBeenCalled();
+  });
+
+  it("rechecks unload after listing preparation", async () => {
+    const ready = createDeferred<NativeSubagentRuntime>();
+    const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
+    let active = true;
+    const pending = withNativeSubagentRequest(
+      () => ready.promise,
+      () =>
+        withNativeSubagentRuntimeGuard(
+          {
+            pluginId: "test-plugin",
+            assertCurrent() {
+              if (!active) {
+                throw new Error("plugin unloaded");
+              }
+            },
+          },
+          () => expectDefined(nativeSubagentRuntime.list, "list facade")(),
+        ),
+    );
+    active = false;
+    ready.resolve({ ...fixture(), list });
+    await expect(pending).rejects.toThrow("plugin unloaded");
+    expect(list).not.toHaveBeenCalled();
   });
 
   it("expires retained listing calls with their invoking request", async () => {
     const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
     const gate = createDeferred();
     let detached: Promise<unknown> | undefined;
-    await inRequest(
+    await withNativeSubagentRequest(
       () => ({ ...fixture(), list }),
-      async () => {
-        expect(await listChildren({ status: "queued" })).toEqual([]);
-        detached = gate.promise.then(() => listChildren());
-      },
+      () =>
+        withNativeSubagentRuntimeGuard(guard, async () => {
+          expect(
+            await expectDefined(nativeSubagentRuntime.list, "list facade")({ status: "queued" }),
+          ).toEqual([]);
+          detached = gate.promise.then(() =>
+            expectDefined(nativeSubagentRuntime.list, "list facade")(),
+          );
+        }),
     );
     gate.resolve();
     await expect(detached).rejects.toThrow("requester-bound");
     expect(list).toHaveBeenCalledExactlyOnceWith({ status: "queued" });
   });
 
-  it("aborts the request scope after a handler exits", async () => {
+  it("aborts the request scope and rejects detached calls after a handler exits", async () => {
+    const gate = createDeferred();
+    const runtime = fixture();
+    let detached: Promise<unknown> | undefined;
     let signal: AbortSignal | undefined;
-    await inRequest(
+    await withNativeSubagentRequest(
       (source) => {
         signal = source.signal;
-        return fixture();
+        return runtime;
       },
-      async () => {
-        await nativeSubagentRuntime.collect({ ids: ["child-run"], timeoutSeconds: 0 });
-      },
+      () =>
+        withNativeSubagentRuntimeGuard(guard, async () => {
+          await nativeSubagentRuntime.collect({ ids: ["child-run"], timeoutSeconds: 0 });
+          detached = gate.promise.then(() => nativeSubagentRuntime.spawn(params));
+        }),
     );
     expect(signal?.aborted).toBe(true);
+    gate.resolve();
+    await expect(detached).rejects.toThrow("requester-bound");
+    expect(runtime.spawn).not.toHaveBeenCalled();
+  });
+
+  it("rechecks plugin lifecycle after awaited request preparation", async () => {
+    const gate = createDeferred<NativeSubagentRuntime>();
+    const runtime = fixture();
+    let active = true;
+    const work = withNativeSubagentRequest(
+      () => gate.promise,
+      () =>
+        withNativeSubagentRuntimeGuard(
+          {
+            pluginId: "test-plugin",
+            assertCurrent() {
+              if (!active) {
+                throw new Error("plugin retired");
+              }
+            },
+          },
+          () => nativeSubagentRuntime.spawn(params),
+        ),
+    );
+    active = false;
+    gate.resolve(runtime);
+    await expect(work).rejects.toThrow("plugin retired");
+    expect(runtime.spawn).not.toHaveBeenCalled();
   });
 });

@@ -37,7 +37,7 @@ it.each([
   "restarts a failed placement on $target without creating a session (fails=$fails)",
   async ({ target, fails }) => {
     const recovery = createDeferred<{ ok: true }>();
-    const { pane, state, request } = createPlacementPane(
+    const { pane, state, request, reconcileMutation } = createPlacementPane(
       dialogs,
       async (method: string) => {
         if (method === "environments.list") {
@@ -105,6 +105,7 @@ it.each([
         expect(request.mock.calls.some(([method]) => method === "sessions.dispatch")).toBe(false);
       }
       expect(request.mock.calls.some(([method]) => method === "sessions.create")).toBe(false);
+      expect(reconcileMutation).toHaveBeenCalledWith("main");
     } finally {
       recovery.resolve({ ok: true });
     }

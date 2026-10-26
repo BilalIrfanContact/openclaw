@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -88,11 +87,17 @@ async function runMode(stateDir: string, mode: Mode) {
     root: null,
     runtime: { log() {}, error() {}, exit() {} },
   });
-  assert(maintenance, "Expected Doctor maintenance");
-  const failure = await maintenance
-    .run(() => migrateDoctorDeliveryQueues({ cfg, stateDir, env: process.env }))
-    .catch((error: unknown) => error)
-    .finally(() => maintenance.release());
+  if (!maintenance) {
+    throw new Error("Expected Doctor maintenance");
+  }
+  let failure: unknown;
+  try {
+    await maintenance.run(() => migrateDoctorDeliveryQueues({ cfg, stateDir, env: process.env }));
+  } catch (error) {
+    failure = error;
+  } finally {
+    await maintenance.release();
+  }
   const writable = nativeState.native?.isOpen === true;
   if (nativeState.native?.isOpen) {
     nativeState.native.exec("INSERT INTO effects VALUES ('after failed cleanup')");
@@ -118,13 +123,21 @@ async function runMode(stateDir: string, mode: Mode) {
   };
 }
 
-const stateRoot = process.argv[2];
-assert(stateRoot, "Expected isolated state directory");
-const reports = [];
-for (const mode of modes) {
-  reports.push(await runMode(path.join(stateRoot, mode), mode));
+const [stateRoot, requestedMode] = process.argv.slice(2);
+if (
+  !stateRoot ||
+  !requestedMode ||
+  (requestedMode !== "all" && !modes.includes(requestedMode as Mode))
+) {
+  throw new Error("Expected isolated state directory and custody case");
 }
-process.stdout.write(JSON.stringify(reports) + "\n", () => {
+const all = requestedMode === "all";
+const selectedModes = all ? modes : [requestedMode as Mode];
+const reports = [];
+for (const mode of selectedModes) {
+  reports.push(await runMode(all ? path.join(stateRoot, mode) : stateRoot, mode));
+}
+process.stdout.write(JSON.stringify(all ? reports : reports[0]) + "\n", () => {
   // A retained inspection has no retryable release handle; ending its owner releases OS custody.
   process.exit(0);
 });

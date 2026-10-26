@@ -1,13 +1,21 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import {
+  clearRuntimeConfigSnapshot,
+  setRuntimeConfigSnapshot,
+} from "../../config/runtime-snapshot.js";
 import type { WorkerProvider } from "../../plugins/types.js";
+import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import {
   readPreparedPoolPresenceDemand,
   writePreparedPoolPresenceDemand,
 } from "./prepared-pool-presence-worker.js";
-import { PREPARATION_TARGET } from "./prepared-pool.test-support.js";
-import { nodeArtifacts, providerService } from "./provider-lifecycle.test-support.js";
+import {
+  createPreparationArtifacts,
+  PREPARATION_TARGET,
+  usePreparedPoolFixture,
+} from "./prepared-pool.test-support.js";
 import {
   AUTHORIZATION,
   TOKEN,
@@ -15,7 +23,7 @@ import {
   assertNoCredentialFiles,
   fixture as gitFixture,
 } from "./repository-git-pack.test-support.js";
-import * as support from "./service.test-support.js";
+import { createWorkerEnvironmentService } from "./service.js";
 
 vi.mock("../../agents/github-tool-identity.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../agents/github-tool-identity.js")>()),
@@ -32,14 +40,15 @@ vi.mock("../../agents/github-tool-identity.js", async (importOriginal) => ({
 }));
 
 afterEach(() => vi.unstubAllGlobals());
-support.setupWorkerEnvironmentServiceSuite((config) => {
-  config.agents = { entries: { main: {} } };
-});
+afterEach(clearRuntimeConfigSnapshot);
+const pool = usePreparedPoolFixture();
 type ProvisionOptions = NonNullable<Parameters<WorkerProvider["provision"]>[2]>;
 
 it("uses the real provider lifecycle and authorized private Git transport for presence demand", async () => {
   const git = await gitFixture({ setupRecipe: false });
-  vi.stubEnv("OPENCLAW_STATE_DIR", support.testState.root);
+  vi.stubEnv("OPENCLAW_STATE_DIR", pool.root);
+  pool.config.agents = { entries: { main: {} } };
+  setRuntimeConfigSnapshot(pool.config);
   const metadata = {
     node_id: git.project.source.repositoryId,
     clone_url: REPOSITORY_URL.replace(/\.git$/u, ""),
@@ -64,35 +73,43 @@ it("uses the real provider lifecycle and authorized private Git transport for pr
       return Response.json(responses.find(([route]) => route.test(pathname))?.[1] ?? metadata);
     }),
   );
-  const prepared: Array<[boolean, string]> = [];
-  const allocate = async (options: ProvisionOptions) => {
-    const result = await options.project!.prepare(git.transport);
+  const upload = vi.fn(git.transport.upload);
+  const allocate = vi.fn(async (options: ProvisionOptions) => {
+    const result = await options.project!.prepare({ ...git.transport, upload });
     const { workspaceDir } = result.preparedWorkspace!;
-    prepared.push([
-      result.cacheHit,
-      await fs.readFile(path.join(workspaceDir, "input.txt"), "utf8"),
-    ]);
+    expect(await fs.readFile(path.join(workspaceDir, "input.txt"), "utf8")).toBe(
+      "pinned private content\n",
+    );
+    expect(result.cacheHit).toBe(false);
     // Stop after real transfer; do not advertise synthetic node readiness.
     throw new Error("Owned allocation observer completed");
-  };
-  const provider = {
+  });
+  pool.provider = {
+    ...pool.provider,
     requiresNodeEnrollment: true,
     provisionBeforeInstallation: true,
     supportedExecutionModes: ["worker-turn"],
     supportsProjectPreparation: () => true,
     resolvePreparationTarget: () => PREPARATION_TARGET,
     prepareProvision: async (_profile, _operationId, options) => async () => allocate(options!),
-  } satisfies Partial<WorkerProvider>;
+  };
   const unexpected = async () => {
     throw new Error("Fixture must not install, bootstrap, or enroll a node");
   };
-  const service = providerService(provider, {
+  pool.service = createWorkerEnvironmentService({
+    scheduler: createTestGatewayScheduler(),
     logger: { warn: vi.fn() },
+    store: pool.store,
+    getConfig: () => pool.config,
+    resolveProvider: () => pool.provider,
     projectNamespace: "gateway",
     prepareInstallation: unexpected,
     bootstrapWorker: unexpected,
     prepareNodeEnrollment: unexpected,
-    prepareNodeArtifacts: async () => nodeArtifacts(),
+    prepareNodeArtifacts: async () => ({
+      artifacts: createPreparationArtifacts(),
+      assertCurrent: () => {},
+    }),
     resolveHumanPresenceDemand: () => ({
       profileId: "development",
       executionMode: "worker-turn",
@@ -102,9 +119,11 @@ it("uses the real provider lifecycle and authorized private Git transport for pr
       read: readPreparedPoolPresenceDemand,
       write: writePreparedPoolPresenceDemand,
     },
+    now: () => pool.nowMs,
   });
-  await service.setHumanPresence(true);
-  expect(prepared).toEqual([[false, "pinned private content\n"]]);
+  await pool.service.setHumanPresence(true);
+  expect(allocate).toHaveBeenCalledOnce();
+  expect(upload).toHaveBeenCalledOnce();
   expect(git.requests.length).toBeGreaterThan(0);
   expect(git.requests.every((value) => value === AUTHORIZATION)).toBe(true);
   expect(git.fetches).toMatchObject([{ settled: true }]);

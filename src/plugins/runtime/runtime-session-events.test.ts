@@ -23,7 +23,7 @@ const target: SessionEventTarget = {
   sessionId: "original",
   generation: "process",
 };
-const address = { agentId: target.agentId, sessionKey: target.sessionKey };
+const address = { agentId: "main", sessionKey: "agent:main:main" };
 const system = () => createRuntimeBase().system;
 const captureTarget = () => system().captureSessionEventTarget(address.agentId, address.sessionKey);
 let active: boolean;
