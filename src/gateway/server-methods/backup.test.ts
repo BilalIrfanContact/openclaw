@@ -1,14 +1,12 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, expect, it, vi } from "vitest";
 import { buildBackupScheduleJob } from "../../cron/backup-command.js";
-import { CronService } from "../../cron/service.js";
-import { createNoopLogger } from "../../cron/service.test-harness.js";
 import type { CronJob } from "../../cron/types.js";
 import type { BackupRunRecord } from "../../state/backup-run-records.js";
-import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import { authorizeOperatorScopesForMethod } from "../method-scopes.js";
 import { createDirectChatContext } from "../server-chat.agent-events.test-helpers.js";
 import { coreGatewayHandlers } from "./core-handlers.js";
+import { createReadService } from "./cron-read.test-support.js";
 import { expectRpcError, expectRpcResult } from "./rpc-response.test-support.js";
 import type { RespondFn } from "./types.js";
 
@@ -27,12 +25,10 @@ afterEach(() => {
 });
 
 async function invoke(params: Record<string, unknown>, jobs: CronJob[] = []) {
-  const cron = new CronService({
-    scheduler: createTestGatewayScheduler(),
+  const cron = createReadService({
     storePath: "/unused/backup-rpc/jobs.json",
     cronEnabled: false,
     defaultAgentId: "main",
-    log: createNoopLogger(),
     enqueueSystemEvent: vi.fn(),
     runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
   });

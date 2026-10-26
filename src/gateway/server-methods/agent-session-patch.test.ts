@@ -45,17 +45,16 @@ function buildCreationPatch(opts: PatchInput) {
 }
 
 function buildPatch({ label, ...opts }: PatchInput & { label?: string }) {
-  const freshEntry: SessionEntry = {
-    sessionId: "session",
-    updatedAt: 1_000,
-    lifecycleRunId: "completed-run",
-    lastRunId: "completed-run",
-    status: "failed",
-    agentStatus: { note: "Need a password", attention: "key", expiresAt: 61_000 },
-    ...(label ? { label } : {}),
-  };
   return buildCreationPatch({
-    freshEntry,
+    freshEntry: {
+      sessionId: "session",
+      updatedAt: 1_000,
+      lifecycleRunId: "completed-run",
+      lastRunId: "completed-run",
+      status: "failed",
+      agentStatus: { note: "Need a password", attention: "key", expiresAt: 61_000 },
+      ...(label ? { label } : {}),
+    },
     canonicalSessionKey: "agent:main:main",
     storePath: "/tmp/openclaw-agent-status-test.json",
     isSystemGatewayRun: true,

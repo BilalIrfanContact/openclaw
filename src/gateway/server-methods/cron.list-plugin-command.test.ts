@@ -3,19 +3,16 @@ import { afterEach, expect, it, vi } from "vitest";
 import { CronJobSchema } from "../../../packages/gateway-protocol/src/schema/cron.js";
 import { pluginCommandSchedule } from "../../cron/plugin-command-schedule.test-support.js";
 import { PLUGIN_COMMAND_SCHEDULE_MESSAGE } from "../../cron/plugin-command-schedule.types.js";
-import {
-  createCronServiceWithStateForTest,
-  setupCronServiceSuite,
-  writeCronStoreSnapshot,
-} from "../../cron/service.test-harness.js";
+import { CronService } from "../../cron/service.js";
+import { setupCronServiceSuite, writeCronStoreSnapshot } from "../../cron/service.test-harness.js";
 import type { CronStoredJob } from "../../cron/types.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
 } from "../../test-utils/gateway-scheduler-clock.js";
 import { serializeGatewayFrame } from "../serialized-json.js";
-import { cronHandlers } from "./cron.js";
-import type { GatewayRequestContext, RespondFn } from "./types.js";
+import { callCron } from "./cron-read.test-support.js";
+import type { GatewayRequestContext } from "./types.js";
 
 const { logger, makeStorePath } = setupCronServiceSuite({
   prefix: "openclaw-cron-list-plugin-command-",
@@ -48,12 +45,11 @@ function storedJob(id: string, overrides: Partial<CronStoredJob> = {}): CronStor
   };
 }
 
-/** Persists rows through the real SQLite store and lists them through the Gateway handler. */
 async function listThroughGateway(jobs: CronStoredJob[], params: Record<string, unknown>) {
   const store = await makeStorePath();
   cleanups.push(() => store.cleanup());
   await writeCronStoreSnapshot({ storePath: store.storePath, jobs });
-  const { cron } = createCronServiceWithStateForTest({
+  const cron = new CronService({
     scheduler: createTestGatewayScheduler(createGatewaySchedulerClock(nowMs).clock),
     storePath: store.storePath,
     cronEnabled: true,
@@ -68,15 +64,7 @@ async function listThroughGateway(jobs: CronStoredJob[], params: Record<string, 
     getRuntimeConfig: () => ({}),
     logGateway: { warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
   } as unknown as GatewayRequestContext;
-  const respond = vi.fn<RespondFn>();
-  await cronHandlers["cron.list"]!({
-    req: { type: "req", id: "plugin-command-list", method: "cron.list", params },
-    params,
-    respond,
-    context,
-    client: null,
-    isWebchatConnect: () => false,
-  });
+  const respond = await callCron(context, "cron.list", params);
   expect(respond).toHaveBeenCalledOnce();
   const [ok, payload, error] = respond.mock.calls[0]!;
   expect({ ok, error }).toEqual({ ok: true, error: undefined });
@@ -115,7 +103,6 @@ it("reports a stored plugin-command schedule's kind while keeping its compatible
     pluginId: "watcher",
     command: "watcher-resume",
   });
-  // Existing readers still receive the reserved agentTurn row they already understand.
   expect(command?.payload).toEqual({
     kind: "agentTurn",
     message: PLUGIN_COMMAND_SCHEDULE_MESSAGE,
