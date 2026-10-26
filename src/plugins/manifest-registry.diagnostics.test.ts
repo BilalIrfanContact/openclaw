@@ -91,19 +91,13 @@ it.each([
   {
     name: "drops non-HTTPS provider auth presentation URLs",
     choices: [
-      {
-        ...authChoice("unsafe"),
-        icon: "http://example.com/icon.svg",
-        website: "javascript:alert(1)",
-        docsUrl: "javascript:alert(1)",
-      },
-      {
-        ...authChoice("oversized"),
-        icon: `https://example.com/${"a".repeat(2048)}`,
-        docsUrl: `https://example.com/${"a".repeat(2048)}`,
-      },
-    ],
-    expected: [authChoice("unsafe"), authChoice("oversized")],
+      "http://example.com/icon.svg",
+      "javascript:alert(1)",
+      `https://example.com/${"a".repeat(2048)}`,
+    ].map((url, index) =>
+      Object.assign(authChoice(`unsafe-${index}`), { icon: url, website: url, docsUrl: url }),
+    ),
+    expected: [authChoice("unsafe-0"), authChoice("unsafe-1"), authChoice("unsafe-2")],
   },
   ...[["not-a-platform"], "darwin"].map((platforms) => ({
     name: `preserves unavailable platform restriction ${JSON.stringify(platforms)}`,

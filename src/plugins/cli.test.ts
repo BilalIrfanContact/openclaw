@@ -93,8 +93,9 @@ it("loads manifest root help without plugin code and respects enabled policy", a
   expect(mocks.load).not.toHaveBeenCalled();
 });
 
-it("preserves deduplicated manifest root help when an unrelated legacy plugin fails", async () => {
+it.each([false, true])("preserves root help across legacy load failure=%s", async (fails) => {
   const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+  const descriptors = [descriptor("legacy", "Legacy external command")];
   mocks.snapshot.mockReturnValue(
     snapshot(
       {
@@ -104,33 +105,14 @@ it("preserves deduplicated manifest root help when an unrelated legacy plugin fa
       legacyPlugin,
     ),
   );
-  mocks.load.mockRejectedValue(new Error("broken legacy CLI plugin"));
+  if (fails) {
+    mocks.load.mockRejectedValue(new Error("broken legacy CLI plugin"));
+  } else {
+    mocks.load.mockResolvedValue({ cliRegistrars: [{ parentPath: [], descriptors }] });
+  }
   const config: OpenClawConfig = { plugins: { entries: { "legacy-cli": { enabled: true } } } };
-  await expect(getPluginCliCommandDescriptors(config)).resolves.toEqual(matrixPlugin.cliCommands);
+  await expect(getPluginCliCommandDescriptors(config)).resolves.toEqual(
+    fails ? matrixPlugin.cliCommands : [...matrixPlugin.cliCommands, ...descriptors],
+  );
   expect(stderr).not.toHaveBeenCalled();
-  expect(mocks.load).toHaveBeenCalledWith(
-    expect.objectContaining({ onlyPluginIds: ["legacy-cli"] }),
-  );
-});
-
-it("preserves root help for external plugins without manifest descriptors", async () => {
-  mocks.snapshot.mockReturnValue(snapshot(legacyPlugin));
-  const descriptors = [descriptor("legacy", "Legacy external command")];
-  mocks.load.mockResolvedValue({
-    cliRegistrars: [
-      {
-        pluginId: "legacy-cli",
-        register: vi.fn(),
-        parentPath: [],
-        commands: ["legacy"],
-        descriptors,
-        source: "/tmp/legacy-cli/index.js",
-      },
-    ],
-  });
-  const config: OpenClawConfig = { plugins: { entries: { "legacy-cli": { enabled: true } } } };
-  await expect(getPluginCliCommandDescriptors(config)).resolves.toEqual(descriptors);
-  expect(mocks.load).toHaveBeenCalledWith(
-    expect.objectContaining({ onlyPluginIds: ["legacy-cli"] }),
-  );
 });

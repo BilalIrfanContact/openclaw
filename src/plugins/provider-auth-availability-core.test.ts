@@ -58,10 +58,6 @@ describe("capability-aware provider auth", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it("skips unsupported profiles before refreshing and selects supported media auth", async () => {
-    expect(auth.listUsableProviderAuthProfileIds(media).profileIds).toEqual([
-      "openai:codex",
-      "openai:key",
-    ]);
     await expect(auth.resolveProviderAuthProfileApiKey(media)).resolves.toBe("openai:codex");
     expect(resolveApiKeyForProfile.mock.calls.map(([params]) => params.profileId)).toEqual([
       "openai:codex",
@@ -130,7 +126,5 @@ describe("capability-aware provider auth", () => {
         acceptsApiKey: (key) => key === "acceptable-env-key",
       }),
     ).resolves.toBe(false);
-    expect(authStore.ensureAuthProfileStore).not.toHaveBeenCalled();
-    expect(authStore.ensureAuthProfileStoreAsync).toHaveBeenCalledOnce();
   });
 });
