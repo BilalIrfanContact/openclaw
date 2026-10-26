@@ -93,7 +93,9 @@ it("classifies checkout roots, aliases and nested packages", async () => {
   await fs.writeFile(path.join(nested, "package.json"), '{"name":"openclaw"}');
   await expect(resolveKind(root)).resolves.toBe("git");
   await expect(resolveKind(alias)).resolves.toBe("git");
+  const command = vi.spyOn(processExec, "runCommandWithTimeout");
   await expect(resolveKind(nested)).resolves.toBe("package");
+  expect(command).not.toHaveBeenCalled();
 });
 
 it("does not treat an invalid Git marker as a checkout", async () => {
