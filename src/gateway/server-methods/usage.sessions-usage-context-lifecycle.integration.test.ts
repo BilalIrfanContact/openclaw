@@ -289,8 +289,8 @@ it.for([
     });
     const aggregated = createDeferred();
     const release = createDeferred();
-    let projection: SessionRowProjection | undefined;
-    let releaseProfileCatalog: (() => void) | undefined;
+    // Created after the cleanup hook is registered.
+    const owned: { projection?: SessionRowProjection; releaseProfileCatalog?: () => void } = {};
     const actualReporter = usageOverviewReport.createUsageOverviewReporter;
     // Hold every worker report after it completes, so access can change before publication.
     const reporter = vi
@@ -312,8 +312,8 @@ it.for([
     onTestFinished(async () => {
       release.resolve();
       reporter.mockRestore();
-      projection?.dispose();
-      releaseProfileCatalog?.();
+      owned.projection?.dispose();
+      owned.releaseProfileCatalog?.();
       await state.cleanup();
     });
     await state.writeConfig({
@@ -334,7 +334,7 @@ it.for([
     });
     const config = await captureRuntimeConfigAsyncReader()();
     const viewer = ensureProfileForEmail("usage-overview-viewer@example.com");
-    releaseProfileCatalog = (await prepareUserProfileCatalog()).release;
+    owned.releaseProfileCatalog = (await prepareUserProfileCatalog()).release;
     const client: GatewayClient = {
       connect: gatewayConnect(["operator.read", "operator.write"]),
       authenticatedUserProfile: gatewayProfile(viewer.id),
@@ -377,7 +377,7 @@ it.for([
       startMs: 0,
       endMs: timestamp + 1,
     });
-    projection = await createSessionRowProjection({ cfg: config, getConfig: () => config });
+    owned.projection = await createSessionRowProjection({ cfg: config, getConfig: () => config });
     const respond = vi.fn();
     const request = Promise.resolve(
       expectDefined(
@@ -391,7 +391,7 @@ it.for([
         isWebchatConnect: () => false,
         context: bindSessionRowProjection(
           { getRuntimeConfig: () => config } as GatewayRequestContext,
-          () => projection,
+          () => owned.projection,
         ),
       }),
     );

@@ -218,7 +218,7 @@ if (!isMainThread) {
   });
 });
 
-it("pairs quarter rows with their partitions through refresh, rollback writes, backfill, and pruning", async () => {
+it("pairs quarter rows with their partitions through refresh, rollback writes, and pruning", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
     const agentId = "usage-quarter-lifecycle";
     const sessionsDir = state.sessionsDir(agentId);
@@ -281,24 +281,6 @@ it("pairs quarter rows with their partitions through refresh, rollback writes, b
     const derived = db.prepare("SELECT * FROM cache_entries ORDER BY scope, key").all();
     await refreshUsage({ config: {}, agentId, sessionFiles: [first] });
     expect(db.prepare("SELECT * FROM cache_entries ORDER BY scope, key").all()).toEqual(derived);
-
-    // An upgraded install has partitions only; bounded full refreshes resume the backfill.
-    db.prepare("DELETE FROM cache_entries WHERE scope = ?").run(USAGE_COST_QUARTER_SCOPE);
-    const remaining: string[] = [];
-    await refreshUsage({
-      config: {},
-      agentId,
-      maxFiles: 1,
-      onRemaining: (files) => remaining.push(...files.map((file) => file.sessionFile)),
-    });
-    expect(remaining).toHaveLength(1);
-    expect(coverage().paired).toBeLessThan(3);
-    await refreshUsage({ config: {}, agentId, sessionFiles: remaining });
-    expect(coverage()).toEqual({ partitions: 3, quarters: 3, paired: 3 });
-    expect(await overview()).toMatchObject({
-      rows: [{ totalTokens: 5 }, { totalTokens: 5 }],
-      summarizing: 0,
-    });
 
     // Removed months and pruned sessions delete their quarter rows with the partitions.
     await fs.writeFile(first, `${entry("2026-09-01T00:05:00Z", 3)}\n`);

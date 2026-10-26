@@ -136,7 +136,7 @@ export function encodeUsageCostQuarters(
   date: string,
   month: SessionUsageRollupData,
 ): UsageCostQuarterRow {
-  const monthStartMs = Date.parse(`${date}T00:00:00.000Z`);
+  const monthStartMs = monthStart(date);
   const columns = Array.from({ length: COLUMN_COUNT }, (): number[] => []);
   const push = (table: number, values: readonly number[]) => {
     for (const [index, value] of values.entries()) {
