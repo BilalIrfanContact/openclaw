@@ -66,13 +66,8 @@ describe("plugins search command", () => {
         () => runPluginsSearchCommand(["calendar"], { limit: 5 }, mocks.runtime),
       );
 
-      for (const family of ["code-plugin", "bundle-plugin"]) {
-        expect(mocks.searchClawHubPackages).toHaveBeenCalledWith({
-          query: "calendar",
-          family,
-          limit: 5,
-        });
-      }
+      // catalog-search.test.ts owns family/query/limit forwarding; assert rendered results here.
+      expect(mocks.logs.join("\n")).toContain("openclaw-calendar-bundle");
       expect(mocks.logs.join("\n")).toContain(packageName);
       expect(mocks.logs.join("\n")).toContain(
         `Install: openclaw${context} plugins install ${spec}`,
