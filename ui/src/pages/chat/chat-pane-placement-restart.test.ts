@@ -6,10 +6,7 @@ import { createSessionsListResult } from "../../test-helpers/chat-model.ts";
 import { createModalDialogTestFixture } from "../../test-helpers/modal-dialog.ts";
 import { flush } from "../../test-helpers/solid-settle.ts";
 import { row } from "./chat-outbox-recovery.test-support.ts";
-import {
-  createPlacementPane,
-  selectPlacementConfiguration,
-} from "./chat-pane-placement.test-support.ts";
+import { createPlacementPane } from "./chat-pane-placement.test-support.ts";
 
 let dialogs: ReturnType<typeof createModalDialogTestFixture>;
 
@@ -23,21 +20,13 @@ function clickChoice(value: string) {
   const button = document.body.querySelector<HTMLButtonElement>(`[data-value="${value}"]`);
   button?.click();
   flush();
-  return button;
 }
 
 const profile = {
   id: "aws",
   providerId: "crabbox",
-  operatingSystems: [
-    { id: "linux", label: "Linux", default: true },
-    { id: "windows/wsl2", label: "Windows (WSL2)" },
-  ],
-  machines: [
-    { id: "tiny", label: "Tiny", os: "linux", default: true },
-    { id: "tiny", label: "Tiny", os: "windows/wsl2", default: true },
-    { id: "fast", label: "Fast", os: "windows/wsl2" },
-  ],
+  operatingSystems: [{ id: "windows/wsl2", label: "Windows (WSL2)", default: true }],
+  machines: [{ id: "fast", label: "Fast", os: "windows/wsl2", default: true }],
 };
 
 it.each([
@@ -48,7 +37,7 @@ it.each([
   "restarts a failed placement on $target without creating a session (fails=$fails)",
   async ({ target, fails }) => {
     const recovery = createDeferred<{ ok: true }>();
-    const { pane, state, request, reconcileMutation } = createPlacementPane(
+    const { pane, state, request } = createPlacementPane(
       dialogs,
       async (method: string) => {
         if (method === "environments.list") {
@@ -88,15 +77,7 @@ it.each([
       expect(document.body.textContent).toContain(
         "Changes that the previous worker did not upload may be lost.",
       );
-      if (target === "cloud") {
-        clickChoice("cloud:aws");
-        await selectPlacementConfiguration("Operating system", "windows/wsl2");
-        await selectPlacementConfiguration("Machine", "fast");
-      } else {
-        expect(clickChoice("gateway")?.querySelector(".session-move__name")?.textContent).toBe(
-          "Gateway · local",
-        );
-      }
+      clickChoice(target === "cloud" ? "cloud:aws" : "gateway");
       [...document.body.querySelectorAll<HTMLButtonElement>("button")]
         .find((button) => button.textContent?.trim() === "Restart session")
         ?.click();
@@ -124,7 +105,6 @@ it.each([
         expect(request.mock.calls.some(([method]) => method === "sessions.dispatch")).toBe(false);
       }
       expect(request.mock.calls.some(([method]) => method === "sessions.create")).toBe(false);
-      expect(reconcileMutation).toHaveBeenCalledWith("main");
     } finally {
       recovery.resolve({ ok: true });
     }

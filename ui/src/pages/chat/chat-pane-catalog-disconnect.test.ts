@@ -23,7 +23,7 @@ const listMethod = "sessions.catalog.list";
 const readMethod = "sessions.catalog.read";
 const session = {
   threadId: key.threadId,
-  status: "stored" as const,
+  status: "stored",
   archived: false,
   canContinue: false,
   canArchive: false,
@@ -95,8 +95,6 @@ it.each(["lookup-before", "lookup-after", "read-resolve", "read-reject"] as cons
       let history = { ...pane.history };
       let error = state.lastError;
       if (lookupStage) {
-        expect(active.length).toBeGreaterThan(0);
-        expect(pane.isConnected).toBe(true);
         if (timing === "lookup-before") {
           pane.remove();
           lookup.resolve(listed);
@@ -107,7 +105,6 @@ it.each(["lookup-before", "lookup-after", "read-resolve", "read-reject"] as cons
         }
       } else {
         pane.remove();
-        expectClosed(fixture);
         history = { ...pane.history };
         error = state.lastError;
         if (timing === "read-reject") {

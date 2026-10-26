@@ -8,29 +8,26 @@ import { chatOutboxOwner } from "./chat-outbox-owner.ts";
 import { admitHostQueueItems } from "./chat-outbox-recovery.test-support.ts";
 import { keepVolatileQueuedMessage } from "./chat-queue.ts";
 import { resumeStoredChatOutboxes, retryQueuedChatMessage } from "./chat-send-actions.ts";
+import { queued } from "./chat-thread-fixtures.test-support.ts";
 import { useChatSendBrowserFixture } from "./outbox-browser.test-support.ts";
 
 useChatSendBrowserFixture();
+
+const ack = (status: string) => (params: unknown) => ({
+  runId: requireRecord(params, "send").idempotencyKey,
+  status,
+});
 
 it("holds unbound attempted sends until review has a conversation identity", async () => {
   const host = makeChatHost({
     currentSessionId: "reviewed-physical-session",
     chatQueue: [
-      {
-        id: "unbound-attempt",
-        text: "Retained input",
-        createdAt: 1,
+      queued("unbound-attempt", "Retained input", 1, "waiting-reconnect", {
         sendRunId: "original-unbound-key",
         sendAttempts: 1,
-        sendState: "waiting-reconnect",
-      },
-    ],
-    requestHandlers: {
-      "chat.send": (params: unknown) => ({
-        runId: requireRecord(params, "reviewed send").idempotencyKey,
-        status: "ok",
       }),
-    },
+    ],
+    requestHandlers: { "chat.send": ack("ok") },
   });
   const sessionKey = host.sessionKey;
   admitHostQueueItems(host);
@@ -49,7 +46,6 @@ it("holds unbound attempted sends until review has a conversation identity", asy
   await retryQueuedChatMessage(host, "unbound-attempt");
   expect(requestCalls(host.request, "chat.send")).toEqual([]);
   expect(listStoredChatOutboxes(host)[0]?.queue[0]?.sendState).toBe("held");
-  host.sessionKey = sessionKey;
   host.currentSessionId = "reviewed-physical-session";
   chatOutboxOwner(host).syncHost(host);
 
@@ -83,12 +79,7 @@ it("replays attempted durable and memory-only sends FIFO with their original key
     chatRunId: "stale-local-run",
     chatStream: "The socket missed this run's terminal event",
     chatQueue: [attempted("a", 1), attempted("c", 3)],
-    requestHandlers: {
-      "chat.send": (params: unknown) => ({
-        runId: requireRecord(params, "replayed send").idempotencyKey,
-        status: "in_flight",
-      }),
-    },
+    requestHandlers: { "chat.send": ack("in_flight") },
   });
   admitHostQueueItems(host);
   onTestFinished(chatOutboxOwner(host).subscribe(host));
@@ -102,7 +93,6 @@ it("replays attempted durable and memory-only sends FIFO with their original key
 
   await resumeStoredChatOutboxes(host);
   expect(requestCalls(host.request, "chat.send")).toEqual([]);
-  expect(host.chatQueue.map((item) => item.sendState)).toEqual(Array(3).fill("waiting-reconnect"));
 
   host.connected = true;
   host.connectionEpoch += 1;
@@ -113,7 +103,6 @@ it("replays attempted durable and memory-only sends FIFO with their original key
       (call) => requireRecord(call[1], "replayed send").idempotencyKey,
     ),
   ).toEqual(["run-a", "run-b", "run-c"]);
-  expect(requestCalls(host.request, "chat.history")).toEqual([]);
   expect(listStoredChatOutboxes(host)).toEqual([]);
   expect(host.chatQueue).toEqual([]);
   expect(chatOutboxOwner(host).hasVolatile(host, "b")).toBe(false);

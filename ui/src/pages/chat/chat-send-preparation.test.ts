@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { ChatQueueItem } from "../../lib/chat/chat-types.ts";
 import { INTERRUPTED_SETTINGS_WAIT_ERROR } from "../../lib/chat/outbox-store-codec.ts";
-import { expectNoRpc, makeChatHost } from "./chat-host.test-support.ts";
+import { expectNoRpc, findChatSendPayload, makeChatHost } from "./chat-host.test-support.ts";
 import { admitHostQueueItems } from "./chat-outbox-recovery.test-support.ts";
 import {
   keepVolatileQueuedMessage,
@@ -11,6 +11,7 @@ import {
   updateQueuedMessage,
 } from "./chat-queue.ts";
 import { sendQueuedChatMessage } from "./chat-send-delivery.ts";
+import { queued } from "./chat-thread-fixtures.test-support.ts";
 import { useChatSendBrowserFixture } from "./outbox-browser.test-support.ts";
 
 const { prepareStreaming } = vi.hoisted(() => ({
@@ -33,15 +34,11 @@ it.each(
   "retains $storageMode send ownership while preparing the first reply ($scenario)",
   async ({ storageMode, scenario }) => {
     const sessionKey = "agent:main:send-preparation";
-    const item: ChatQueueItem = {
-      id: "prepared-send",
-      text: "Send after reply preparation",
-      createdAt: 1,
+    const item = queued("prepared-send", "Send after reply preparation", 1, "waiting-idle", {
       sessionKey,
       agentId: "main",
-      sendState: "waiting-idle",
       sendAttempts: 0,
-    };
+    });
     const host = makeChatHost({
       sessionKey,
       currentSessionId: "send-preparation-session",
@@ -93,11 +90,7 @@ it.each(
       const result = await sending;
       if (scenario === "ready") {
         expect(result).toBe("sent");
-        expect(host.request).toHaveBeenCalledWith(
-          "chat.send",
-          expect.objectContaining({ sessionKey, message: item.text }),
-          expect.anything(),
-        );
+        expect(findChatSendPayload(host)).toMatchObject({ sessionKey, message: item.text });
       } else {
         expectNoRpc(host.request, "chat.send");
         const pending = scenario === "connection replaced" || scenario === "row replaced";

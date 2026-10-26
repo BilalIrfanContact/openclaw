@@ -39,23 +39,13 @@ it("pools legacy assistant activity with stable keys and message order", () => {
         chatMessage("assistant", content, 1_000 * index, { runId: `hb-run-${index}` }),
         `hb-${index}`,
       ),
-      {
-        // Exercise legacy assistant-role activity, not only normalized tool groups.
-        role: "assistant",
-        visibleContent: "none" as const,
-      },
+      { role: "assistant", visibleContent: "none" as const },
     );
   });
-  const prompt = preparedGroup(
-    chatMessage("user", "Start", 500, { __openclaw: { idempotencyKey: "run-1:user" } }),
-    "prompt",
-  );
-  const initial = coalesceActivityRuns([prompt, ...groups.slice(0, 2)]);
-  const appended = coalesceActivityRuns([prompt, ...groups]);
-  for (const [result, expected] of [
-    [initial, groups.slice(0, 2)],
-    [appended, groups],
-  ] as const) {
+  const prompt = preparedGroup(chatMessage("user", "Start", 500), "prompt");
+  for (const count of [2, 3]) {
+    const expected = groups.slice(0, count);
+    const result = coalesceActivityRuns([prompt, ...expected]);
     expect(result).toHaveLength(2);
     expect(result[0]).toBe(prompt);
     const run = requireActivityRun(result[1]);

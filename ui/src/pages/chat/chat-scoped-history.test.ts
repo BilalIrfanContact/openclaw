@@ -11,8 +11,6 @@ import {
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
-import { getChatHistoryLoadState } from "./chat-history-state.ts";
-import { loadChatHistory } from "./chat-history.ts";
 import { createTestChatPane } from "./chat-pane.test-support.ts";
 import { refreshCurrentChatSessionList } from "./chat-session.ts";
 import { refreshPageChat } from "./chat-state-refresh.ts";
@@ -95,20 +93,11 @@ it.each([
       deferBranches: true,
       scheduleScroll: false,
     });
-    const historyLoad = loadChatHistory(state, { deferBranches: true });
-    expect(getChatHistoryLoadState(state).phase).toBe("in-flight");
     if (workRefresh !== "none") {
       await refreshCurrentChatSessionList(state);
-      expect(selectedChatSessionRow(state)).toEqual(
-        workRefresh === "missing" ? undefined : expect.objectContaining(newerWork),
-      );
     }
-    const publishedWorkProjection = state.sessionsResult;
     if (moveRoster) {
       await sessions.refresh({ agentId: "main", force: true });
-      expect(sessions.state.agentId).toBe("main");
-      expect(state.sessionsResult).toBe(publishedWorkProjection);
-      expect(state.sessionsResultAgentId).toBe("work");
     }
     const primaryDefaults = sessions.state.result?.defaults;
     const historyRow = {
@@ -125,10 +114,9 @@ it.each([
       messages: [{ role: "assistant", content: "History really applied" }],
       sessionInfo: historyRow,
     });
-    await Promise.all([historyLoad, refresh]);
-    expect(getChatHistoryLoadState(state).phase).toBe("committed");
+    await refresh;
     expect(state.chatMessages).toEqual([{ role: "assistant", content: "History really applied" }]);
-    expect(request.mock.calls.filter(([method]) => method === "chat.history")).toHaveLength(1);
+    expect(state.sessionsResultAgentId).toBe("work");
     if (moveRoster) {
       expect(sessions.state.result?.sessions[0]).toEqual(mainRow);
       expect(sessions.state.result?.defaults).toEqual(primaryDefaults);

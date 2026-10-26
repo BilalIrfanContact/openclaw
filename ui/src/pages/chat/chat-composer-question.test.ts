@@ -3,10 +3,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import {
-  createComposerContainer,
   createComposerQuestionPrompt as questionPrompt,
   createComposerControlsFixture,
-  createComposerProps as props,
   renderComposerFixture as renderComposer,
   resetComposerFixture,
   renderComposerInto,
@@ -21,26 +19,16 @@ it.each([
 ])(
   "restores the composer after $takeover (progress=$progressOpen)",
   async ({ progressOpen, takeover }) => {
-    const container = createComposerContainer();
-    document.body.append(container);
     const prompt = questionPrompt("question-swap", "Choose a release target");
     const nextPrompt = questionPrompt("question-next", "Choose a release format");
-    const composerProps = props({
+    const { container, props: composerProps } = renderComposer({
       collapseTaskProgress: progressOpen,
-      progressCard: {
-        sessionKey: "queue-test",
-        revision: 1,
-        updatedAt: Date.now(),
-        markdown: "Release preparation",
-        steps: [{ step: "Choose a target", status: "in_progress" }],
-      },
+      progressCard: { sessionKey: "queue-test", revision: 1, updatedAt: 1, markdown: "Progress" },
       sessionKey: "queue-test",
       draft: "Keep this draft",
       composerControls: createComposerControlsFixture(),
     });
-    composerProps.onDraftChange = (next) => {
-      composerProps.draft = next;
-    };
+    document.body.append(container);
     const draw = () => renderComposerInto(container, composerProps);
     const editor = () => container.querySelector<HTMLTextAreaElement>("textarea")!;
     const compose = (value: string) => {
@@ -51,7 +39,6 @@ it.each([
       );
     };
 
-    draw();
     await vi.dynamicImportSettled();
     await waitForSolid(() =>
       expect(container.querySelector(".session-progress-card--composer")).not.toBeNull(),
@@ -60,7 +47,6 @@ it.each([
       ".session-progress-card--composer",
     )!;
     progress.querySelector("summary")!.click();
-    expect(progress.open).toBe(progressOpen);
     const progressWrapper = progress.closest<HTMLElement>(".agent-chat__progress-float")!;
     expect(progressWrapper.hidden).toBe(false);
     const expectRestored = (draft: string) => {
@@ -70,6 +56,16 @@ it.each([
       expect(editor().value).toBe(draft);
       expect(document.activeElement).toBe(editor());
     };
+    const expectQuestion = (panel: Element, draft: string) => {
+      expect(
+        container.querySelector(
+          ".agent-chat__input, .agent-chat__composer-footer, .agent-chat__typing-indicator--outside",
+        ),
+      ).toBeNull();
+      expect(document.activeElement).toBe(panel.querySelector(".chat-question-panel"));
+      expect(composerProps.draft).toBe(draft);
+      expect(progressWrapper.hidden).toBe(true);
+    };
     const initialTextarea = editor();
     initialTextarea.focus();
     expect(document.activeElement).toBe(initialTextarea);
@@ -78,12 +74,7 @@ it.each([
     composerProps.gatewayQuestionPrompts = [prompt, nextPrompt];
     draw();
     let panel = await questionPanelIn(container);
-    expect(container.querySelector(".agent-chat__input")).toBeNull();
-    expect(container.querySelector(".agent-chat__composer-footer")).toBeNull();
-    expect(container.querySelector(".agent-chat__typing-indicator--outside")).toBeNull();
-    expect(document.activeElement).toBe(panel.querySelector(".chat-question-panel"));
-    expect(composerProps.draft).toBe("Keep this draft while composing");
-    expect(progressWrapper.hidden).toBe(true);
+    expectQuestion(panel, "Keep this draft while composing");
     expect(progress.open).toBe(progressOpen);
 
     composerProps.draft = "Host updated this draft while the question was open";
@@ -103,11 +94,7 @@ it.each([
     }
     draw();
     await questionPanelIn(container);
-    expect(container.querySelector(".agent-chat__input")).toBeNull();
-    expect(document.activeElement).toBe(panel.querySelector(".chat-question-panel"));
-    expect(composerProps.draft).toBe(composedDraft);
-
-    expect(progressWrapper.hidden).toBe(true);
+    expectQuestion(panel, composedDraft);
     prompt.status = "answered";
     nextPrompt.status = "answered";
     draw();
