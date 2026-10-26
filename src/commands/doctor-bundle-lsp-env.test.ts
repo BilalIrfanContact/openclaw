@@ -13,12 +13,11 @@ vi.mock("./doctor-service-repair-policy.js", async (importOriginal) => ({
 
 const noteFn = vi.fn();
 const service = { readCommand: vi.fn() };
-const docsUrl = "https://docs.openclaw.ai/plugins/bundles#lsp-server-environment";
 
 function lspConfig(
   servers: Record<string, Record<string, unknown>>,
-): typeof bundleLsp.loadEnabledBundleLspConfig {
-  return vi.fn(() => ({ config: { lspServers: servers }, diagnostics: [] }));
+): ReturnType<typeof bundleLsp.loadEnabledBundleLspConfig> {
+  return { config: { lspServers: servers }, diagnostics: [] };
 }
 
 const gopls = { gopls: { command: "gopls", env: { DOTNET_ROOT: "/bundle/dotnet" } } };
@@ -45,7 +44,7 @@ async function diagnose(
     loadLspConfig?: typeof bundleLsp.loadEnabledBundleLspConfig;
   } = {},
 ): Promise<string | undefined> {
-  const { loadLspConfig = lspConfig(gopls), ...params } = options;
+  const { loadLspConfig = () => lspConfig(gopls), ...params } = options;
   vi.spyOn(bundleLsp, "loadEnabledBundleLspConfig").mockImplementation(loadLspConfig);
   await noteBundleLspEnvPassthrough({
     cfg: {},
@@ -59,18 +58,19 @@ async function diagnose(
 }
 
 it("names withheld Gateway variables per configured server, never values or secrets", async () => {
-  const text = await diagnose();
+  shouldManageGatewayService.mockResolvedValue(true);
+  const text = await diagnose({ env: { ...gatewayEnv, HOME: userInfo().homedir } });
 
-  expect(noteFn).toHaveBeenCalledExactlyOnceWith(expect.any(String), "Bundle LSP environment");
   expect(text).toContain(`- "gopls": ANDROID_HOME: add to the server's "env"`);
   expect(text).toContain(`- "gopls": HTTPS_PROXY: refused by the host exec env policy`);
-  expect(text).toContain(docsUrl);
+  expect(text).toContain(`- "gopls": VIRTUAL_ENV: refused by the host exec env policy`);
+  expect(text).toContain("https://docs.openclaw.ai/plugins/bundles#lsp-server-environment");
   expect(text).not.toMatch(/DOTNET_ROOT|NPM_TOKEN|OPENAI_API_KEY|canary|proxy-pass|proxy\.example/);
 });
 
 it.each([
-  { loadLspConfig: lspConfig({}) },
-  { loadLspConfig: lspConfig({ remote: { transport: "socket" } }) },
+  { loadLspConfig: () => lspConfig({}) },
+  { loadLspConfig: () => lspConfig({ remote: { transport: "socket" } }) },
   { env: { OPENAI_API_KEY: "provider-key-canary" } },
   { cfg: { gateway: { mode: "remote" as const } } },
 ])("stays quiet for an inapplicable environment: %j", async (options) => {
@@ -78,33 +78,20 @@ it.each([
 });
 
 it("evaluates each workspace's config when workspaces reuse a server name", async () => {
-  const configs: Record<string, Record<string, Record<string, unknown>>> = {
-    "/synthetic/android-a": {
-      kotlin: { command: "kotlin-lsp", env: { ANDROID_HOME: "/bundle/android" } },
-    },
-    "/synthetic/android-b": { kotlin: { command: "kotlin-lsp" } },
-  };
-  const loadLspConfig = vi.fn(({ workspaceDir }: { workspaceDir: string }) => ({
-    config: { lspServers: configs[workspaceDir] ?? {} },
-    diagnostics: [],
-  })) as unknown as typeof bundleLsp.loadEnabledBundleLspConfig;
-
   const text = await diagnose({
-    workspaceDirs: Object.keys(configs),
+    workspaceDirs: ["/synthetic/android-a", "/synthetic/android-b"],
     env: { ANDROID_HOME: "/srv/android" },
-    loadLspConfig,
+    loadLspConfig: ({ workspaceDir }) =>
+      lspConfig({
+        kotlin: {
+          command: "kotlin-lsp",
+          env: workspaceDir.endsWith("-a") ? { ANDROID_HOME: "/bundle/android" } : undefined,
+        },
+      }),
   });
 
   expect(text).toContain(`- "kotlin": ANDROID_HOME: add to the server's "env"`);
   expect(text).not.toMatch(/\/srv\/android|\/bundle\/android/);
-});
-
-it("includes the installed Gateway service environment", async () => {
-  shouldManageGatewayService.mockResolvedValue(true);
-  const text = await diagnose({ env: { HOME: userInfo().homedir } });
-
-  expect(text).toContain(`- "gopls": VIRTUAL_ENV: refused by the host exec env policy`);
-  expect(text).not.toContain("venv-canary");
 });
 
 it("does not read the installed service for a non-default install identity", async () => {

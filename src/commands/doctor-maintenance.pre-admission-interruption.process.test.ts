@@ -21,22 +21,18 @@ it.skipIf(process.platform === "win32").for([
     // Keep command and signal owners real; interrupt the synthetic database inspection.
     const overrides = {
       "/commands/doctor-database-preflight.js": `import { once } from "node:events";
-      import { MessageChannel } from "node:worker_threads";
       export async function prepareDoctorDatabasePreflight() {
-        // Signal listeners alone do not keep Node alive until OS signal delivery.
-        const { port1, port2 } = new MessageChannel();
-        port1.on("message", () => {});
+        // Retain the existing parent channel until OS signal delivery settles.
+        process.channel.ref();
         try {
           const interrupted = once(process, ${JSON.stringify(signal)});
           const proceed = once(process, "message");
           process.send("preflight");
           await proceed;
-          process.disconnect();
           process.kill(process.pid, ${JSON.stringify(signal)});
           await interrupted;
         } finally {
-          port1.close();
-          port2.close();
+          process.disconnect();
         }
         console.log("preflight settled");
         return { incompatible: [], indeterminate: [] };
