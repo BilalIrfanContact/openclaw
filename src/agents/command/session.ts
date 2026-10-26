@@ -25,6 +25,7 @@ import {
   resolveSessionResetPolicy,
 } from "../../config/sessions/reset-policy.js";
 import { resolveChannelResetConfig, resolveSessionResetType } from "../../config/sessions/reset.js";
+import { buildRestartRecoveryClaimCleanupPatch } from "../../config/sessions/restart-recovery-state.js";
 import type { SessionEntrySummary } from "../../config/sessions/session-accessor.types.js";
 import {
   captureSessionActorStorageOwner,
@@ -69,6 +70,10 @@ type SessionResolution = {
   storePath: string;
   isNewSession: boolean;
   previousSessionId?: string;
+  automaticReset?: {
+    reason: "idle" | "daily" | "reset";
+    expectedLifecycleRevision?: string;
+  };
   persistedThinking?: ThinkLevel;
   persistedVerbose?: VerboseLevel;
 };
@@ -91,6 +96,7 @@ type SessionRequest = {
 export function clearRotatedSessionMetadata(entry: InternalSessionEntry): InternalSessionEntry {
   const next = {
     ...entry,
+    ...buildRestartRecoveryClaimCleanupPatch({ entry, recordTerminalSource: false }),
     sessionFile: undefined,
     status: undefined,
     lifecycleRunId: undefined,
@@ -99,25 +105,6 @@ export function clearRotatedSessionMetadata(entry: InternalSessionEntry): Intern
     endedAt: undefined,
     runtimeMs: undefined,
     abortedLastRun: undefined,
-    restartRecoveryForceSafeTools: undefined,
-    restartRecoveryDeliveryContext: undefined,
-    restartRecoveryDeliveryMediaUrls: undefined,
-    restartRecoveryDisableMessageTool: undefined,
-    restartRecoverySuppressTextDelivery: undefined,
-    restartRecoveryDeliveryRequestFingerprint: undefined,
-    restartRecoveryDeliveryRunId: undefined,
-    restartRecoveryDeliverySourceRunId: undefined,
-    restartRecoveryOperatorSource: undefined,
-    restartRecoveryRequesterSource: undefined,
-    restartRecoveryBeforeAgentReplyState: undefined,
-    restartRecoveryDeliveryReceiptState: undefined,
-    restartRecoveryDeliveryToolCallId: undefined,
-    restartRecoveryRequesterAccountId: undefined,
-    restartRecoveryRequesterSenderId: undefined,
-    restartRecoverySameChannelThreadRequired: undefined,
-    restartRecoverySourceIngress: undefined,
-    restartRecoverySourceMessageChannel: undefined,
-    restartRecoverySourceReplyDeliveryMode: undefined,
     restartRecoveryTerminalDeliveryEvidence: undefined,
     restartRecoveryTerminalRunIds: undefined,
     sessionStartedAt: undefined,
@@ -682,30 +669,45 @@ export async function resolveSession(
   const lockedModelSelection = isModelSelectionLocked(sessionEntry);
   const skipImplicitExpiry =
     resetPolicy.configured !== true && hasProviderOwnedSession(sessionEntry);
-  const fresh = sessionEntry
-    ? lockedModelSelection ||
-      (!terminalMainTranscriptNewerThanRegistry &&
-        (skipImplicitExpiry ||
-          evaluateSessionFreshness({
-            updatedAt: sessionEntry.updatedAt,
-            ...(sessionKey
-              ? await resolveSessionLifecycleTimestampsAsync({
-                  entry: sessionEntry,
-                  agentId: sessionAgentId,
-                  sessionKey,
-                  storePath,
-                  signal: opts.signal,
-                })
-              : {}),
-            now,
-            policy: resetPolicy,
-          }).fresh))
-    : false;
+  const freshness =
+    sessionEntry &&
+    !lockedModelSelection &&
+    !terminalMainTranscriptNewerThanRegistry &&
+    !skipImplicitExpiry
+      ? evaluateSessionFreshness({
+          updatedAt: sessionEntry.updatedAt,
+          ...(sessionKey
+            ? await resolveSessionLifecycleTimestampsAsync({
+                entry: sessionEntry,
+                agentId: sessionAgentId,
+                sessionKey,
+                storePath,
+                signal: opts.signal,
+              })
+            : {}),
+          now,
+          policy: resetPolicy,
+        })
+      : undefined;
+  const fresh = Boolean(
+    sessionEntry &&
+    (lockedModelSelection ||
+      (!terminalMainTranscriptNewerThanRegistry && (skipImplicitExpiry || freshness?.fresh))),
+  );
   opts.signal?.throwIfAborted();
   opts.assertCurrent?.();
-  const sessionId =
-    requestedSessionId || (fresh ? sessionEntry?.sessionId : undefined) || crypto.randomUUID();
   const isNewSession = !fresh && !requestedSessionId;
+  const automaticReset: SessionResolution["automaticReset"] =
+    isNewSession && sessionEntry && !terminalMainTranscriptNewerThanRegistry
+      ? {
+          reason: freshness?.staleReason ?? "reset",
+          expectedLifecycleRevision: sessionEntry.lifecycleRevision,
+        }
+      : undefined;
+  const sessionId =
+    requestedSessionId ||
+    (fresh || automaticReset ? sessionEntry?.sessionId : undefined) ||
+    crypto.randomUUID();
   const resolvedSessionEntry =
     isNewSession && sessionEntry ? clearRotatedSessionMetadata(sessionEntry) : sessionEntry;
 
@@ -726,6 +728,7 @@ export async function resolveSession(
     storePath,
     isNewSession,
     previousSessionId: isNewSession ? sessionEntry?.sessionId : undefined,
+    automaticReset,
     persistedThinking,
     persistedVerbose,
   };
