@@ -23,43 +23,49 @@ const repo = "/src/openclaw";
 const checkout = "/tmp/worktrees/title-bar";
 const worktree = { id: "wt-1", branch: "title-bar", repoRoot: repo };
 const agentWorkspace = "/local/default";
+function headerWorkspace(overrides: Partial<Parameters<typeof resolveChatPaneWorkspace>[0]>) {
+  return resolveChatPaneWorkspace({
+    session: row(),
+    agentWorkspace,
+    worktreePaths: new Map(),
+    branches: new Map(),
+    methodAdvertised: true,
+    hasAdminAccess: true,
+    ...overrides,
+  });
+}
 type WorkspaceCase = [
   Partial<GatewaySessionRow>,
-  ReturnType<typeof resolveSessionWorkspace>,
+  string | null,
+  string | null,
   Omit<Parameters<typeof resolveSessionWorkspace>[0], "session">?,
 ];
 it.each<WorkspaceCase>([
-  [
-    { spawnedCwd: checkout, worktree },
-    { root: checkout, label: "openclaw" },
-  ],
-  [{ worktree }, { root: null, label: "openclaw" }, { agentWorkspace, worktreePath: null }],
-  [
-    { spawnedWorkspaceDir: repo, spawnedCwd: `${repo}/packages/nested` },
-    { root: repo, label: "openclaw" },
-  ],
-  [
-    { execCwd: "/remote/stale", spawnedCwd: repo },
-    { root: repo, label: "openclaw" },
-  ],
+  [{ spawnedCwd: checkout, worktree }, checkout, "openclaw"],
+  [{ worktree }, null, "openclaw", { agentWorkspace, worktreePath: null }],
+  [{ spawnedWorkspaceDir: repo, spawnedCwd: `${repo}/packages/nested` }, repo, "openclaw"],
+  [{ execCwd: "/remote/stale", spawnedCwd: repo }, repo, "openclaw"],
   [
     { execNode: "build-mac", execCwd: "/remote/build" },
-    { root: "/remote/build", label: "build" },
+    "/remote/build",
+    "build",
     { agentWorkspace },
   ],
   [
     { execNode: "build-mac", spawnedCwd: "/local/spawned" },
-    { root: null, label: null },
+    null,
+    null,
     { agentWorkspace, worktreePath: "/local/worktree" },
   ],
-  [{}, { root: repo, label: "openclaw" }, { agentWorkspace: repo }],
+  [{}, repo, "openclaw", { agentWorkspace: repo }],
   [
     { key: "agent:bot-stable-id:main" },
-    { root: "/local/workspace/bot-stable-id", label: "Workspace" },
+    "/local/workspace/bot-stable-id",
+    "Workspace",
     { agentWorkspace: "/local/workspace/bot-stable-id" },
   ],
-])("resolves workspace from %j", (session, expected, options) => {
-  expect(resolveSessionWorkspace({ session: row(session), ...options })).toEqual(expected);
+])("resolves workspace from %j", (session, root, label, options) => {
+  expect(resolveSessionWorkspace({ session: row(session), ...options })).toEqual({ root, label });
 });
 
 it.each(["Workspace", "openclaw"])(
@@ -89,47 +95,27 @@ it.each<Partial<Parameters<typeof resolveChatPaneWorkspace>[0]>>([
   { methodAdvertised: false },
   { hasAdminAccess: false },
 ])("disables reveal for unavailable or unauthorized workspaces: %j", (overrides) => {
-  expect(
-    resolveChatPaneWorkspace({
-      session: row(),
-      agentWorkspace: repo,
-      worktreePaths: new Map(),
-      branches: new Map(),
-      methodAdvertised: true,
-      hasAdminAccess: true,
-      ...overrides,
-    }).canReveal,
-  ).toBe(false);
+  expect(headerWorkspace({ agentWorkspace: repo, ...overrides }).canReveal).toBe(false);
 });
 
 it.each([{}, { spawnedCwd: agentWorkspace }, { spawnedWorkspaceDir: agentWorkspace }])(
   "omits the default agent workspace from header identity: %j",
   (placement) => {
-    const workspace = resolveChatPaneWorkspace({
+    const workspace = headerWorkspace({
       session: { key: "agent:main:default-workspace", kind: "direct", ...placement },
-      agentWorkspace,
-      worktreePaths: new Map(),
-      branches: new Map(),
-      methodAdvertised: true,
-      hasAdminAccess: true,
     });
     expect(workspace).toEqual({ root: agentWorkspace, label: null, branch: null, canReveal: true });
   },
 );
 
 it("preserves a real project even when it uses the agent workspace directory", () => {
-  const workspace = resolveChatPaneWorkspace({
+  const workspace = headerWorkspace({
     session: {
       key: "agent:main:project",
       kind: "direct",
       spawnedCwd: agentWorkspace,
       worktree: { id: "project", repoRoot: agentWorkspace, branch: "feature" },
     },
-    agentWorkspace,
-    worktreePaths: new Map(),
-    branches: new Map(),
-    methodAdvertised: true,
-    hasAdminAccess: true,
   });
   expect(workspace.label).toBe("default");
 });
