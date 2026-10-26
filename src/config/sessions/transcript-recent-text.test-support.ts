@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { appendTranscriptEvent, persistSessionTranscriptTurn } from "./session-accessor.js";
 import * as historyWorkerRuntime from "./session-history-worker-runtime.js";
 import { resolveSqliteTargetFromSessionStorePath } from "./session-sqlite-target.js";
@@ -13,12 +13,10 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
   fixture: { storePath(): string };
   sessionId: string;
   sessionKey: string;
-  createFixtureTranscriptScope: () => {
-    agentId: string;
-    sessionId: string;
-    sessionKey: string;
-    storePath: string;
-  };
+  createFixtureTranscriptScope: () => Record<
+    "agentId" | "sessionId" | "sessionKey" | "storePath",
+    string
+  >;
   writeTranscriptStore: () => Promise<void>;
 }) {
   const { fixture, createFixtureTranscriptScope: scope, writeTranscriptStore } = params;
@@ -53,17 +51,20 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
 
   it("reads recent context only from the active transcript branch", async () => {
     await writeTranscriptStore();
-    await persist(
-      (
-        [
-          ["root-user", null, "user", "keep this branch", 1_000],
-          ["active-reply", "root-user", "assistant", "active answer", 2_000],
-          ["abandoned-reply", "root-user", "assistant", "abandoned answer", 3_000],
-        ] as const
-      ).map(([id, parentId, role, content, timestamp]) =>
-        transcriptMessage(id, parentId, { role, content, timestamp }),
+    const expected = [
+      { id: "root-user", role: "user", text: "keep this branch", timestamp: 1_000 },
+      { id: "active-reply", role: "assistant", text: "active answer", timestamp: 2_000 },
+    ];
+    await persist([
+      ...expected.map(({ id, role, text: content, timestamp }, index) =>
+        transcriptMessage(id, index ? "root-user" : null, { role, content, timestamp }),
       ),
-    );
+      transcriptMessage("abandoned-reply", "root-user", {
+        role: "assistant",
+        content: "abandoned answer",
+        timestamp: 3_000,
+      }),
+    ]);
     await appendTranscriptEvent(scope(), {
       type: "leaf",
       id: "active-leaf",
@@ -76,18 +77,15 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
     }).path;
     await waitForSessionTranscriptIndexReconcile({ agentId: "main", path: databasePath });
 
-    const expected = [
-      { id: "root-user", role: "user", text: "keep this branch", timestamp: 1_000 },
-      { id: "active-reply", role: "assistant", text: "active answer", timestamp: 2_000 },
-    ];
     await expect(read()).resolves.toEqual(expected);
 
-    const futureMessages = Array.from({ length: 260 }, (_, index) => ({
-      eventId: `future-${index}`,
-      parentId: index === 0 ? "active-reply" : `future-${index - 1}`,
-      message: { role: "user" as const, content: `future ${index}`, timestamp: 10_000 + index },
-    }));
-    await persist(futureMessages);
+    await persist(
+      Array.from({ length: 260 }, (_, index) => ({
+        eventId: `future-${index}`,
+        parentId: index === 0 ? "active-reply" : `future-${index - 1}`,
+        message: { role: "user" as const, content: `future ${index}`, timestamp: 10_000 + index },
+      })),
+    );
     await expect(read({ beforeTimestampMs: 2_500, limit: 2 })).resolves.toEqual(expected);
   });
 
@@ -104,27 +102,21 @@ export function registerRecentTranscriptTextSnapshotTests(params: {
     const readPage = historyWorkerRuntime.readSessionHistoryPageInWorker;
     let appended = false;
     const reader = vi.spyOn(historyWorkerRuntime, "readSessionHistoryPageInWorker");
+    onTestFinished(() => reader.mockRestore());
     reader.mockImplementation(async (request, signal) => {
       const page = await readPage(request, signal);
       if (!appended) {
         appended = true;
         await persist([
-          transcriptMessage("appended-reply", "snapshot-299", {
-            role: "assistant",
-            content: "reply appended after the read snapshot",
-          }),
+          transcriptMessage("reply", "snapshot-299", { role: "assistant", content: "new" }),
         ]);
       }
       return page;
     });
-    try {
-      await expect(read({ role: "user", limit: 2 })).resolves.toEqual([
-        { id: "snapshot-0", role: "user", text: "context 0" },
-        { id: "snapshot-50", role: "user", text: "context 50" },
-      ]);
-      expect(appended).toBe(true);
-    } finally {
-      reader.mockRestore();
-    }
+    await expect(read({ role: "user", limit: 2 })).resolves.toEqual([
+      { id: "snapshot-0", role: "user", text: "context 0" },
+      { id: "snapshot-50", role: "user", text: "context 50" },
+    ]);
+    expect(appended).toBe(true);
   });
 }
