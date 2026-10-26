@@ -30,6 +30,12 @@ whose runs are all recorded terminal and have no remaining execution or delivery
 owner. For a killed conversation, it also releases unfinished fences after checking
 that no run or session work remains active and no final delivery is pending. This
 lets a stopped conversation continue without resetting its history.
+A worker placement already marked failed does not start another automatic recovery
+turn. Recovery records the failure and its next step once; later restarts preserve
+that outcome. Inspect the placement error, finish any pending worker cleanup, then
+repair or restart the worker and use Resume. Explicit session recovery remains
+available after worker cleanup is complete.
+
 Cron owns recovery of interrupted scheduled turns. An enabled, unchanged,
 time-scheduled agent job interrupted before delivery gets one fresh retry after
 startup, including one-shot jobs. Its original run remains recorded as interrupted.
@@ -86,8 +92,6 @@ and what the automatic resume looks like.
 During startup, a new reply waits for its agent's model and plugin runtime to
 finish loading. Agents that are already ready can serve replies while other
 agents continue loading. Startup preparation failures still report an error.
-Session display rows warm in the background. A keyed read prepares its requested
-rows without waiting for the rest of the roster.
 
 Startup orphan marking runs after plugin loading and startup completion. It uses
 the existing active-session index to exclude archived rows before inspecting
@@ -112,6 +116,10 @@ interrupted work.
 | Restart continuation          | SQLite restart sentinel                                      | One-shot follow-up dispatched to the session that asked for the restart         |
 | Background exec processes     | Process memory; notification obligation in session row       | Processes end; eligible owning sessions wake once with an unknown outcome       |
 | Gateway terminal PTYs         | Process memory                                               | End with the old process; terminal sessions are not recovered                   |
+
+Outbound recovery keeps checking queued deliveries when the Gateway restarts
+before a platform-send lease expires. It waits for the lease before inspecting
+the send and still reconciles uncertain outcomes before any replay.
 
 The Gateway resumes eligible accepted `chat.send` inputs from SQLite at startup,
 in acceptance order within each session. This includes queued inputs left by a

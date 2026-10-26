@@ -12,11 +12,19 @@
  * for a separate sampled-allocation pass. Alternate baseline/candidate timing and
  * allocation runs. Acceptance: identical payload digest, lower allocation and CPU;
  * report absolute costs and spread, and do not infer whole-Gateway tail changes.
+ * --audiences selects distinct prepared row identities (default 2); use 8 with 65
+ * clients to measure reuse within interleaved audiences rather than across all clients.
  * --fresh-fields replaces every nested field per event to measure misses separately.
+ * --profile <path> saves the sampled profile when used with --allocations.
+ * Add --no-turbo-inlining to Node for callee attribution. Compare --clients 1/10/60
+ * with --audiences 1/8/8 to distinguish single-recipient and audience fanout costs.
+ * --sessions 64 rotates changing rows through the connection-owned delivery histories.
+ * --encode-envelopes includes JSON encoding once per distinct projected payload,
+ * checking object-shape costs as well as projection; it does not measure transport.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import type { HeapProfiler } from "node:inspector";
 import { Session } from "node:inspector/promises";
 import { loadavg } from "node:os";
@@ -35,23 +43,35 @@ const { values } = parseArgs({
     "delivery-owner": { type: "string", default: "src/gateway/session-ancestor-references.ts" },
     events: { type: "string", default: "3000" },
     clients: { type: "string", default: "65" },
+    audiences: { type: "string", default: "2" },
+    sessions: { type: "string", default: "1" },
     allocations: { type: "boolean", default: false },
+    profile: { type: "string" },
+    "encode-envelopes": { type: "boolean", default: false },
     "fresh-fields": { type: "boolean", default: false },
   },
 });
 const events = Number(values.events);
 const clients = Number(values.clients);
+const audiences = Number(values.audiences);
+const sessions = Number(values.sessions);
 assert(Number.isSafeInteger(events) && events > 0);
 assert(Number.isSafeInteger(clients) && clients > 0);
+assert(Number.isSafeInteger(sessions) && sessions > 0);
+assert(Number.isSafeInteger(audiences) && audiences > 0 && audiences <= clients);
 const owner = path.resolve(values.owner);
 const ownerSha256 = createHash("sha256").update(readFileSync(owner)).digest("hex");
-const key = "agent:main:stream-envelope";
+let key = "agent:main:stream-envelope";
 let row: GatewaySessionRow;
+let audienceRows: GatewaySessionRow[];
 mock.module(new URL("../../src/gateway/session-row-presentation.ts", import.meta.url), {
   namedExports: {
     prepareSessionRowPublication: () => (client: GatewayClient) => ({
       getAudienceKey: () => client.connect.scopes?.[0] ?? "viewer",
-      getPresentation: () => ({ present: () => row, sharing: {} }),
+      getPresentation: () => ({
+        present: () => audienceRows[Number(client.connect.scopes![0])],
+        sharing: {},
+      }),
     }),
   },
 });
@@ -170,11 +190,11 @@ const peers = Array.from({ length: clients }, (_, index) => ({
       client: { id: "openclaw-control-ui", version: "bench", platform: "bench", mode: "ui" },
       minProtocol: 3,
       maxProtocol: 3,
-      scopes: [index % 2 ? "owner" : "viewer"],
+      scopes: [String(index % audiences)],
       caps:
-        index % 10 === 0
+        (index + 1) % 10 === 0
           ? []
-          : ["session-row-deltas", ...(index % 5 ? ["session-event-field-refs"] : [])],
+          : ["session-row-deltas", ...((index + 1) % 5 ? ["session-event-field-refs"] : [])],
     },
   } satisfies GatewayClient,
   rows: new ConnectionSessionRows(),
@@ -190,7 +210,11 @@ const context: Parameters<ReturnType<typeof prepareSessionEventProjection>>[3] =
   createRunProjector: () => () => ({ active: false }),
 };
 const prepare = prepareSessionEventProjection(projection);
+let envelopeEncodings = 0;
+let envelopeBytes = 0;
 function publish(index: number, digest?: ReturnType<typeof createHash>) {
+  key = `agent:main:stream-envelope-${index % sessions}`;
+  record.entry.sessionId = `synthetic-session-${index % sessions}`;
   row = freezeTrustedJsonSnapshot({
     ...rowFields,
     ...(values["fresh-fields"]
@@ -206,7 +230,7 @@ function publish(index: number, digest?: ReturnType<typeof createHash>) {
     agentId: "main",
     kind: "direct",
     updatedAt: 1,
-    sessionId: "synthetic-session",
+    sessionId: record.entry.sessionId,
     lifecycleRevision: "1",
     runtimeMs: index,
     label: "Streaming tool turn",
@@ -217,6 +241,9 @@ function publish(index: number, digest?: ReturnType<typeof createHash>) {
     startedAt: 1,
     hasActiveRun: true,
   });
+  audienceRows = Array.from({ length: audiences }, (_, audience) =>
+    freezeTrustedJsonSnapshot({ ...row, sharingRole: audience === 0 ? "owner" : "viewer" }),
+  );
   const project = prepare(
     "sessions.changed",
     { ...fields, ...row, sessionKey: key, session: row, reason: "send" },
@@ -224,6 +251,7 @@ function publish(index: number, digest?: ReturnType<typeof createHash>) {
     context,
   );
   assert(project);
+  const encodedPayloads = values["encode-envelopes"] ? new Set<unknown>() : undefined;
   for (const [position, peer] of peers.entries()) {
     // Staggered delivery creates distinct live histories without growing the recipient set.
     if (index % 17 === position % 17) {
@@ -231,6 +259,11 @@ function publish(index: number, digest?: ReturnType<typeof createHash>) {
     }
     const result = project(peer.client);
     assert(result);
+    if (encodedPayloads && !encodedPayloads.has(result.payload)) {
+      encodedPayloads.add(result.payload);
+      envelopeBytes += Buffer.byteLength(JSON.stringify({ payload: result.payload }));
+      envelopeEncodings++;
+    }
     digest?.update(JSON.stringify(result.payload));
     result.delivered?.(peer.client);
   }
@@ -241,6 +274,8 @@ for (let index = 0; index < 200; index++) {
 for (const peer of peers) {
   peer.rows.clear();
 }
+envelopeEncodings = 0;
+envelopeBytes = 0;
 global.gc?.();
 const inspector = new Session();
 if (values.allocations) {
@@ -261,9 +296,13 @@ for (let index = 0; index < events; index++) {
 const elapsedMs = performance.now() - start;
 const cpu = process.threadCpuUsage(cpuStart);
 const memoryAfter = process.memoryUsage();
+const measuredEncoding = { envelopeEncodings, envelopeBytes };
 let sampledBytes: number | undefined;
 if (values.allocations) {
   const { profile } = await inspector.post("HeapProfiler.stopSampling");
+  if (values.profile) {
+    writeFileSync(values.profile, JSON.stringify(profile));
+  }
   const sum = (node: HeapProfiler.SamplingHeapProfileNode): number =>
     node.selfSize + node.children.reduce((total, child) => total + sum(child), 0);
   sampledBytes = sum(profile.head);
@@ -285,7 +324,11 @@ console.log(
     node: process.version,
     events,
     clients,
+    audiences,
+    sessions,
     freshFields: values["fresh-fields"],
+    encodeEnvelopes: values["encode-envelopes"],
+    ...measuredEncoding,
     mode: values.allocations ? "allocation" : "timing",
     elapsedMs,
     threadCpuMs: (cpu.user + cpu.system) / 1000,
