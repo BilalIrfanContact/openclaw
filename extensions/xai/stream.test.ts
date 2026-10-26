@@ -56,6 +56,18 @@ function imageMessage(index: number, ...images: unknown[]) {
   };
 }
 
+function message(role: string, content: string) {
+  return { type: "message", role, content };
+}
+
+function toolCall(call_id: string) {
+  return { type: "function_call", call_id, name: "read", arguments: "{}" };
+}
+
+function imagePart(image_url = "data:image/png;base64,QUJDRA==") {
+  return { type: "input_image", image_url };
+}
+
 it.each([
   { modelId: "grok-4-0709", target: "grok-4-fast", supported: true },
   { modelId: "grok-4.3", target: "grok-4.3", supported: false },
@@ -185,17 +197,7 @@ describe("xai stream wrappers", () => {
   it("preserves native Responses image output arrays for x-ai", () => {
     const callId = `${"a".repeat(63)}🙈`;
     const input = [
-      toolOutput(
-        [
-          inputText("Read image"),
-          {
-            type: "input_image",
-            detail: "auto",
-            image_url: "data:image/png;base64,QUJDRA==",
-          },
-        ],
-        callId,
-      ),
+      toolOutput([inputText("Read image"), { ...imagePart(), detail: "auto" }], callId),
     ];
     expect(
       project(input, {
@@ -206,20 +208,23 @@ describe("xai stream wrappers", () => {
   });
 
   it("keeps parallel compatibility image history as a prefix across turns", () => {
-    const image = { type: "input_image", image_url: "data:image/png;base64,QUJDRA==" };
+    const image = {
+      type: "input_image",
+      source: { type: "base64", media_type: "image/png", data: "QUJDRA==" },
+    };
     const result = toolOutput([inputText("Read image"), image], "call_image");
     const group = [result, toolOutput("No image", "call_text")];
     const history = [
-      { type: "message", role: "user", content: "Read the files" },
-      { type: "function_call", call_id: "call_image", name: "read", arguments: "{}" },
-      { type: "function_call", call_id: "call_text", name: "read", arguments: "{}" },
+      message("user", "Read the files"),
+      toolCall("call_image"),
+      toolCall("call_text"),
       ...group,
     ];
     const first = project(history);
     const nextTurns = [
-      { type: "message", role: "assistant", content: "I read the files." },
-      { type: "message", role: "user", content: "Read another image" },
-      { type: "function_call", call_id: "call_next", name: "read", arguments: "{}" },
+      message("assistant", "I read the files."),
+      message("user", "Read another image"),
+      toolCall("call_next"),
       { ...result, call_id: "call_next" },
     ];
     const next = project([...history, ...nextTurns]);
@@ -235,31 +240,17 @@ describe("xai stream wrappers", () => {
     expect(project(next)).toEqual(next);
 
     // Compaction replaces old history; the retained tail establishes a fresh prefix.
-    const compactedHistory = [
-      { type: "message", role: "user", content: "Summary: the first files were read." },
-      ...nextTurns,
-    ];
+    const compactedHistory = [message("user", "Summary: the first files were read."), ...nextTurns];
     const compacted = project(compactedHistory);
     expect(compacted.at(-1)).toEqual(first.at(-1));
     expect(compacted).toHaveLength(compactedHistory.length + 1);
     expect(
       project([
         ...compactedHistory,
-        { type: "message", role: "assistant", content: "The next image is blue." },
-        { type: "message", role: "user", content: "Thanks" },
+        message("assistant", "The next image is blue."),
+        message("user", "Thanks"),
       ]).slice(0, compacted.length),
     ).toEqual(compacted);
-  });
-
-  it("replays source-based input_image parts from tool results", () => {
-    const image = {
-      type: "input_image",
-      source: { type: "base64", media_type: "image/png", data: "QUJDRA==" },
-    };
-    expect(project([toolOutput([inputText("Read image"), image])])).toEqual([
-      toolOutput("Read image"),
-      imageMessage(1, image),
-    ]);
   });
 
   it("preserves interleaved text and image references for image placeholders", () => {
@@ -267,7 +258,7 @@ describe("xai stream wrappers", () => {
       type: "input_image",
       source: { type: "url", url: "https://example.com/first.png" },
     };
-    const secondImage = { type: "input_image", image_url: "data:image/png;base64,QkJCQg==" };
+    const secondImage = imagePart("data:image/png;base64,QkJCQg==");
     const originalParts = [inputText(""), firstImage, inputText(""), secondImage];
     const originalBytes = JSON.stringify(originalParts);
     const payload = {
@@ -290,21 +281,17 @@ describe("xai stream wrappers", () => {
       "a".repeat(63) + "🙈",
       ...["c", "d"].map((suffix) => `${"x".repeat(64)}${suffix}`),
     ];
-    const firstImage = {
-      type: "input_image",
-      detail: "auto",
-      image_url: "data:image/png;base64,QUFBQQ==",
-    };
+    const firstImage = { ...imagePart("data:image/png;base64,QUFBQQ=="), detail: "auto" };
     const secondImage = { ...firstImage, image_url: "data:image/png;base64,QkJCQg==" };
     const input = [
-      { type: "message", role: "user", content: "Read the tool results" },
+      message("user", "Read the tool results"),
       toolOutput("No image", callIds[0]),
       toolOutput([inputText("first"), structuredClone(firstImage)], callIds[1]),
       toolOutput([inputText("Still no image")], callIds[2]),
       toolOutput([inputText("second"), structuredClone(secondImage)], callIds[3]),
     ];
     expect(project(input, { baseUrl: "https://cli-chat-proxy.grok.com/v1" })).toEqual([
-      { type: "message", role: "user", content: "Read the tool results" },
+      message("user", "Read the tool results"),
       toolOutput("No image", callIds[0]),
       toolOutput("first", callIds[1]),
       toolOutput("Still no image", callIds[2]),
@@ -314,11 +301,7 @@ describe("xai stream wrappers", () => {
   });
 
   it.each([
-    [
-      "image",
-      { type: "input_image", detail: "auto", image_url: "data:image/png;base64,QUJDRA==" },
-      "call_1",
-    ],
+    ["image", { ...imagePart(), detail: "auto" }, "call_1"],
     ["audio", { type: "input_audio", mimeType: "audio/wav", data: "QUJDRA==" }, "call_audio"],
   ] as const)(
     "uses %s fallback text without forwarding unsupported media",

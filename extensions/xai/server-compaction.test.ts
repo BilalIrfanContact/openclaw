@@ -28,11 +28,7 @@ vi.mock("openai", () => {
 
 const model = xaiModel({
   id: "grok-4",
-  name: "Grok 4",
   baseUrl: "https://api.x.ai/v1",
-  input: ["text"],
-  contextWindow: 256_000,
-  maxTokens: 8_192,
 });
 
 function prepareRequests(
@@ -131,11 +127,8 @@ it("uses the same OAuth proxy headers as a normal turn", async () => {
     { clientVersion: "2026.7.2" },
   );
   await requests.compact();
-  const compactHeaders = sdkState.clients[0]?.defaultHeaders;
-
   await requests.replay();
-  const normalHeaders = sdkState.clients[1]?.defaultHeaders;
-
+  const [compactHeaders, normalHeaders] = sdkState.clients.map((client) => client.defaultHeaders);
   expect(compactHeaders).toEqual(normalHeaders);
   expect(Object.fromEntries(new Headers(omitNullRequestHeaders(compactHeaders)))).toMatchObject({
     "x-existing": "kept",

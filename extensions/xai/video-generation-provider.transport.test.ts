@@ -56,14 +56,14 @@ async function withXaiVideoServer(
   );
 }
 
-function generate(baseUrl: string, request?: Record<string, unknown>, prompt = "transport proof") {
+function generate(baseUrl: string, request?: Record<string, unknown>) {
   return buildXaiVideoGenerationProvider().generateVideo({
     provider: "xai",
     model: "grok-imagine-video",
-    prompt,
+    prompt: "transport proof",
     cfg: {
       models: {
-        providers: { xai: { baseUrl, apiKey: "local-xai-key", ...(request ? { request } : {}) } },
+        providers: { xai: { baseUrl, apiKey: "local-xai-key", request } },
       },
     } as never,
   });
@@ -101,11 +101,9 @@ describe("xai video generation provider transport", () => {
     ["explicit false", { allowPrivateNetwork: false }],
   ] as const)(
     "blocks %s loopback xAI video requests before reaching the server",
-    async (policyName, requestPolicy) => {
+    async (_policyName, requestPolicy) => {
       await withXaiVideoServer(async (server) => {
-        await expect(
-          generate(server.baseUrl, requestPolicy, `${policyName} policy loopback proof`),
-        ).rejects.toThrow(
+        await expect(generate(server.baseUrl, requestPolicy)).rejects.toThrow(
           expect.objectContaining({
             name: "SsrFBlockedError",
             message: expect.stringContaining("private/internal/special-use IP address"),
