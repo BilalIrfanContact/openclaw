@@ -15,25 +15,21 @@ function session(sessionKey: string, entry: Partial<SessionEntry> = {}) {
   };
 }
 
-function boundSessions(entries: { sessionKey: string; entry: Partial<SessionEntry> }[]) {
-  return listBoundClaudeSessions({
+function apiFor(entries: { sessionKey: string; entry: Partial<SessionEntry> }[] = []) {
+  const config = {};
+  return {
     id: "anthropic",
-    config: {},
+    config,
     runtime: {
-      config: { current: () => ({}) },
+      config: { current: () => config },
       agent: { session: { listSessionEntries: () => entries } },
     },
-  } as unknown as OpenClawPluginApi);
+  } as unknown as OpenClawPluginApi;
 }
 
 describe("Claude bound session resolution", () => {
   it("reuses revision-bound projections and reads unversioned entries every time", () => {
-    const config = {};
-    const api = {
-      id: "anthropic",
-      config,
-      runtime: { config: { current: () => config } },
-    } as OpenClawPluginApi;
+    const api = apiFor();
     const entries = [
       {
         agentId: "main",
@@ -50,26 +46,22 @@ describe("Claude bound session resolution", () => {
       entriesForAgent: () => entries,
       entriesForCatalog: vi.fn(() => entries),
     };
-    const before = listBoundClaudeSessions(api, "main", snapshot);
-    expect(before.get(adoptedSourceKey("gateway:local", "before"))?.sessionKey).toBe(
-      "agent:main:bound",
-    );
-    expect(listBoundClaudeSessions(api, "main", snapshot)).toEqual(before);
+    const lookup = () => listBoundClaudeSessions(api, "main", snapshot);
+    const key = (id: string) => adoptedSourceKey("gateway:local", id);
+    const before = lookup();
+    expect(before.get(key("before"))?.sessionKey).toBe("agent:main:bound");
+    expect(lookup()).toEqual(before);
     expect(snapshot.entriesForCatalog).toHaveBeenCalledTimes(1);
     entries[0]!.entry.cliSessionBindings["claude-cli"].sessionId = "after";
     snapshot.revision = {};
-    const after = listBoundClaudeSessions(api, "main", snapshot);
-    expect(after.has(adoptedSourceKey("gateway:local", "before"))).toBe(false);
-    expect(after.has(adoptedSourceKey("gateway:local", "after"))).toBe(true);
+    const after = lookup();
+    expect(after.has(key("before"))).toBe(false);
+    expect(after.has(key("after"))).toBe(true);
     expect(snapshot.entriesForCatalog).toHaveBeenCalledTimes(2);
     delete snapshot.revision;
-    listBoundClaudeSessions(api, "main", snapshot);
+    lookup();
     entries[0]!.entry.cliSessionBindings["claude-cli"].sessionId = "unversioned";
-    expect(
-      listBoundClaudeSessions(api, "main", snapshot).has(
-        adoptedSourceKey("gateway:local", "unversioned"),
-      ),
-    ).toBe(true);
+    expect(lookup().has(key("unversioned"))).toBe(true);
     expect(snapshot.entriesForCatalog).toHaveBeenCalledTimes(4);
   });
 
@@ -93,10 +85,9 @@ describe("Claude bound session resolution", () => {
       nodeEntry: { execHost: "node" as const, execNode: "node-a" },
     },
   ])("keeps local and paired-node bindings distinct via $label", ({ nodeAdopted, nodeEntry }) => {
-    const bound = boundSessions([
-      session("agent:main:local"),
-      session("agent:main:node", nodeEntry),
-    ]);
+    const bound = listBoundClaudeSessions(
+      apiFor([session("agent:main:local"), session("agent:main:node", nodeEntry)]),
+    );
 
     expect(bound).toEqual(
       new Map([
@@ -114,11 +105,13 @@ describe("Claude bound session resolution", () => {
 
   it("keeps an adopted session on a source key a sibling agent's CLI binding shares", () => {
     const sessionKey = "plugin:anthropic:catalog-adopt:claude:adopted";
-    const bound = boundSessions([
-      session(sessionKey, { pluginOwnerId: "anthropic", modelSelectionLocked: true }),
-      // A later sibling binding must not displace the adopted owner of this source key.
-      session("agent:other:routed"),
-    ]);
+    const bound = listBoundClaudeSessions(
+      apiFor([
+        session(sessionKey, { pluginOwnerId: "anthropic", modelSelectionLocked: true }),
+        // A later sibling binding must not displace the adopted owner of this source key.
+        session("agent:other:routed"),
+      ]),
+    );
 
     expect(bound).toEqual(
       new Map([[adoptedSourceKey("gateway:local", threadId), { adopted: true, sessionKey }]]),

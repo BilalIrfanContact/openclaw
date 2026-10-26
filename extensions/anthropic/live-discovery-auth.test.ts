@@ -88,8 +88,7 @@ it("does not resolve Anthropic credentials for Claude CLI-only catalog scope", a
   expect(guardedFetchCalls).toEqual([]);
 });
 
-it("keeps shipped models Anthropic does not publish while adding discovered ones", async () => {
-  // Discovery must retain shipped rows absent from the live response.
+it("retains shipped models and their compat while projecting discovered capabilities", async () => {
   discoveryRows.value = [
     discoveryRow("claude-opus-5"),
     discoveryRow("claude-brand-new-9", {
@@ -97,6 +96,7 @@ it("keeps shipped models Anthropic does not publish while adding discovered ones
       capabilities: capabilities(),
     }),
     discoveryRow("claude-unshaped-9"),
+    discoveryRow("claude-sonnet-4-6", { capabilities: capabilities(false) }),
   ];
   const result = await discover("sk-ant-oat01-test-token");
   // Never republish API rows under the native CLI hook alias.
@@ -126,17 +126,8 @@ it("keeps shipped models Anthropic does not publish while adding discovered ones
     },
   });
   expect(models.has("claude-unshaped-9")).toBe(false);
-});
-
-it("keeps the closest shipped model's request contract for a listed unknown id", async () => {
-  discoveryRows.value = [discoveryRow("claude-sonnet-4-6", { capabilities: capabilities(false) })];
-  const result = await discover("sk-ant-api03-test-key");
-  const model = result.providers.anthropic?.models?.find(
-    (entry) => entry.id === "claude-sonnet-4-6",
-  );
-
   // Tool surface (Code Mode) comes from the shipped Sonnet row; effort comes from the listing.
-  expect(model).toMatchObject({
+  expect(models.get("claude-sonnet-4-6")).toMatchObject({
     compat: { codeMode: "preferred" },
     thinkingLevelMap: { xhigh: null, max: "max" },
     params: { claudeCapabilities: { xhighEffort: false, maxEffort: true } },

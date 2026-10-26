@@ -50,6 +50,12 @@ const allowed = (proof: string) => ({
   behavior: "allow",
   updatedInput: { ...input, answers: mappedAnswers(proof) },
 });
+const displayedQuestions = (questions = input.questions) =>
+  questions.map((entry, i) => ({ ...entry, id: `question_${i + 1}`, isOther: true }));
+const withDescription = (description: string) => [
+  { ...input.questions[0], options: [{ label: "Vitest", description }, ...options("Node test")] },
+  input.questions[1],
+];
 const rejectedQuestions = (detail: string) => ({
   behavior: "deny",
   message: `OpenClaw rejected malformed Claude user questions: ${detail}. Correct the invalid field and retry AskUserQuestion.`,
@@ -60,6 +66,11 @@ function ask(
   toolUseId?: string,
 ) {
   return authorizer.authorize({ input: payload, toolUseId, signal: new AbortController().signal });
+}
+async function expectRejected(payload: Record<string, unknown>, detail: string) {
+  const requestUserInput = vi.fn();
+  expect(await ask(authorizerFor(requestUserInput), payload)).toEqual(rejectedQuestions(detail));
+  expect(requestUserInput).not.toHaveBeenCalled();
 }
 
 describe("Claude CLI user input adapter", () => {
@@ -79,10 +90,7 @@ describe("Claude CLI user input adapter", () => {
       intro: "Claude needs input:",
       toolCallId: "claude-question-1",
       abortSignal: signal,
-      questions: [
-        { ...input.questions[0], id: "question_1", isOther: true },
-        { ...input.questions[1], id: "question_2", isOther: true },
-      ],
+      questions: displayedQuestions(),
     });
   });
 
@@ -92,29 +100,15 @@ describe("Claude CLI user input adapter", () => {
     ["the exact display limit", "x".repeat(1_024), "x".repeat(1_024)],
   ])("preserves the question set and answers with %s", async (_case, description, displayed) => {
     const requestUserInput = answered("Unit tests");
-    const payload = {
-      questions: [
-        {
-          ...input.questions[0],
-          options: [{ label: "Vitest", description }, ...options("Node test")],
-        },
-        input.questions[1],
-      ],
-    };
+    const payload = { questions: withDescription(description) };
 
     const result = await ask(authorizerFor(requestUserInput), payload);
 
     expect(payload.questions[0]!.options[0]!.description).toBe(description);
     expect(requestUserInput).toHaveBeenCalledOnce();
-    expect(requestUserInput.mock.calls[0]![0].questions).toEqual([
-      {
-        ...payload.questions[0],
-        id: "question_1",
-        isOther: true,
-        options: [{ label: "Vitest", description: displayed }, ...options("Node test")],
-      },
-      { ...payload.questions[1], id: "question_2", isOther: true },
-    ]);
+    expect(requestUserInput.mock.calls[0]![0].questions).toEqual(
+      displayedQuestions(withDescription(displayed)),
+    );
     expect(result).toEqual({
       behavior: "allow",
       updatedInput: { ...payload, answers: mappedAnswers("Unit tests") },
@@ -150,53 +144,32 @@ describe("Claude CLI user input adapter", () => {
   });
 
   it.each([
-    ["missing questions array", {}, "questions must be an array of 1 to 4 questions"],
+    [undefined, "must be an array of 1 to 4 questions"],
     [
-      "too many questions",
-      { questions: ["A", "B", "C", "D", "E"].map((header) => question({ header })) },
-      "questions must be an array of 1 to 4 questions",
+      ["A", "B", "C", "D", "E"].map((header) => question({ header })),
+      "must be an array of 1 to 4 questions",
     ],
-    [
-      "non-boolean multiSelect",
-      malformed({ multiSelect: "no" }),
-      "questions[0].multiSelect must be a boolean",
-    ],
-    [
-      "too few options",
-      malformed({ options: options("A") }),
-      "questions[0].options must be an array of 2 to 4 options",
-    ],
-    [
-      "empty option description",
-      malformed({ options: [...options("A"), { label: "B", description: "" }] }),
-      "questions[0].options[1].description must not be empty",
-    ],
-    [
-      "oversized option label",
-      malformed({ options: options("A".repeat(257), "B") }),
-      "questions[0].options[0].label must be at most 256 characters",
-    ],
-    [
-      "oversized question",
-      malformed({ question: "Q".repeat(4_097) }),
-      "questions[0].question must be at most 4096 characters",
-    ],
-    [
-      "missing option label",
-      malformed({ options: validOptions.map(({ description }) => ({ description })) }),
-      "questions[0].options[0].label must be a string",
-    ],
-    ["non-record question", { questions: ["not a question"] }, "questions[0] must be an object"],
-  ])(
-    "reports the failed constraint for %s without echoing payload text",
-    async (_case, malformedInput, expectedDetail) => {
-      const requestUserInput = vi.fn();
-      const authorizer = authorizerFor(requestUserInput);
+    [["not a question"], "[0] must be an object"],
+  ] as const)("rejects invalid question lists: %j", async (questions, detail) => {
+    await expectRejected({ questions }, `questions${detail.startsWith("[") ? "" : " "}${detail}`);
+  });
 
-      const result = await ask(authorizer, malformedInput as Record<string, unknown>);
-
-      expect(result).toEqual(rejectedQuestions(expectedDetail));
-      expect(requestUserInput).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    ["multiSelect", "no", "multiSelect must be a boolean"],
+    ["options", options("A"), "options must be an array of 2 to 4 options"],
+    [
+      "options",
+      [...options("A"), { label: "B", description: "" }],
+      "options[1].description must not be empty",
+    ],
+    ["options", options("A".repeat(257), "B"), "options[0].label must be at most 256 characters"],
+    ["question", "Q".repeat(4_097), "question must be at most 4096 characters"],
+    [
+      "options",
+      validOptions.map(({ description }) => ({ description })),
+      "options[0].label must be a string",
+    ],
+  ] as const)("reports invalid %s without echoing payload text", async (field, value, detail) => {
+    await expectRejected(malformed({ [field]: value }), `questions[0].${detail}`);
+  });
 });

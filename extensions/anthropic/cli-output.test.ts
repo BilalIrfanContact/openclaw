@@ -33,21 +33,17 @@ it.each([
   expect(backend.classifyErrorCode?.(message)).toBeUndefined();
 });
 
-const status = { type: "system", subtype: "status" };
+const statusEvent = (status: string | null, compact_result?: string) => ({
+  type: "system",
+  subtype: "status",
+  status,
+  compact_result,
+});
 const end = { kind: "compaction", phase: "end" };
 const lifecycleCases = [
-  [
-    { ...status, status: "compacting" },
-    { kind: "compaction", phase: "start" },
-  ],
-  [
-    { ...status, status: null, compact_result: "success" },
-    { ...end, completed: true },
-  ],
-  [
-    { ...status, status: null, compact_result: "failed" },
-    { ...end, completed: false },
-  ],
+  [statusEvent("compacting"), { kind: "compaction", phase: "start" }],
+  [statusEvent(null, "success"), { ...end, completed: true }],
+  [statusEvent(null, "failed"), { ...end, completed: false }],
   [{ compact_result: "success" }, { ...end, completed: true }],
   [{ type: "system", subtype: "compact_boundary" }, null],
 ];

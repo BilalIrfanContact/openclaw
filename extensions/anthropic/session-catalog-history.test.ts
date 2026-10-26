@@ -25,6 +25,7 @@ function parseMessage(role: string, content: string, flags: Record<string, unkno
   const row = { type: role, ...flags, message: { role, content } };
   return parseTranscriptLine(Buffer.from(JSON.stringify(row)));
 }
+const userMessage = (text: string, timestamp: string) => ({ type: "userMessage", text, timestamp });
 
 // mock-isolation: Exercise native message projection without opening the transcript store.
 vi.mock("openclaw/plugin-sdk/session-transcript-runtime", () => ({
@@ -62,13 +63,16 @@ describe("importClaudeHistory", () => {
     await importItems(items);
 
     expect(JSON.stringify(appended)).not.toContain("private skill instructions");
-    expect(appended.find((message) => message.content === "run the review")?.provenance).toBe(
-      undefined,
-    );
+    const userRow = appended.find((message) => message.content === "run the review");
+    expect(userRow?.provenance).toBeUndefined();
+    // Imported prompts must not be swallowed as OpenClaw self-echoes.
+    expect(userRow?.["__openclaw"]).toMatchObject({ mirrorOrigin: "claude-catalog-import" });
     expect(appended.map((message) => message.content)).toEqual(
       expect.arrayContaining(["run the review", "compacted context", "transcript-only context"]),
     );
-    expect(appended.find((message) => message.role === "assistant")).toBeDefined();
+    const assistantRow = appended.find((message) => message.role === "assistant");
+    expect(assistantRow).toBeDefined();
+    expect(assistantRow?.["__openclaw"]).toBeUndefined();
   });
 
   it("preserves Date.parse semantics for valid strings and falls back for invalid values", async () => {
@@ -77,15 +81,10 @@ describe("importClaudeHistory", () => {
     vi.setSystemTime(fallbackTimestamp);
     try {
       await importItems([
-        { type: "userMessage", text: "invalid", timestamp: "not-a-date", uuid: "u-1" },
-        { type: "userMessage", text: "numeric year", timestamp: "2026", uuid: "u-2" },
-        { type: "userMessage", text: "numeric zero", timestamp: "0", uuid: "u-3" },
-        {
-          type: "userMessage",
-          text: "pre-epoch",
-          timestamp: "1969-12-31T23:59:59.000Z",
-          uuid: "u-4",
-        },
+        userMessage("invalid", "not-a-date"),
+        userMessage("numeric year", "2026"),
+        userMessage("numeric zero", "0"),
+        userMessage("pre-epoch", "1969-12-31T23:59:59.000Z"),
       ]);
     } finally {
       vi.useRealTimers();
@@ -99,21 +98,6 @@ describe("importClaudeHistory", () => {
       fallbackTimestamp + 3,
     ]);
     expect(JSON.stringify(appended)).not.toContain('"timestamp":null');
-  });
-
-  it("tags imported native user rows so self-echo provenance excludes them", async () => {
-    await importItems([
-      { type: "userMessage", text: "continue", uuid: "u-1" },
-      { type: "assistantMessage", text: "done", uuid: "a-1" },
-    ]);
-
-    const userRow = appended.find((message) => message.role === "user");
-    // mirrorOrigin keeps imported native prompts out of ownRecentUserTexts; without
-    // it a repeated external prompt like "continue" is swallowed as self-echo.
-    expect(userRow?.["__openclaw"]).toMatchObject({ mirrorOrigin: "claude-catalog-import" });
-    const assistantRow = appended.find((message) => message.role === "assistant");
-    expect(assistantRow).toBeDefined();
-    expect(assistantRow?.["__openclaw"]).toBeUndefined();
   });
 
   it("omits empty native reasoning records instead of rendering a placeholder", async () => {

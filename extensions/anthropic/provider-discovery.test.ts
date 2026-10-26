@@ -26,12 +26,9 @@ it("prepares native availability once for a 632-workspace roster", async () => {
   );
   const input = { config: { agents: { entries } }, env: {}, signal: undefined };
   probeClaudeCliAuthStatus.mockResolvedValue({ status: "missing" });
-  const prepared = new Set<string>();
-  for (const agentId of Object.keys(entries)) {
+  for (let i = 0; i < Object.keys(entries).length; i++) {
     await prepare(input);
-    prepared.add(agentId);
   }
-  expect(prepared.size).toBe(632);
   expect(probeClaudeCliAuthStatus).toHaveBeenCalledOnce();
 });
 
