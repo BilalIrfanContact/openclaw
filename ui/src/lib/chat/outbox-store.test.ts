@@ -2,22 +2,31 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import type { ChatQueueItem } from "./chat-types.ts";
+import * as payloadStore from "./outbox-payload-store.runtime.ts";
 import { outboxStorageScope } from "./outbox-payload-store.runtime.ts";
 import {
   captureChatOutboxRecoveryDestination,
   discardChatOutboxRecovery,
   readChatOutboxRecovery,
+  retireDeliveredChatOutboxRecovery,
+  restoreChatOutboxRecovery,
 } from "./outbox-recovery.ts";
-import type { StoredComposerState } from "./outbox-store-codec.ts";
+import type {
+  StoredComposerRecovery,
+  StoredComposerSession,
+  StoredComposerState,
+} from "./outbox-store-codec.ts";
 import { createStoredChatOutboxReader } from "./outbox-store-projection.ts";
 import { retireStoredComposerDrafts } from "./outbox-store-retirement.ts";
 import {
   readStoredOutboxStore,
   storedChatOutboxScopeKey,
+  storageTargetForComposer,
   storageTargetForGateway,
   subscribeStoredChatOutboxChanges,
   writeStoredOutboxStore,
 } from "./outbox-store.ts";
+import { seedSource, seedStore, sourceJson, storedSession } from "./outbox.test-support.ts";
 
 function ownedState(gatewayUrl = target.gatewayOwner) {
   return {
@@ -40,10 +49,6 @@ const queued = (id: string, overrides: Partial<ChatQueueItem> = {}): ChatQueueIt
   createdAt: 1,
   ...overrides,
 });
-const storedSession = (overrides: Partial<StoredComposerState["sessions"][string]> = {}) => ({
-  updatedAt: 1,
-  ...overrides,
-});
 const draftSession = (draft: string, revision: number) =>
   storedSession({ draft, draftRevision: revision, updatedAt: revision });
 const privateInput = () => ({
@@ -53,40 +58,6 @@ const privateInput = () => ({
 });
 const readStore = () => readStoredOutboxStore(sessionStorage, target);
 const storedJson = (key: string) => JSON.parse(sessionStorage.getItem(key)!);
-
-function seedStore(
-  target: ReturnType<typeof storageTargetForGateway>,
-  sessions: StoredComposerState["sessions"],
-  recovery: StoredComposerState["recovery"] = {},
-) {
-  const store = { version: 4, gatewayOwner: target.gatewayOwner, sessions, recovery };
-  sessionStorage.setItem(target.key, JSON.stringify(store));
-  return store;
-}
-
-function seedSource(
-  target: ReturnType<typeof storageTargetForGateway>,
-  version: number,
-  sessions: Record<string, unknown>,
-) {
-  const key = [target.legacyKey, target.previousKey, target.blobKey, target.key][version - 1]!;
-  const source = sourceJson(target, version, sessions);
-  sessionStorage.setItem(key, source);
-  return { key, source };
-}
-
-function sourceJson(
-  target: ReturnType<typeof storageTargetForGateway>,
-  version: number,
-  sessions: Record<string, unknown>,
-) {
-  return JSON.stringify({
-    version,
-    ...(version !== 1 ? { gatewayOwner: target.gatewayOwner } : {}),
-    ...(version === 4 ? { recovery: {} } : {}),
-    sessions,
-  });
-}
 
 const recoveryRow = (
   sourceScopeKey: string,
@@ -115,9 +86,7 @@ const quotaExceeded = () => {
   throw new DOMException("quota exceeded", "QuotaExceededError");
 };
 const cleanups: Array<() => void> = [];
-beforeEach(() => {
-  vi.stubGlobal("sessionStorage", createStorageMock());
-});
+beforeEach(() => vi.stubGlobal("sessionStorage", createStorageMock()));
 
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) {
@@ -128,10 +97,9 @@ afterEach(() => {
 });
 
 it.each(["raw", "cleared"])("preserves newer legacy bytes during %s retirement", (input) => {
-  const scopeKey = privateScope;
   const source = (id: string) =>
     sourceJson(target, 3, {
-      [scopeKey]: storedSession({ draft: "Private legacy input", queue: [queued(id)] }),
+      [privateScope]: storedSession({ draft: "Private legacy input", queue: [queued(id)] }),
     });
   sessionStorage.setItem(target.blobKey, source("submitted"));
   if (input === "cleared") {
@@ -151,13 +119,12 @@ it.each(["raw", "cleared"])("preserves newer legacy bytes during %s retirement",
   });
   const migrated = readStore();
   expect(sessionStorage.getItem(target.blobKey)).toBe(replacement);
-  expect(migrated.sessions[scopeKey]?.queue).toMatchObject([{ id: "submitted" }]);
+  expect(migrated.sessions[privateScope]?.queue).toMatchObject([{ id: "submitted" }]);
 });
 
 it.each([1, 3])("retires v%i private input after failed deletion without replay", (version) => {
-  const scopeKey = privateScope;
   const { key: sourceKey, source } = seedSource(target, version, {
-    [scopeKey]: {
+    [privateScope]: {
       ...privateInput(),
       queue: [queued("submitted", { text: "Submitted message" })],
       updatedAt: 1,
@@ -181,7 +148,7 @@ it.each([1, 3])("retires v%i private input after failed deletion without replay"
   });
   const migrated = readStore();
   expect(sessionStorage.getItem(sourceKey)).toBe(source);
-  expect(migrated.sessions[scopeKey]?.queue).toMatchObject([
+  expect(migrated.sessions[privateScope]?.queue).toMatchObject([
     { id: "submitted", text: "Submitted message" },
   ]);
   expect(Object.values(migrated.recovery)[0]?.session.draft).toBe("Ambiguous input");
@@ -200,7 +167,6 @@ it.each([1, 3])("retires v%i private input after failed deletion without replay"
 it.each([1, 3])(
   "retires v%i deferred private input, preserving queues and ambiguity",
   (version) => {
-    const scopeKey = privateScope;
     const item = queued("submitted", { text: "Submitted private message" });
     const privateRow = {
       ...privateInput(),
@@ -210,7 +176,7 @@ it.each([1, 3])(
       unknownMetadata: "preserve",
     };
     const sessions = {
-      [scopeKey]: privateRow,
+      [privateScope]: privateRow,
       "agent:main:dashboard:incognito-draft-only\u0000agent:main": {
         draft: "Private draft without an explicit revision",
         updatedAt: 2,
@@ -235,7 +201,7 @@ it.each([1, 3])(
     expect(retained).toEqual({
       ...JSON.parse(source),
       sessions: {
-        [scopeKey]: preserved,
+        [privateScope]: preserved,
         "main\u0000agent:main": sessions["main\u0000agent:main"],
       },
     });
@@ -350,14 +316,7 @@ it.each([
     expect(restored).toMatchObject({
       draft: "@Alex draft",
       draftMentions: [mention()],
-      queue: [
-        {
-          text: "@Alex queued",
-          mentions: [mention()],
-          sendRunId: "mention-run",
-          sendState: "waiting-reconnect",
-        },
-      ],
+      queue: [{ ...item, mentions: [mention()], sendRunId: "mention-run" }],
     });
   } else {
     expect(restored?.queue?.[0]).toMatchObject({ text: "@Alex review", sendState: "failed" });
@@ -401,6 +360,13 @@ it.each([1, 2, 4])("refreshes a cached v%i projection after an external write", 
   expect(reader.read(ownedState(gatewayUrl)).total).toBe(0);
   expect(reader.read({ ...state, settings: { gatewayUrl: "ws://other.test" } }).total).toBe(0);
   expect(reader.read(state).total).toBe(2);
+  if (version === 4) {
+    const foreign = { ...target, gatewayOwner: "ws://other.test/control" };
+    seedStore(foreign, { "global\u0000agent:work": storedSession({ queue: [queued("queued")] }) });
+    storageEvent(key);
+    expect(reader.read(state).total).toBe(0);
+    expect(storedJson(target.key).gatewayOwner).toBe(foreign.gatewayOwner);
+  }
 });
 
 it.each([1, 3])("retains the last v%i source when quota blocks verified retirement", (version) => {
@@ -419,9 +385,13 @@ it.each([1, 3])("retains the last v%i source when quota blocks verified retireme
   expect(sessionStorage.getItem(sourceKey)).toContain("retire me");
 });
 
-it("clears every retained projection after an external storage clear", () => {
-  const listener = vi.fn();
-  const unsubscribe = subscribeStoredChatOutboxChanges(listener);
+it("invalidates all projections and unsubscribes storage listeners independently", () => {
+  const first = vi.fn(),
+    second = vi.fn();
+  const offFirst = subscribeStoredChatOutboxChanges(first);
+  const offSecond = subscribeStoredChatOutboxChanges(second);
+  storageEvent("openclaw.control.settings.v1");
+  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([0, 0]);
   const gatewayUrls = ["ws://first.test/control", "ws://second.test/control"];
   for (const storageGateway of gatewayUrls) {
     seedStore(storageTargetForGateway(storageGateway, "summary-owner"), {
@@ -433,11 +403,18 @@ it("clears every retained projection after an external storage clear", () => {
   }
   sessionStorage.clear();
   storageEvent(null);
-  unsubscribe();
   for (const storageGateway of gatewayUrls) {
     expect(createStoredChatOutboxReader().read(ownedState(storageGateway)).total).toBe(0);
   }
-  expect(listener).toHaveBeenCalledOnce();
+  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 1]);
+  storageEvent(target.key);
+  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([2, 2]);
+  offFirst();
+  storageEvent(target.legacyKey);
+  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([2, 3]);
+  offSecond();
+  storageEvent(target.key);
+  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([2, 3]);
 });
 
 it.each([
@@ -505,41 +482,6 @@ it("queries unresolved main drafts before defaults arrive", () => {
   expect(summary.hasSessionDraft("agent:main:main")).toBe(false);
 });
 
-it("bridges matching storage events until the last subscriber leaves", () => {
-  const first = vi.fn(),
-    second = vi.fn();
-  const offFirst = subscribeStoredChatOutboxChanges(first);
-  const offSecond = subscribeStoredChatOutboxChanges(second);
-  storageEvent("openclaw.control.settings.v1");
-  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([0, 0]);
-  storageEvent(target.key);
-  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 1]);
-  offFirst();
-  storageEvent(target.legacyKey);
-  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 2]);
-  offSecond();
-  storageEvent(target.key);
-  expect([first.mock.calls.length, second.mock.calls.length]).toEqual([1, 2]);
-});
-
-it("rejects a store owned by another gateway", () => {
-  seedStore(
-    { ...target, gatewayOwner: "ws://other.test/control" },
-    {
-      "global\u0000agent:work": storedSession({ queue: [queued("queued")] }),
-    },
-  );
-  expect(
-    createStoredChatOutboxReader().read({
-      client: null,
-      connected: false,
-      settings: { gatewayUrl },
-      agentsList: { defaultId: "work", mainKey: "workspace" },
-    }).total,
-  ).toBe(0);
-  expect(storedJson(target.key).gatewayOwner).toBe("ws://other.test/control");
-});
-
 it("projects metadata-only badges and counts distinct operator-review rows", () => {
   const queue = [
     ...(
@@ -596,4 +538,501 @@ it("filters legacy queue tombstones before offering recovery", () => {
     queued("shared", { text: "older", createdAt: 2 }),
   ]);
   expect(sessionStorage.getItem(target.legacyKey)).toBeNull();
+});
+
+const scopeKey = storedChatOutboxScopeKey;
+const transferUrl = "wss://transfer.test";
+const sourceScope = "agent:main:old\u0000agent:main";
+const firstScope = { sessionKey: "agent:main:first", agentId: "main" };
+const secondScope = { sessionKey: "agent:main:second", agentId: "main" };
+const attachment = { id: "file", mimeType: "text/plain", fileName: "saved.txt" };
+const storageScope = JSON.stringify([transferUrl, "account-a"]);
+const deliveredMessage = (idempotencyKey = "attempt", local = false) => ({
+  role: "user",
+  content: "queue 雪",
+  __openclaw: { id: local ? null : "delivered", seq: null, idempotencyKey },
+});
+const queueItem = (overrides: Partial<ChatQueueItem> = {}) =>
+  queued("input", { text: "queue 雪", ...overrides });
+const submittedItem = () =>
+  queueItem({
+    sendRunId: "attempt",
+    sendAttempts: 1,
+    sendState: "waiting-reconnect",
+    sessionId: "session",
+  });
+const recovery = (
+  session: StoredComposerSession,
+  sourceVersion: StoredComposerRecovery["sourceVersion"] = 4,
+): StoredComposerRecovery => ({
+  sourceVersion,
+  sourceScopeKey: sourceScope,
+  session,
+});
+function fixture(kind: "queue" | "draft", sibling = false, originalScope = sourceScope) {
+  const state = {
+    settings: { gatewayUrl: transferUrl },
+    connected: true,
+    client: { recoveryScope: "account-a", recoveryScopeReady: true },
+    agentsList: { defaultId: "main", mainKey: "main", scope: "per-sender" },
+    sessionKey: firstScope.sessionKey,
+    chatMessage: "",
+    chatQueue: [],
+  };
+  const session = storedSession({
+    draftRevision: 1,
+    ...(kind === "draft" ? { draft: "draft 雪" } : { queue: [submittedItem()] }),
+  });
+  const source = storageTargetForGateway(transferUrl);
+  seedStore(source, {
+    [originalScope]: session,
+    ...(sibling
+      ? { "agent:main:sibling\u0000agent:main": storedSession({ draft: "untouched" }, 2) }
+      : {}),
+  });
+  const entry = () =>
+    readChatOutboxRecovery(state).entries.find((row) => row.sourceScopeKey === originalScope)!;
+  const destination = (scope = firstScope) => captureChatOutboxRecoveryDestination(state, scope)!;
+  const stored = () => readStoredOutboxStore(sessionStorage, storageTargetForComposer(state));
+  const entries = () => readChatOutboxRecovery(state).entries;
+  return {
+    state,
+    session,
+    source,
+    entry,
+    stored,
+    entries,
+    legacy: () => readStoredOutboxStore(sessionStorage, source),
+    saveLegacy: (store: ReturnType<typeof stored>) =>
+      writeStoredOutboxStore(sessionStorage, source, store),
+    save: (store: ReturnType<typeof stored>) =>
+      writeStoredOutboxStore(sessionStorage, storageTargetForComposer(state), store),
+    restore: (row = entry(), scope = firstScope) =>
+      restoreChatOutboxRecovery(state, row, destination(scope)),
+    discard: (row = entry(), isCurrent?: () => boolean) =>
+      discardChatOutboxRecovery(state, row, isCurrent),
+    retire: (rows = entries()) => retireDeliveredChatOutboxRecovery(state, rows),
+    expectRetained: () => {
+      expect(stored().sessions).toEqual({});
+      expect(entry().session).toEqual(session);
+    },
+  };
+}
+
+function reopenStorage() {
+  const reopened = createStorageMock();
+  for (let index = 0; index < sessionStorage.length; index++) {
+    const key = sessionStorage.key(index)!;
+    reopened.setItem(key, sessionStorage.getItem(key)!);
+  }
+  vi.stubGlobal("sessionStorage", reopened);
+}
+
+function interceptTransfer(
+  f: ReturnType<typeof fixture>,
+  intercept: (stage: string, commit: () => void) => void,
+) {
+  const set = sessionStorage.setItem.bind(sessionStorage);
+  const remove = sessionStorage.removeItem.bind(sessionStorage);
+  const ownedKey = storageTargetForComposer(f.state).key;
+  const apply = (key: string, value?: string) => {
+    const commit = () => (value === undefined ? remove(key) : set(key, value));
+    if (key !== f.source.key && key !== ownedKey) {
+      commit();
+      return;
+    }
+    const source = key === f.source.key;
+    let stage = source ? "retire-remove" : "discard";
+    if (value !== undefined) {
+      const record = JSON.parse(value) as Pick<StoredComposerState, "recovery">;
+      const staging = Object.values(record.recovery).some(
+        (row) => row.sourceScopeKey === sourceScope,
+      );
+      stage = source ? (staging ? "claim" : "retire-write") : staging ? "stage" : "publish";
+    }
+    intercept(stage, commit);
+  };
+  const writes = vi
+    .spyOn(sessionStorage, "setItem")
+    .mockImplementation((key, value) => apply(key, value));
+  const removals = vi.spyOn(sessionStorage, "removeItem").mockImplementation((key) => apply(key));
+  return () => {
+    writes.mockRestore();
+    removals.mockRestore();
+  };
+}
+
+function deliveryFixture(idempotencyKey = "attempt") {
+  const f = fixture("queue");
+  const state = Object.assign(f.state, {
+    sessionKey: "agent:main:old",
+    currentSessionId: "session",
+    chatMessages: [deliveredMessage(idempotencyKey)] as unknown[],
+  });
+  return { ...f, state };
+}
+
+function fillDestination(f: ReturnType<typeof fixture>, occupied: "queue" | "pending" | "draft") {
+  const store = f.stored();
+  const prefix = occupied === "pending" ? "opaque-" : `agent:main:${occupied}-`;
+  const key = (index: number) => `${prefix}${index}\u0000agent:main`;
+  for (let index = 0; index < 20; index++) {
+    store.sessions[key(index)] = storedSession(
+      {
+        queue: occupied === "queue" ? [queueItem({ id: String(index), storageScope })] : undefined,
+        draft: occupied === "queue" ? undefined : String(index),
+        awaitingDefaults: occupied === "pending" ? true : undefined,
+      },
+      index + 1,
+    );
+  }
+  f.save(store);
+  return key;
+}
+
+it.each(["attempt", "attempt:user"])("retires delivered %s", (idempotencyKey) => {
+  const f = deliveryFixture(idempotencyKey);
+  expect(f.retire()).toBe("retired");
+  expect(f.entries()).toEqual([]);
+  expect([f.stored().recovery, f.stored().sessions]).toEqual([{}, {}]);
+  expect(f.state).toMatchObject({ chatQueue: [], chatMessage: "" });
+});
+
+it.each([
+  "local-copy",
+  "session",
+  "scope",
+  "text-only",
+  "assistant",
+  "no-run-id",
+  "unowned-draft",
+] as const)("keeps saved queue input when delivery retirement is unsafe: %s", (mismatch) => {
+  const f = deliveryFixture();
+  const message = deliveredMessage(
+    mismatch === "text-only" ? "another-attempt" : "attempt",
+    mismatch === "local-copy",
+  );
+  message.role = mismatch === "assistant" ? "assistant" : "user";
+  f.state.chatMessages = [message];
+  if (mismatch === "session") {
+    f.state.currentSessionId = "replacement-session";
+  } else if (mismatch === "scope") {
+    f.state.sessionKey = firstScope.sessionKey;
+  } else if (mismatch === "no-run-id" || mismatch === "unowned-draft") {
+    const legacy = f.legacy();
+    if (mismatch === "no-run-id") {
+      delete legacy.sessions[sourceScope]!.queue![0]!.sendRunId;
+    } else {
+      legacy.sessions[sourceScope]!.draft = "Keep this draft";
+      f.state.chatMessages = [
+        { role: "user", __openclaw: { seq: 7, idempotencyKey: "attempt:user" } },
+      ];
+    }
+    f.saveLegacy(legacy);
+  }
+  const before = sessionStorage.getItem(f.source.key);
+  const entries = f.entries();
+  expect(f.retire(entries)).toBe("unchanged");
+  expect(f.entries()).toEqual(entries);
+  expect(sessionStorage.getItem(f.source.key)).toBe(before);
+  expect(f.stored().recovery).toEqual({});
+});
+
+it("retains the draft and unproven inputs when only one owned submission was delivered", () => {
+  const f = deliveryFixture();
+  const legacy = f.legacy();
+  const delivered = legacy.sessions[sourceScope]!.queue![0]!;
+  legacy.sessions = {};
+  f.saveLegacy(legacy);
+  const owned = f.stored();
+  owned.recovery.owned = recovery({
+    draft: "Keep this draft",
+    updatedAt: 1,
+    queue: [delivered, queueItem({ id: "unsent", text: "Still unsent", createdAt: 2 })],
+  });
+  f.save(owned);
+  f.state.chatMessages = [{ role: "user", __openclaw: { seq: 7, idempotencyKey: "attempt:user" } }];
+  expect(f.retire()).toBe("retired");
+  expect(f.entries()).toMatchObject([
+    { id: "owned", session: { draft: "Keep this draft", queue: [{ id: "unsent" }] } },
+  ]);
+  expect(f.entries()[0]!.session.queue).toHaveLength(1);
+});
+
+it.each(["recovery", "history"] as const)("fences retirement after %s changes", (change) => {
+  const f = deliveryFixture();
+  const entries = f.entries();
+  if (change === "recovery") {
+    const legacy = f.legacy();
+    legacy.sessions[sourceScope]!.draft = "Newer intent";
+    f.saveLegacy(legacy);
+  } else {
+    interceptTransfer(f, (stage, commit) => {
+      commit();
+      if (stage === "claim" || stage === "retire-write") {
+        f.state.chatMessages = [];
+      }
+    });
+  }
+  const before = sessionStorage.getItem(f.source.key);
+  expect(f.retire(entries)).toBe("conflict");
+  if (change === "recovery") {
+    expect(sessionStorage.getItem(f.source.key)).toBe(before);
+  }
+  expect(f.entries()[0]?.session.queue).toHaveLength(1);
+});
+
+it("offers textless recovery input but preserves and hides canonical clear fences", () => {
+  const f = fixture("draft");
+  const fence = { updatedAt: 12, draftRevision: 12 };
+  const legacy = f.legacy();
+  legacy.sessions["global\u0000agent:main"] = fence;
+  legacy.recovery = {
+    cleared: recovery(fence, 3),
+    attachment: recovery(
+      storedSession({ queue: [queueItem({ text: "", attachments: [attachment] })] }),
+    ),
+    goal: recovery(storedSession({ goalMode: { action: "start" } }, 2)),
+    reply: recovery(storedSession({ replyTarget: { messageId: "message", text: "quoted" } }, 3)),
+  };
+  f.saveLegacy(legacy);
+  const owned = f.stored();
+  owned.recovery.cleared = recovery(fence);
+  f.save(owned);
+  const before = sessionStorage.getItem(f.source.key);
+  expect(f.entries().map((entry) => entry.id)).toEqual([
+    "legacy-session:" + sourceScope,
+    ...["attachment", "goal", "reply"].map((id) => "legacy-recovery:" + id),
+  ]);
+  expect(f.entries()[0]?.session.draft).toBe("draft 雪");
+  expect(sessionStorage.getItem(f.source.key)).toBe(before);
+  expect(f.stored().recovery.cleared).toBeUndefined();
+  expect(f.legacy().sessions["global\u0000agent:main"]).toEqual(fence);
+});
+
+it.each(["account", "gateway", "revision", "incognito", "confirmation"] as const)(
+  "fences discard after %s changes",
+  (change) => {
+    const f = fixture("draft");
+    const entry = f.entry();
+    if (change === "revision") {
+      const legacy = f.legacy();
+      legacy.sessions[sourceScope] = { draft: "newer", draftRevision: 2, updatedAt: 2 };
+      f.saveLegacy(legacy);
+    } else if (change === "account") {
+      f.state.client.recoveryScope = "account-b";
+    } else if (change === "gateway") {
+      f.state.settings.gatewayUrl = "wss://other.test";
+    } else if (change === "incognito") {
+      Object.assign(f.state, { selectedChatSessionIncognito: true });
+    }
+    const before = sessionStorage.getItem(f.source.key);
+    expect(f.discard(entry, () => change !== "confirmation")).toBe("conflict");
+    expect(sessionStorage.getItem(f.source.key)).toBe(before);
+    expect(f.stored().sessions).toEqual({});
+  },
+);
+
+it("discards recovery without changing the composer, then retires its attachment payload", () => {
+  const f = fixture("queue", true);
+  const reference = { key: "blob", tabId: "this-tab", recoveryScope: "account-a" };
+  const legacy = f.legacy();
+  legacy.sessions[sourceScope]!.draft = "discard draft";
+  Object.assign(legacy.sessions[sourceScope]!.queue![0]!, {
+    attachmentPayload: reference,
+    attachments: [attachment],
+  });
+  f.saveLegacy(legacy);
+  const owned = f.stored();
+  owned.sessions[scopeKey(firstScope)] = draftSession("current", 10);
+  f.save(owned);
+  f.state.chatMessage = "current";
+  const entry = f.entry();
+  const remaining = () => f.entries().map((row) => row.session.draft);
+  const cleanup = vi.spyOn(payloadStore, "removeOutboxPayloads").mockImplementation(async () => {
+    expect(remaining()).toEqual(["untouched"]);
+  });
+  expect(f.discard(entry)).toBe("discarded");
+  expect(f.state.chatMessage).toBe("current");
+  expect(f.stored().sessions).toEqual(owned.sessions);
+  expect(remaining()).toEqual(["untouched"]);
+  expect(f.discard(entry)).toBe("conflict");
+  expect(cleanup).toHaveBeenCalledExactlyOnceWith([reference]);
+});
+
+const stages = ["claim", "stage", "retire-write", "retire-remove", "publish"] as const;
+const transferCases = stages.flatMap((stage) =>
+  (["throw", "after-write"] as const).flatMap((failure) =>
+    (stage === "publish" ? (["queue", "draft"] as const) : (["queue"] as const)).map(
+      (kind) => [stage, failure, kind, false] as const,
+    ),
+  ),
+);
+it.each([
+  ...transferCases,
+  ...["claim", "stage", "retire-remove", "discard"].map(
+    (stage) => [stage, "throw", "queue", true] as const,
+  ),
+])("retains input across %s %s (%s, discard=%s)", (stage, failure, kind, discard) => {
+  const f = fixture(kind, stage === "retire-write");
+  const original = f.entry();
+  let failed = false;
+  const reset = interceptTransfer(f, (currentStage, commit) => {
+    if (currentStage === stage) {
+      failed = true;
+      if (failure === "after-write") {
+        commit();
+      }
+      throw new Error("Injected " + stage);
+    }
+    commit();
+  });
+  expect(discard ? f.discard(original) : f.restore(original)).toBe("storage-failed");
+  expect(failed).toBe(true);
+  reset();
+  reopenStorage();
+  const committed = stage === "publish" && failure === "after-write";
+  if (committed) {
+    expect(f.entry()).toBeUndefined();
+    expect(f.restore(original, secondScope)).toBe("conflict");
+  } else {
+    f.expectRetained();
+    expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toHaveLength(1);
+    expect(discard ? f.discard() : f.restore(f.entry(), secondScope)).toBe(
+      discard ? "discarded" : "restored",
+    );
+  }
+  const sessions = f.stored().sessions;
+  if (discard) {
+    expect(sessions).toEqual({});
+  } else {
+    const scope = committed ? firstScope : secondScope;
+    const key = scopeKey(scope);
+    expect(Object.keys(sessions)).toEqual([key]);
+    expect(sessions[key]).toMatchObject(
+      kind === "draft"
+        ? { draft: f.session.draft }
+        : {
+            queue: [{ id: "input", text: "queue 雪", ...scope, storageScope }],
+          },
+    );
+  }
+  expect(f.entries().filter((row) => row.sourceScopeKey === sourceScope)).toEqual([]);
+  if (stage === "retire-write") {
+    expect(f.entries()[0]?.session.draft).toBe("untouched");
+  }
+});
+
+it.each([
+  [sourceScope, "agent:main:old", true, {}],
+  ["main\u0000agent:main", "agent:main:main", true, {}],
+  [sourceScope, firstScope.sessionKey, false, { attachments: [attachment] }],
+  [
+    sourceScope,
+    firstScope.sessionKey,
+    true,
+    { intent: { kind: "session-goal-start", version: 1, issuedAtMs: 1 } },
+  ],
+  [sourceScope, firstScope.sessionKey, true, { localCommandName: "clear" }],
+  [sourceScope, firstScope.sessionKey, true, { queueMode: "steer" }],
+] satisfies Array<[string, string, boolean, Partial<ChatQueueItem>]>)(
+  "preserves admission when restoring %s to %s (retained=%s)",
+  (source, destination, retained, input) => {
+    const f = fixture("queue", false, source);
+    const legacy = f.legacy();
+    Object.assign(legacy.sessions[source]!.queue![0]!, input);
+    f.saveLegacy(legacy);
+    const scope = { sessionKey: destination, agentId: "main" };
+
+    expect(f.restore(f.entry(), scope)).toBe("restored");
+
+    const restored = f.stored().sessions[scopeKey(scope)]?.queue?.[0];
+    expect(restored).toMatchObject({
+      ...input,
+      sendAttempts: retained ? 1 : 0,
+      sendState: retained ? "held" : "failed",
+    });
+    if (retained) {
+      expect(restored).toMatchObject({
+        sendRunId: "attempt",
+        sessionId: "session",
+      });
+    } else {
+      expect(restored).not.toHaveProperty("sendRunId");
+      expect(restored).not.toHaveProperty("sessionId");
+    }
+  },
+);
+
+it.each([
+  ...(["account", "client"] as const).map((change) => ({
+    boundary: "claim" as const,
+    change,
+  })),
+  ...(["stage", "retire"] as const).map((boundary) => ({ boundary, change: "account" as const })),
+])("retains recovery across reentrant $change replacement at $boundary", ({ boundary, change }) => {
+  const f = fixture("draft");
+  const original = f.entry();
+  let changed = false;
+  const reset = interceptTransfer(f, (stage, commit) => {
+    commit();
+    if (!changed && stage === (boundary === "retire" ? "retire-remove" : boundary)) {
+      changed = true;
+      if (change === "account") {
+        f.state.client.recoveryScope = "account-b";
+      } else {
+        f.state.client = { ...f.state.client };
+      }
+    }
+  });
+  expect(f.restore(original)).toBe("conflict");
+  reset();
+  expect(changed).toBe(true);
+  if (change === "account") {
+    expect(f.entries()).toEqual([]);
+    f.state.client.recoveryScope = "account-a";
+  }
+  f.expectRetained();
+  expect(f.restore(f.entry(), secondScope)).toBe("restored");
+  expect(f.stored().sessions[scopeKey(secondScope)]?.draft).toBe(f.session.draft);
+  if (boundary !== "claim") {
+    expect(Object.keys(f.stored().sessions)).toEqual([scopeKey(secondScope)]);
+  }
+});
+
+it.each([
+  { kind: "queue", occupied: "queue" },
+  { kind: "draft", occupied: "queue" },
+  { kind: "draft", occupied: "pending" },
+  { kind: "queue", occupied: "draft" },
+] as const)("retains $kind when destination is full of $occupied", ({ kind, occupied }) => {
+  const f = fixture(kind);
+  const key = fillDestination(f, occupied);
+  const before = f.stored().sessions;
+  expect(f.restore()).toBe("storage-failed");
+  expect(f.stored().sessions).toEqual(before);
+  expect(Object.keys(f.stored().sessions)).toHaveLength(20);
+  reopenStorage();
+  expect(f.entry().session).toEqual(f.session);
+  if (occupied === "pending") {
+    const ordinary = f.stored();
+    ordinary.sessions[scopeKey(firstScope)] = { ...f.session, updatedAt: Date.now() };
+    f.save(ordinary);
+    expect(f.stored().sessions[scopeKey(firstScope)]).toBeUndefined();
+    expect(f.entry().session).toEqual(f.session);
+  }
+  const freed = f.stored();
+  delete freed.sessions[key(0)];
+  f.save(freed);
+  expect(f.restore(f.entry(), secondScope)).toBe("restored");
+  const after = f.stored().sessions;
+  expect(Object.keys(after)).toHaveLength(20);
+  for (let index = 1; index < 20; index++) {
+    expect(after[key(index)]).toEqual(before[key(index)]);
+  }
+  expect(after[scopeKey(secondScope)]).toMatchObject(
+    kind === "draft" ? { draft: f.session.draft } : { queue: [{ id: "input" }] },
+  );
+  expect(after[scopeKey(firstScope)]).toBeUndefined();
+  expect(f.entries()).toEqual([]);
 });
