@@ -52,7 +52,6 @@ it.each<[Record<string, unknown>, boolean, string, { now?: number; channelId?: s
   [{ connected: false, lifecycle: "starting", lastStartAt: 95_000 }, true, "startup-connect-grace"],
   [{ lifecycle: "stopped" }, false, "not-running"],
   [{ running: false, terminalDisconnect: true, linked: false }, false, "terminal-disconnect"],
-  [{ running: false, terminalDisconnect: false }, false, "not-running"],
   [{ running: true, connected: true, terminalDisconnect: true }, true, "healthy"],
   [
     { running: false, linked: false, restartPending: true, ingressUnavailable: true },

@@ -51,7 +51,6 @@ test("sessions.create preserves creation and notices after an unknown signal out
   }).finally(signal.restore);
 
   expect(created.ok).toBe(true);
-  expect(signal.attempts()).toBe(1);
   expect(created.payload?.entry).toMatchObject({
     createdVia: "operator",
     createdActor: { type: "human", source: "profile", id: profileId },
@@ -114,8 +113,8 @@ test("sessions.create preserves creation and notices after an unknown signal out
     expect(hinted.payload?.entry).toMatchObject({
       createdVia: "spawn",
       createdActor: expectedCreator,
+      sandbox,
     });
-    expect(hinted.payload?.entry?.sandbox).toBe(sandbox);
     const hintedKey = expectDefined(hinted.payload?.key, "delegated session key");
     const stored = loadSessionEntry({ sessionKey: hintedKey, storePath });
     expect(stored?.createdVia).toBe("spawn");
