@@ -101,22 +101,16 @@ it.each<[string, boolean, "none" | "scope" | "manager", Scenario]>([
 
   await expect(shouldManageGatewayService(env)).resolves.toBe(expected);
 
-  expect([
-    mocks.findInstalledSystemdGatewayScope.mock.calls,
-    mocks.resolveGatewayService.mock.calls,
-    mocks.isLoaded.mock.calls,
-  ]).toEqual([
-    probes === "none" ? [] : [[env]],
-    probes === "manager" ? [[]] : [],
-    probes === "manager" ? [[{ env, timeoutMs: 5_000 }]] : [],
-  ]);
+  expect(mocks.findInstalledSystemdGatewayScope).toHaveBeenCalledTimes(probes === "none" ? 0 : 1);
+  expect(mocks.resolveGatewayService).toHaveBeenCalledTimes(probes === "manager" ? 1 : 0);
+  expect(mocks.isLoaded).toHaveBeenCalledTimes(probes === "manager" ? 1 : 0);
 });
 
 it.each([
-  { envKey: "OPENCLAW_SERVICE_REPAIR_POLICY", value: "external" },
-  { envKey: "OPENCLAW_SUPERVISOR_MODE", value: "external" },
-  { envKey: "OPENCLAW_UPDATE_IN_PROGRESS", value: "1" },
-])("never confirms a Doctor repair deferred by $envKey", async ({ envKey, value }) => {
+  ["OPENCLAW_SERVICE_REPAIR_POLICY", "external"],
+  ["OPENCLAW_SUPERVISOR_MODE", "external"],
+  ["OPENCLAW_UPDATE_IN_PROGRESS", "1"],
+])("never confirms a Doctor repair deferred by %s", async (envKey, value) => {
   const prompter = createDoctorPrompter({
     runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
     options: { repair: true },

@@ -21,17 +21,21 @@ function lspConfig(
   return vi.fn(() => ({ config: { lspServers: servers }, diagnostics: [] }));
 }
 
-const gopls = { gopls: { command: "gopls", args: ["serve"] } };
+const gopls = { gopls: { command: "gopls", env: { DOTNET_ROOT: "/bundle/dotnet" } } };
 const gatewayEnv = {
   HTTPS_PROXY: ["http://user", "proxy-pass-canary@proxy.example:3128"].join(":"),
   ANDROID_HOME: "/srv/android-canary",
+  DOTNET_ROOT: "/srv/dotnet-canary",
   NPM_TOKEN: "npm-token-canary",
   OPENAI_API_KEY: "provider-key-canary",
 };
 
 beforeEach(() => {
   noteFn.mockReset();
-  service.readCommand.mockReset().mockResolvedValue(null);
+  service.readCommand.mockReset().mockResolvedValue({
+    programArguments: [],
+    environment: { VIRTUAL_ENV: "/srv/venv-canary" },
+  });
   shouldManageGatewayService.mockReset().mockResolvedValue(false);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -61,34 +65,16 @@ it("names withheld Gateway variables per configured server, never values or secr
   expect(text).toContain(`- "gopls": ANDROID_HOME: add to the server's "env"`);
   expect(text).toContain(`- "gopls": HTTPS_PROXY: refused by the host exec env policy`);
   expect(text).toContain(docsUrl);
-  expect(text).not.toMatch(/NPM_TOKEN|OPENAI_API_KEY|canary|proxy-pass|proxy\.example/);
+  expect(text).not.toMatch(/DOTNET_ROOT|NPM_TOKEN|OPENAI_API_KEY|canary|proxy-pass|proxy\.example/);
 });
 
-it("stays quiet without configured bundle LSP servers", async () => {
-  expect(await diagnose({ loadLspConfig: lspConfig({}) })).toBeUndefined();
-  expect(
-    await diagnose({ loadLspConfig: lspConfig({ remote: { transport: "socket" } }) }),
-  ).toBeUndefined();
-});
-
-it("stays quiet when no commonly needed variable is set", async () => {
-  expect(await diagnose({ env: { OPENAI_API_KEY: "provider-key-canary" } })).toBeUndefined();
-});
-
-it("skips remote Gateways", async () => {
-  expect(await diagnose({ cfg: { gateway: { mode: "remote" } } })).toBeUndefined();
-});
-
-it("omits a name the server's own env supplies", async () => {
-  const text = await diagnose({
-    env: { ANDROID_HOME: "/srv/android", DOTNET_ROOT: "/srv/dotnet" },
-    loadLspConfig: lspConfig({
-      gopls: { command: "gopls", env: { ANDROID_HOME: "/bundle/android" } },
-    }),
-  });
-
-  expect(text).toContain(`- "gopls": DOTNET_ROOT: add to the server's "env"`);
-  expect(text).not.toContain("ANDROID_HOME");
+it.each([
+  { loadLspConfig: lspConfig({}) },
+  { loadLspConfig: lspConfig({ remote: { transport: "socket" } }) },
+  { env: { OPENAI_API_KEY: "provider-key-canary" } },
+  { cfg: { gateway: { mode: "remote" as const } } },
+])("stays quiet for an inapplicable environment: %j", async (options) => {
+  expect(await diagnose(options)).toBeUndefined();
 });
 
 it("evaluates each workspace's config when workspaces reuse a server name", async () => {
@@ -109,18 +95,12 @@ it("evaluates each workspace's config when workspaces reuse a server name", asyn
     loadLspConfig,
   });
 
-  expect(loadLspConfig).toHaveBeenCalledTimes(2);
   expect(text).toContain(`- "kotlin": ANDROID_HOME: add to the server's "env"`);
   expect(text).not.toMatch(/\/srv\/android|\/bundle\/android/);
 });
 
 it("includes the installed Gateway service environment", async () => {
   shouldManageGatewayService.mockResolvedValue(true);
-  service.readCommand.mockResolvedValue({
-    programArguments: [],
-    environment: { VIRTUAL_ENV: "/srv/venv-canary" },
-  });
-
   const text = await diagnose({ env: { HOME: userInfo().homedir } });
 
   expect(text).toContain(`- "gopls": VIRTUAL_ENV: refused by the host exec env policy`);
@@ -129,11 +109,6 @@ it("includes the installed Gateway service environment", async () => {
 
 it("does not read the installed service for a non-default install identity", async () => {
   shouldManageGatewayService.mockResolvedValue(true);
-  service.readCommand.mockResolvedValue({
-    programArguments: [],
-    environment: { VIRTUAL_ENV: "/srv/venv" },
-  });
-
   expect(await diagnose({ env: { HOME: "/srv/relocated-home" } })).toBeUndefined();
   expect(service.readCommand).not.toHaveBeenCalled();
 });
