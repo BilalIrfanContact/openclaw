@@ -21,6 +21,13 @@ function fixture() {
 }
 const params = { requestId: "first", task: "Review the change" };
 const guard = { pluginId: "test-plugin", assertCurrent() {} };
+const inRequest = <T>(runtime: NativeSubagentRuntime, run: () => Promise<T>) =>
+  withNativeSubagentRequest(
+    () => runtime,
+    () => withNativeSubagentRuntimeGuard(guard, run),
+  );
+const listChildren = (options?: Parameters<NonNullable<NativeSubagentRuntime["list"]>>[0]) =>
+  expectDefined(nativeSubagentRuntime.list, "list facade")(options);
 
 describe("native subagent requester binding", () => {
   it("rejects calls without both a host request and a plugin runtime", async () => {
@@ -75,22 +82,17 @@ describe("native subagent requester binding", () => {
 
   it("reports optional listing absence honestly on an older runtime", async () => {
     const runtime = fixture();
-    await withNativeSubagentRequest(
-      () => runtime,
-      () =>
-        withNativeSubagentRuntimeGuard(guard, async () => {
-          await expect(expectDefined(nativeSubagentRuntime.list, "list facade")()).rejects.toThrow(
-            "listing is unsupported",
-          );
-        }),
-    );
+    await inRequest(runtime, async () => {
+      await expect(listChildren()).rejects.toThrow("listing is unsupported");
+    });
     expect(runtime.collect).not.toHaveBeenCalled();
     expect(runtime.spawn).not.toHaveBeenCalled();
   });
 
-  it("rechecks unload after listing preparation", async () => {
+  it.each(["list", "spawn"] as const)("rechecks unload after %s preparation", async (method) => {
     const ready = createDeferred<NativeSubagentRuntime>();
     const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
+    const runtime = { ...fixture(), list };
     let active = true;
     const pending = withNativeSubagentRequest(
       () => ready.promise,
@@ -104,31 +106,23 @@ describe("native subagent requester binding", () => {
               }
             },
           },
-          () => expectDefined(nativeSubagentRuntime.list, "list facade")(),
+          () => (method === "list" ? listChildren() : nativeSubagentRuntime.spawn(params)),
         ),
     );
     active = false;
-    ready.resolve({ ...fixture(), list });
+    ready.resolve(runtime);
     await expect(pending).rejects.toThrow("plugin unloaded");
-    expect(list).not.toHaveBeenCalled();
+    expect(runtime[method]).not.toHaveBeenCalled();
   });
 
   it("expires retained listing calls with their invoking request", async () => {
     const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
     const gate = createDeferred();
     let detached: Promise<unknown> | undefined;
-    await withNativeSubagentRequest(
-      () => ({ ...fixture(), list }),
-      () =>
-        withNativeSubagentRuntimeGuard(guard, async () => {
-          expect(
-            await expectDefined(nativeSubagentRuntime.list, "list facade")({ status: "queued" }),
-          ).toEqual([]);
-          detached = gate.promise.then(() =>
-            expectDefined(nativeSubagentRuntime.list, "list facade")(),
-          );
-        }),
-    );
+    await inRequest({ ...fixture(), list }, async () => {
+      expect(await listChildren({ status: "queued" })).toEqual([]);
+      detached = gate.promise.then(() => listChildren());
+    });
     gate.resolve();
     await expect(detached).rejects.toThrow("requester-bound");
     expect(list).toHaveBeenCalledExactlyOnceWith({ status: "queued" });
@@ -153,31 +147,6 @@ describe("native subagent requester binding", () => {
     expect(signal?.aborted).toBe(true);
     gate.resolve();
     await expect(detached).rejects.toThrow("requester-bound");
-    expect(runtime.spawn).not.toHaveBeenCalled();
-  });
-
-  it("rechecks plugin lifecycle after awaited request preparation", async () => {
-    const gate = createDeferred<NativeSubagentRuntime>();
-    const runtime = fixture();
-    let active = true;
-    const work = withNativeSubagentRequest(
-      () => gate.promise,
-      () =>
-        withNativeSubagentRuntimeGuard(
-          {
-            pluginId: "test-plugin",
-            assertCurrent() {
-              if (!active) {
-                throw new Error("plugin retired");
-              }
-            },
-          },
-          () => nativeSubagentRuntime.spawn(params),
-        ),
-    );
-    active = false;
-    gate.resolve(runtime);
-    await expect(work).rejects.toThrow("plugin retired");
     expect(runtime.spawn).not.toHaveBeenCalled();
   });
 });

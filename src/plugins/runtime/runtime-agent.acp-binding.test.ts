@@ -10,18 +10,15 @@ type Create = Parameters<ReturnType<typeof createRuntimeAgent>["session"]["creat
 type CreateOptions<T = Create> = T extends Create
   ? Omit<T, "cfg" | "key" | "initialEntry"> & Partial<Pick<T, "key" | "initialEntry">>
   : never;
-function acpFixture({
-  key = "agent:main:plugin:acpx:catalog-adopt:pi:source",
-  agent = "pi",
-  pluginOwnerId = "acpx",
-  sourceId = "pi-source",
-} = {}) {
+function acpFixture() {
+  const key = "agent:main:plugin:acpx:catalog-adopt:pi:source";
+  const pluginOwnerId = "acpx";
   const session = createRuntimeAgent().session;
-  const cwd = `/workspace/${agent}`;
+  const cwd = "/workspace/pi";
   const initialEntry = {
     acpBackendId: "acpx",
     pluginOwnerId,
-    acpSessionBinding: { acpAgentId: agent, agentSessionId: sourceId },
+    acpSessionBinding: { acpAgentId: "pi", agentSessionId: "pi-source" },
   };
   return {
     key,
@@ -40,18 +37,15 @@ function acpFixture({
           initializationPending: true,
           pluginOwnerId,
           spawnedCwd: cwd,
-          ...(pluginExtensions ? { pluginExtensions } : {}),
+          pluginExtensions,
           acpSessionBinding: { acpBackendId: "acpx", ...initialEntry.acpSessionBinding },
         },
       }),
     initialEntry,
   };
 }
-function withAcpFixture(
-  run: (fixture: ReturnType<typeof acpFixture>) => Promise<void>,
-  options?: Parameters<typeof acpFixture>[0],
-) {
-  return withOpenClawTestState({ label: "plugin-runtime-acp" }, () => run(acpFixture(options)));
+function withAcpFixture(run: (fixture: ReturnType<typeof acpFixture>) => Promise<void>) {
+  return withOpenClawTestState({ label: "plugin-runtime-acp" }, () => run(acpFixture()));
 }
 const readMeta = (sessionKey: string) =>
   acpSessionMeta.readAcpSessionEntry({ cfg: {}, sessionKey })?.acp;
@@ -115,43 +109,35 @@ it("persists a plugin-owned native resume binding", async () => {
 });
 
 it("rejects recovery when the native resume binding differs", async () => {
-  await withAcpFixture(
-    async ({ key, cwd, seed, read, create }) => {
-      await seed("interrupted-acp-initializer");
-      await acpSessionMeta.upsertAcpSessionMeta({
-        cfg: {},
-        sessionKey: key,
-        mutate: () => ({
-          backend: "acpx",
-          agent: "opencode",
-          runtimeSessionName: key,
-          identity: {
-            state: "resolved",
-            agentSessionId: "different-source",
-            source: "ensure",
-            lastUpdatedAt: Date.now(),
-          },
-          mode: "persistent",
-          cwd,
-          state: "idle",
-          lastActivityAt: Date.now(),
-        }),
-      });
-      const stored = read();
-      const afterCreate = vi.fn(async () => ({ pluginExtensions: {} }));
-      await expect(
-        create({ spawnedCwd: cwd, recoverMatchingInitialEntry: true, afterCreate }),
-      ).rejects.toThrow("does not match its trusted recovery state");
-      expect(afterCreate).not.toHaveBeenCalled();
-      expect(read()).toEqual(stored);
-    },
-    {
-      key: "agent:main:plugin:opencode:catalog-adopt:source",
-      agent: "opencode",
-      pluginOwnerId: "opencode",
-      sourceId: "expected-source",
-    },
-  );
+  await withAcpFixture(async ({ key, cwd, seed, read, create }) => {
+    await seed("interrupted-acp-initializer");
+    await acpSessionMeta.upsertAcpSessionMeta({
+      cfg: {},
+      sessionKey: key,
+      mutate: () => ({
+        backend: "acpx",
+        agent: "pi",
+        runtimeSessionName: key,
+        identity: {
+          state: "resolved",
+          agentSessionId: "different-source",
+          source: "ensure",
+          lastUpdatedAt: Date.now(),
+        },
+        mode: "persistent",
+        cwd,
+        state: "idle",
+        lastActivityAt: Date.now(),
+      }),
+    });
+    const stored = read();
+    const afterCreate = vi.fn(async () => ({ pluginExtensions: {} }));
+    await expect(
+      create({ spawnedCwd: cwd, recoverMatchingInitialEntry: true, afterCreate }),
+    ).rejects.toThrow("does not match its trusted recovery state");
+    expect(afterCreate).not.toHaveBeenCalled();
+    expect(read()).toEqual(stored);
+  });
 });
 
 it("recovers an interrupted ACP initializer before metadata was seeded", async () => {
