@@ -1121,7 +1121,9 @@ asynchronous filesystem reads before dispatching maintenance. Slow metadata
 writeback delays that check without blocking the Gateway event loop. Stopping
 maintenance joins the check. A confirmed live sidecar mismatch still terminates
 the process without SQLite cleanup, including when shutdown is waiting on the
-check. Otherwise, a stopped owner dispatches no further maintenance.
+check. Native close and replacement refuse while inspection is pending; idle eviction
+retains its handle and lease until a later retry. Otherwise, a stopped owner
+dispatches no further maintenance.
 
 If the warning persists, capture `openclaw status --deep` output and restart the
 Gateway with `openclaw gateway restart`. Report the captured output

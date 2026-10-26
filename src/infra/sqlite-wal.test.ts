@@ -7,6 +7,7 @@ import { probeTreeClone } from "@openclaw/fs-safe/copy";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferredCore } from "../shared/deferred.js";
+import { registerNodeSqliteDisposeCallback } from "./kysely-sync-cache-state.js";
 import { requireNodeSqlite } from "./node-sqlite.js";
 import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "./runtime-worker-url.js";
 import {
@@ -403,6 +404,8 @@ describe("sqlite WAL maintenance", () => {
       db.prepare("INSERT INTO entries VALUES ('pending');").run();
       const prepare = vi.spyOn(db, "prepare");
       const close = vi.spyOn(db, "close");
+      const disposeDependent = vi.fn();
+      registerNodeSqliteDisposeCallback(db, disposeDependent);
       const inspecting = createDeferredCore();
       const inspected = createDeferredCore<fs.BigIntStats>();
       const sidecarPath = `${databasePath}-wal`;
@@ -427,6 +430,10 @@ describe("sqlite WAL maintenance", () => {
         expect(maintenance.checkpoint()).toBe(false);
         expect(() => maintenance.reclaimFreePages()).toThrow("owner is unavailable");
         expect(maintenance.close()).toBe(false);
+        expect(() => db.close()).toThrow("SQLite WAL inspection is pending");
+        expect(db.isOpen).toBe(true);
+        expect(disposeDependent).not.toHaveBeenCalled();
+        close.mockClear();
         expect(prepare).not.toHaveBeenCalled();
       } finally {
         inspected.resolve({ dev: 10n, ino: 21n } as fs.BigIntStats);

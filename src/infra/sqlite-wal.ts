@@ -6,6 +6,7 @@ import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coerci
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { GatewayScheduler, type GatewayScheduledJob } from "./gateway-scheduler.js";
+import { registerNodeSqliteDisposeGuard } from "./kysely-sync-cache-state.js";
 import {
   normalizeSqliteNonNegativeInteger,
   runWithSqliteBusyTimeout,
@@ -500,6 +501,11 @@ export function configureSqliteWalMaintenance(
       if (tripwireDatabasePath && splitBrainDetectionEnabled) {
         // Other due ticks and explicit maintenance must not overtake containment.
         inspectingSidecars = true;
+        const releaseInspection = registerNodeSqliteDisposeGuard(db, () => {
+          throw new Error(
+            "SQLite WAL inspection is pending; await maintenance.stop() before close",
+          );
+        });
         try {
           let splitBrain: SqliteWalSplitBrainEvent | undefined;
           try {
@@ -518,6 +524,7 @@ export function configureSqliteWalMaintenance(
             terminateForSqliteWalSplitBrain(splitBrain, options.databaseLabel);
           }
         } finally {
+          releaseInspection();
           inspectingSidecars = false;
         }
         if (scope.signal.aborted) {
