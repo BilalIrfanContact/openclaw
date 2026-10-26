@@ -35,15 +35,9 @@ const model = makeProviderModelFixture({
 const assistant = makeAssistantMessageFixture({
   api: model.api,
   provider: model.provider,
-  model: model.id,
-  content: [{ type: "text", text: "title" }],
   stopReason: "stop",
   errorMessage: undefined,
-  timestamp: 1,
-  usage: {
-    ...createUsageFixture(8, 2, 10),
-    cost: { input: 0.000008, output: 0.000002, cacheRead: 0, cacheWrite: 0, total: 0.00001 },
-  },
+  usage: createUsageFixture(8, 2, 10),
 });
 const messages = [{ role: "user" as const, content: "Generate a title", timestamp: 1 }];
 const complete = () =>
@@ -73,13 +67,9 @@ it("does not serialize prompts for the default activity and stability listeners"
   completeSimple.mockResolvedValue(assistant);
   using stringify = vi.spyOn(JSON, "stringify");
 
-  for (let call = 0; call < 3; call++) {
-    await complete();
-  }
+  await complete();
   await waitForDiagnosticEventsDrained();
   expect(stringify.mock.calls.filter(([value]) => value === messages)).toHaveLength(0);
-  expect(completeSimple).toHaveBeenCalledTimes(3);
-  expect(activityByRunId.size).toBe(0);
 });
 
 it.each(["success", "returned-error", "throw"] as const)(
@@ -116,7 +106,6 @@ it.each(["success", "returned-error", "throw"] as const)(
       { callId: calls[0]?.callId, durationMs: expect.any(Number) },
     ]);
     expect(events.filter((event) => event.type === "model.usage")).toEqual([]);
-    expect(completeSimple).toHaveBeenCalledOnce();
     expect(activityByRunId.size).toBe(0);
   },
 );

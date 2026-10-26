@@ -36,24 +36,18 @@ it.each([
   expect(resolvePersistedSessionRuntimeId(entry)).toBe(expected);
 });
 
-it("keeps a locked harness across a conflicting provider runtime alias", () => {
-  expect(
-    resolveSessionRuntimeOverrideForProvider({
-      provider: "anthropic",
-      entry: { ...lockedCodex, agentRuntimeOverride: "claude-cli" },
-    }),
-  ).toBe("codex");
-});
-
-it("retains plugin ownership after another harness reports usage", () => {
-  for (const agentHarnessId of [undefined, "codex", "claude-cli"]) {
-    expect(
-      resolveSessionRuntimeOverrideForProvider({
-        provider: "openai",
-        entry: { ...lockedCodex, agentHarnessId, pluginOwnerId: "model-owner" },
-      }),
-    ).toBe("openclaw");
-  }
+it.each([
+  ["anthropic", { ...lockedCodex, agentRuntimeOverride: "claude-cli" }, "codex"],
+  ...[undefined, "codex", "claude-cli"].map(
+    (agentHarnessId) =>
+      [
+        "openai",
+        { ...lockedCodex, agentHarnessId, pluginOwnerId: "model-owner" },
+        "openclaw",
+      ] as const,
+  ),
+] as const)("preserves runtime ownership for %s / %j", (provider, entry, expected) => {
+  expect(resolveSessionRuntimeOverrideForProvider({ provider, entry })).toBe(expected);
 });
 
 describe("resolveManualCompactionCliTarget", () => {
@@ -62,15 +56,6 @@ describe("resolveManualCompactionCliTarget", () => {
     provider = "anthropic",
     cfg?: Parameters<typeof resolveManualCompactionCliTarget>[0]["cfg"],
   ) => resolveManualCompactionCliTarget({ provider, entry, cfg });
-  const useSetupBackend = (expectedConfig?: Parameters<typeof compact>[2]) => {
-    cliBackendsTesting.setDepsForTest({
-      resolveRuntimeCliBackends: () => [],
-      resolvePluginSetupCliBackend: ({ backend, config }) =>
-        backend === "claude-cli" && (!expectedConfig || config === expectedConfig)
-          ? ({ pluginId: "anthropic", backend: cliBackend() } as never)
-          : undefined,
-    });
-  };
   beforeEach(() => {
     cliBackendsTesting.setDepsForTest({
       resolveRuntimeCliBackends: () => [cliBackend()] as never,
@@ -81,7 +66,13 @@ describe("resolveManualCompactionCliTarget", () => {
 
   it.each([false, true])("uses setup metadata (explicit runtime: %s)", (explicit) => {
     const cfg = explicit ? { plugins: { entries: { anthropic: { enabled: true } } } } : {};
-    useSetupBackend(cfg);
+    cliBackendsTesting.setDepsForTest({
+      resolveRuntimeCliBackends: () => [],
+      resolvePluginSetupCliBackend: ({ backend, config }) =>
+        backend === "claude-cli" && config === cfg
+          ? ({ pluginId: "anthropic", backend: cliBackend() } as never)
+          : undefined,
+    });
     const entry = {
       cliSessionBindings: nativeBinding,
       ...(explicit ? { agentRuntimeOverride: "claude-cli" } : {}),

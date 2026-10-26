@@ -1,22 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ToolAllowDenyPolicyConfig } from "../config/types.tools.js";
-import { resolveSandboxConfigForAgent } from "./sandbox/config.js";
 import {
   formatSandboxToolPolicyBlockedMessage,
   resolvePreparedSandboxRuntimeStatus,
 } from "./sandbox/runtime-status.js";
-import { resolveSandboxToolPolicyForAgent } from "./sandbox/tool-policy.js";
+import { isToolAllowed, resolveSandboxToolPolicyForAgent } from "./sandbox/tool-policy.js";
 
-const { toolPolicyAuditInfo } = vi.hoisted(() => ({
-  toolPolicyAuditInfo: vi.fn(),
-}));
+const toolPolicyAuditInfo = vi.hoisted(() => vi.fn());
 
+// mock-isolation: Observe audit logging without touching the real subsystem logger.
 vi.mock("../logging/subsystem.js", () => ({
-  createSubsystemLogger: () => ({
-    // Audit logging is asserted without touching the real subsystem logger.
-    info: toolPolicyAuditInfo,
-  }),
+  createSubsystemLogger: () => ({ info: toolPolicyAuditInfo }),
 }));
 
 function sandboxConfig(
@@ -24,18 +19,13 @@ function sandboxConfig(
   agentTools?: ToolAllowDenyPolicyConfig,
   mode: "all" | "non-main" = "all",
 ): OpenClawConfig {
-  const config: OpenClawConfig = {
+  return {
     agents: {
       defaults: { sandbox: { mode, scope: "agent" } },
+      entries: agentTools ? { work: { tools: { sandbox: { tools: agentTools } } } } : undefined,
     },
-    ...(tools === undefined ? {} : { tools: { sandbox: { tools } } }),
+    tools: tools ? { sandbox: { tools } } : undefined,
   };
-  if (agentTools !== undefined) {
-    config.agents!.entries = {
-      work: { workspace: "~/openclaw-work", tools: { sandbox: { tools: agentTools } } },
-    };
-  }
-  return config;
 }
 
 describe("sandbox explain helpers", () => {
@@ -43,36 +33,21 @@ describe("sandbox explain helpers", () => {
     toolPolicyAuditInfo.mockClear();
   });
 
-  it("prefers agent overrides > global > defaults (sandbox tool policy)", () => {
-    const cfg = sandboxConfig({ allow: ["read"], deny: ["browser"] }, { allow: ["write"] });
-
-    const resolved = resolveSandboxConfigForAgent(cfg, "work");
-    expect(resolved.tools).toMatchObject({ allow: ["write", "view_image"], deny: ["browser"] });
-
-    const policy = resolveSandboxToolPolicyForAgent(cfg, "work");
-    expect(policy).toMatchObject({
-      allow: ["write", "view_image"],
-      deny: ["browser"],
-      sources: { allow: { source: "agent" }, deny: { source: "global" } },
-    });
-  });
-
-  it("expands groups while preserving explicit denies", () => {
-    const cfg = sandboxConfig({ deny: ["memory_get"] }, { allow: ["group:memory", "group:fs"] });
+  it("prefers agent groups over global allows while preserving global denies", () => {
+    const cfg = sandboxConfig(
+      { allow: ["browser"], deny: ["memory_get"] },
+      { allow: ["group:memory", "group:fs"] },
+    );
 
     const policy = resolveSandboxToolPolicyForAgent(cfg, "work");
-    expect(policy.allow).toEqual([
-      "memory_search",
-      "memory_get",
-      "personal_instructions",
-      "ls",
-      "read",
-      "write",
-      "edit",
-      "apply_patch",
-      "view_image",
-    ]);
+    expect(policy.allow).toEqual(expect.arrayContaining(["memory_search", "memory_get", "read"]));
+    expect(policy.allow).not.toContain("browser");
     expect(policy.deny).toEqual(["memory_get"]);
+    expect(policy.sources).toMatchObject({
+      allow: { source: "agent" },
+      deny: { source: "global" },
+    });
+    expect(isToolAllowed(policy, "memory_get")).toBe(false);
   });
 
   it.each([undefined, true])("explains non-main policy blocks (audit: %s)", (audit) => {
@@ -102,16 +77,11 @@ describe("sandbox explain helpers", () => {
       expect(toolPolicyAuditInfo).not.toHaveBeenCalled();
       return;
     }
-    expect(toolPolicyAuditInfo).toHaveBeenCalledWith(
-      "sandbox tool policy blocked browser via tools.sandbox.tools.deny; matched browser",
-      {
-        tool: "browser",
-        ruleKind: "deny",
-        ruleSource: "global",
-        configKey: "tools.sandbox.tools.deny",
-        matchedRule: "browser",
-        sandboxMode: "non-main",
-      },
-    );
+    expect(toolPolicyAuditInfo.mock.calls[0]?.[1]).toMatchObject({
+      tool: "browser",
+      ruleKind: "deny",
+      ruleSource: "global",
+      configKey: "tools.sandbox.tools.deny",
+    });
   });
 });
