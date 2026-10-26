@@ -40,6 +40,13 @@ const queueItem = (overrides: Partial<ChatQueueItem> = {}): ChatQueueItem => ({
   createdAt: 1,
   ...overrides,
 });
+const submittedItem = () =>
+  queueItem({
+    sendRunId: "original-attempt",
+    sendAttempts: 1,
+    sendState: "waiting-reconnect",
+    sessionId: "original-session",
+  });
 const recovery = (
   session: StoredComposerSession,
   sourceVersion: StoredComposerRecovery["sourceVersion"] = 4,
@@ -60,18 +67,7 @@ function fixture(kind: "queue" | "draft", sibling = false, originalScope = sourc
   };
   const session = storedSession({
     draftRevision: 1,
-    ...(kind === "draft"
-      ? { draft: "Retained draft 雪" }
-      : {
-          queue: [
-            queueItem({
-              sendRunId: "original-attempt",
-              sendAttempts: 1,
-              sendState: "waiting-reconnect",
-              sessionId: "original-session",
-            }),
-          ],
-        }),
+    ...(kind === "draft" ? { draft: "Retained draft 雪" } : { queue: [submittedItem()] }),
   });
   const source = storageTargetForGateway(gatewayUrl);
   sessionStorage.setItem(
@@ -175,9 +171,6 @@ function deliveryFixture(idempotencyKey = "original-attempt") {
     currentSessionId: "original-session",
     chatMessages: [deliveredMessage(idempotencyKey)] as unknown[],
   });
-  const store = f.legacy();
-  store.sessions[sourceScope]!.queue![0]!.sessionId = state.currentSessionId;
-  f.saveLegacy(store);
   return { ...f, state };
 }
 
@@ -479,36 +472,20 @@ it.each(
 });
 
 it.each([
-  { source: sourceScope, destination: "agent:main:legacy", retained: true },
-  { source: "main\u0000agent:main", destination: "agent:main:main", retained: true },
-  {
-    source: sourceScope,
-    destination: firstScope.sessionKey,
-    retained: false,
-    attachments: [attachment],
-  },
-  {
-    source: sourceScope,
-    destination: firstScope.sessionKey,
-    retained: true,
-    intent: { kind: "session-goal-start", version: 1, issuedAtMs: 1 },
-  },
-  {
-    source: sourceScope,
-    destination: firstScope.sessionKey,
-    retained: true,
-    localCommandName: "clear",
-  },
-  { source: sourceScope, destination: firstScope.sessionKey, retained: true, queueMode: "steer" },
-] satisfies Array<
-  {
-    source: string;
-    destination: string;
-    retained: boolean;
-  } & Partial<ChatQueueItem>
->)(
-  "preserves admission=$retained when restoring $source to $destination",
-  ({ source, destination, retained, ...input }) => {
+  [sourceScope, "agent:main:legacy", true, {}],
+  ["main\u0000agent:main", "agent:main:main", true, {}],
+  [sourceScope, firstScope.sessionKey, false, { attachments: [attachment] }],
+  [
+    sourceScope,
+    firstScope.sessionKey,
+    true,
+    { intent: { kind: "session-goal-start", version: 1, issuedAtMs: 1 } },
+  ],
+  [sourceScope, firstScope.sessionKey, true, { localCommandName: "clear" }],
+  [sourceScope, firstScope.sessionKey, true, { queueMode: "steer" }],
+] satisfies Array<[string, string, boolean, Partial<ChatQueueItem>]>)(
+  "preserves admission when restoring %s to %s (retained=%s)",
+  (source, destination, retained, input) => {
     const f = fixture("queue", false, source);
     const legacy = f.legacy();
     Object.assign(legacy.sessions[source]!.queue![0]!, input);

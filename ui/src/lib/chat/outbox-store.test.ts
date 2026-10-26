@@ -46,6 +46,8 @@ const storedSession = (overrides: Partial<StoredComposerState["sessions"][string
   updatedAt: 1,
   ...overrides,
 });
+const draftSession = (draft: string, revision: number) =>
+  storedSession({ draft, draftRevision: revision, updatedAt: revision });
 const privateInput = () => ({
   draft: "@Alex private legacy input",
   draftMentions: [{ profileId: "alex", start: 0, end: 5 }],
@@ -287,7 +289,7 @@ it("admits legacy input through full clear fences without replay", () => {
     ),
   );
   const source = sourceJson(target, 3, {
-    [scopeKey]: { draft: "real saved input", draftRevision: 101, updatedAt: 101 },
+    [scopeKey]: draftSession("real saved input", 101),
     "main\u0000agent:main": { draftRevision: 99, updatedAt: 99 },
   });
   sessionStorage.setItem(target.blobKey, source);
@@ -340,37 +342,22 @@ it.each([
 ] as const)("restores valid mentions and parks invalid metadata: %s", (_reason, invalid) => {
   const scopeKey = storedChatOutboxScopeKey({ sessionKey: "agent:main:mentions" });
   const mentions = [mention()];
+  const item = queued(invalid === undefined ? "mention-send" : "corrupt-mention", {
+    text: invalid === undefined ? "@Alex queued" : "@Alex review",
+    sendState: "waiting-reconnect",
+  });
   if (invalid === undefined) {
     const store = readStore();
-    store.sessions[scopeKey] = {
+    store.sessions[scopeKey] = storedSession({
       draft: "@Alex draft",
       draftMentions: mentions,
-      queue: [
-        queued("mention-send", {
-          text: "@Alex queued",
-          mentions,
-          sendRunId: "mention-run",
-          sendState: "waiting-reconnect",
-        }),
-      ],
-      updatedAt: 1,
-    };
+      queue: [{ ...item, mentions, sendRunId: "mention-run" }],
+    });
     writeStoredOutboxStore(sessionStorage, target, store);
     mentions[0]!.profileId = "later-selection";
   } else {
     seedSource(target, 4, {
-      [scopeKey]: {
-        queue: [
-          {
-            ...queued("corrupt-mention", {
-              text: "@Alex review",
-              sendState: "waiting-reconnect",
-            }),
-            mentions: invalid,
-          },
-        ],
-        updatedAt: 1,
-      },
+      [scopeKey]: { updatedAt: 1, queue: [{ ...item, mentions: invalid }] },
     });
   }
   const restored = readStore().sessions[scopeKey];
@@ -492,17 +479,14 @@ it.each(["captured", "quota", "batch"] as const)(
     const other = storedChatOutboxScopeKey({
       sessionKey: captured ? "agent:main:current" : "newer",
     });
-    const replacement = {
-      draft: captured ? "new target" : "replacement",
-      draftRevision: captured ? 11 : 1_000,
-      updatedAt: captured ? 11 : 1_000,
-    };
+    const replacement = draftSession(
+      captured ? "new target" : "replacement",
+      captured ? 11 : 1_000,
+    );
     seedStore(target, {
       [scope]: {
-        draft: "retire me",
-        draftRevision: 10,
+        ...draftSession("retire me", 10),
         ...(captured ? {} : { queue: [queued("queued")] }),
-        updatedAt: 10,
       },
       ...(failed ? {} : { [other]: replacement }),
     });
