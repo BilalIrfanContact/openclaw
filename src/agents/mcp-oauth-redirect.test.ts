@@ -1,14 +1,18 @@
 import { formatErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { operatorMcpOAuthIdentity } from "./mcp-oauth-identity.js";
-import type { McpOAuthStore } from "./mcp-oauth-store.js";
 import { completeMcpOAuthAuthorization, resolveMcpOAuthAccessToken } from "./mcp-oauth.js";
-import { withMcpOAuthTempHome } from "./mcp-oauth.test-harness.js";
-import { resolvedOAuthConfig, seedMcpOAuthStoreForTest } from "./mcp-oauth.test-support.js";
+import { withTempHome } from "./mcp-oauth.test-harness.js";
+import { resolvedOAuthConfig, withMcpOAuthProviderForTest } from "./mcp-oauth.test-support.js";
 
 const TEST_UNDICI_RUNTIME_DEPS_KEY = "__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__";
 const lookupMock = vi.hoisted(() => vi.fn());
 const redirectRefusal = "Refusing to follow cross-origin redirect for POST request body";
+const homeOptions = {
+  prefix: "openclaw-mcp-oauth-redirect-",
+  skipSessionCleanup: true,
+  env: { OPENCLAW_CONFIG_PATH: undefined, OPENCLAW_STATE_DIR: undefined },
+};
 
 class TestDispatcher {
   constructor(readonly options: unknown) {}
@@ -37,13 +41,17 @@ function installRedirectingRuntime(status: number) {
   return runtimeFetchMock;
 }
 
-function prepareGrant(identity: ReturnType<typeof operatorMcpOAuthIdentity>, grant: McpOAuthStore) {
-  const issuer = "https://example.com/";
-  seedMcpOAuthStoreForTest(identity.storeKey, {
-    authorizationId: "synthetic-authorization",
-    clientInformation: { client_id: "fixture-client" },
-    tokensAuthorizationServerUrl: issuer,
-    discoveryState: {
+async function createPreparedProvider(
+  params: {
+    identity: ReturnType<typeof operatorMcpOAuthIdentity>;
+    allowAuthorizationRedirect?: boolean;
+  },
+  run: Parameters<typeof withMcpOAuthProviderForTest>[1],
+) {
+  return await withMcpOAuthProviderForTest(params, async (provider) => {
+    const issuer = "https://example.com/";
+    await provider.saveClientInformation?.({ client_id: "fixture-client" });
+    await provider.saveDiscoveryState?.({
       authorizationServerUrl: issuer,
       authorizationServerMetadata: {
         issuer,
@@ -54,11 +62,11 @@ function prepareGrant(identity: ReturnType<typeof operatorMcpOAuthIdentity>, gra
         token_endpoint_auth_methods_supported: ["none"],
       },
       resourceMetadata: {
-        resource: identity.serverUrl,
+        resource: params.identity.serverUrl,
         authorization_servers: [issuer],
       },
-    },
-    ...grant,
+    });
+    return await run(provider);
   });
 }
 
@@ -75,12 +83,18 @@ describe("MCP OAuth redirects", () => {
   it.each([307, 308])(
     "rejects a cross-origin code-exchange %s redirect before replaying its body",
     async (status) => {
-      await withMcpOAuthTempHome(async () => {
+      await withTempHome(async () => {
         const identity = operatorMcpOAuthIdentity(`Redirect ${status}`, "https://example.com/mcp");
-        prepareGrant(identity, {
-          codeVerifier: "synthetic-verifier",
-          redirectUrl: "http://127.0.0.1:8989/oauth/callback",
-        });
+        await createPreparedProvider(
+          { identity, allowAuthorizationRedirect: true },
+          async (provider) => {
+            await provider.saveCodeVerifier("synthetic-verifier");
+            const authorizationUrl = new URL("https://example.com/authorize");
+            authorizationUrl.searchParams.set("redirect_uri", String(provider.redirectUrl));
+            authorizationUrl.searchParams.set("state", "state-1234567890");
+            await provider.redirectToAuthorization(authorizationUrl);
+          },
+        );
 
         const runtimeFetchMock = installRedirectingRuntime(status);
         await expect(
@@ -89,20 +103,20 @@ describe("MCP OAuth redirects", () => {
           }),
         ).rejects.toThrow(redirectRefusal);
         expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
-      }, "openclaw-mcp-oauth-redirect-");
+      }, homeOptions);
     },
   );
 
   it("preserves the redirect refusal through real SDK token refresh", async () => {
-    await withMcpOAuthTempHome(async () => {
+    await withTempHome(async () => {
       const identity = operatorMcpOAuthIdentity("Refresh Redirect", "https://example.com/mcp");
-      prepareGrant(identity, {
-        tokenExpiresAt: 0,
-        tokens: {
+      await createPreparedProvider({ identity }, async (provider) => {
+        await provider.saveTokens({
           access_token: "expired-access",
           refresh_token: "synthetic-refresh",
           token_type: "Bearer",
-        },
+          expires_in: -1,
+        });
       });
       const runtimeFetchMock = installRedirectingRuntime(307);
 
@@ -118,6 +132,6 @@ describe("MCP OAuth redirects", () => {
       expect(formatErrorMessage(error)).toContain(redirectRefusal);
       await expect(resolveMcpOAuthAccessToken({ identity })).rejects.toThrow(/uncertain/);
       expect(runtimeFetchMock).toHaveBeenCalledTimes(1);
-    }, "openclaw-mcp-oauth-redirect-");
+    }, homeOptions);
   });
 });

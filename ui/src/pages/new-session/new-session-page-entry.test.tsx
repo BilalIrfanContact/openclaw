@@ -48,7 +48,7 @@ function retainedDraft() {
     flow.disconnect();
     gateway.disconnect();
   });
-  return { data: restored, page, input };
+  return { auth, data: restored, page, input };
 }
 
 afterEach(() => {
@@ -118,6 +118,15 @@ it("initializes the composer and retains it while loader data updates", async ()
       expect(page?.querySelector("textarea")).toBe(input);
     });
   }
+});
+
+it("rejects retained DOM after its authorization changes", async () => {
+  const { auth, data, page, input } = retainedDraft();
+  auth.recoveryScope = "replacement-principal";
+  const { container } = mountRoute(data);
+  await waitForSolid(() => expect(pageHost(container)?.data).toBe(data));
+  expect(container.contains(page)).toBe(false);
+  expect(container.contains(input)).toBe(false);
 });
 
 it("restores owned DOM and replaces it when a later rollback supplies another host", async () => {
