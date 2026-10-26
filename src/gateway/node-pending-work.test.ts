@@ -34,8 +34,7 @@ describe("node pending work", () => {
     expect(first.deduped).toBe(false);
     expect(second).toMatchObject({ deduped: true, item: { id: first.item.id } });
 
-    const drained = drainNodePendingWork("node-2");
-    expect(drained).toMatchObject({
+    expect(drainNodePendingWork("node-2")).toMatchObject({
       items: [{ type: "location.request" }, { type: "status.request" }],
     });
 
@@ -66,23 +65,15 @@ describe("node pending work", () => {
     expect(oldPairing.drain()).toMatchObject({ items: baseline });
     expect(oldPairing.clear()).toBe(false);
     expect(oldPairing.remove(retired.item.id)).toBe(false);
-    expect(newPairing.drain()).toMatchObject({
-      items: [{ id: replacement.item.id }, ...baseline],
-    });
+    expect(newPairing.drain()).toMatchObject({ items: [{ id: replacement.item.id }, ...baseline] });
   });
 
   it("expires queued work when a different pairing polls", () => {
-    enqueue("node-retired-generation", {
-      expiresInMs: 1_000,
-      pairingGeneration: "generation-1",
-    });
-
+    const work = pairing("node-retired-generation", "generation-1");
+    work.enqueue({ expiresInMs: 1_000 });
     using _ = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2_000);
-    drainNodePendingWork("node-retired-generation", {
-      pairingGeneration: "generation-2",
-    });
-
-    expect(clearNodePendingWork("node-retired-generation", "generation-1")).toBe(false);
+    pairing("node-retired-generation", "generation-2").drain();
+    expect(work.clear()).toBe(false);
   });
 
   it("rolls back only the exact item owned by one enqueue", () => {
@@ -90,31 +81,31 @@ describe("node pending work", () => {
     const location = work.enqueue();
     work.enqueue({ type: "status.request" });
     expect(work.remove(location.item.id)).toBe(true);
-    expect(work.drain()).toMatchObject({
-      items: [{ type: "status.request" }],
-    });
+    expect(work.drain()).toMatchObject({ items: [{ type: "status.request" }] });
   });
 
   it("keeps hasMore true when the baseline status item is deferred by maxItems", () => {
     enqueue("node-3");
 
-    const drained = drainNodePendingWork("node-3", { maxItems: 1 });
-
-    expect(drained).toMatchObject({ items: [{ type: "location.request" }], hasMore: true });
-
-    const next = drainNodePendingWork("node-3", { maxItems: 1 });
-    expect(next).toMatchObject({ items: baseline, hasMore: false });
+    expect(drainNodePendingWork("node-3", { maxItems: 1 })).toMatchObject({
+      items: [{ type: "location.request" }],
+      hasMore: true,
+    });
+    expect(drainNodePendingWork("node-3", { maxItems: 1 })).toMatchObject({
+      items: baseline,
+      hasMore: false,
+    });
   });
 
   it("keeps explicit work queued when maxItems defers it", () => {
     enqueue("node-4", { type: "status.request", priority: "normal" });
     enqueue("node-4", { priority: "high" });
 
-    const firstDrain = drainNodePendingWork("node-4", { maxItems: 1 });
-    expect(firstDrain).toMatchObject({ items: [{ type: "location.request" }], hasMore: true });
-
-    const secondDrain = drainNodePendingWork("node-4", { maxItems: 1 });
-    expect(secondDrain).toMatchObject({
+    expect(drainNodePendingWork("node-4", { maxItems: 1 })).toMatchObject({
+      items: [{ type: "location.request" }],
+      hasMore: true,
+    });
+    expect(drainNodePendingWork("node-4", { maxItems: 1 })).toMatchObject({
       items: [{ type: "status.request", id: expect.not.stringMatching(/^baseline-status$/) }],
       hasMore: false,
     });
@@ -126,7 +117,6 @@ describe("node pending work", () => {
     expect(enqueue("node-default-expiry").item.expiresAtMs).toBe(expiresAtMs);
 
     dateNow.mockReturnValue(expiresAtMs);
-    const drained = drainNodePendingWork("node-default-expiry");
-    expect(drained).toMatchObject({ items: baseline });
+    expect(drainNodePendingWork("node-default-expiry")).toMatchObject({ items: baseline });
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { runCliProcessChild } from "../cli/cli-process-child.test-helpers.js";
 import * as runtimeConfig from "../config/runtime-snapshot.js";
 import { loadSessionEntry, upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
+import { promptReport } from "../config/sessions/system-prompt-report.test-support.js";
 import type { InternalSessionEntry } from "../config/sessions/types.js";
 import { resolveRuntimeWorkerArgv } from "../infra/runtime-worker-url.js";
 import * as sqliteIntegrity from "../infra/sqlite-integrity.js";
@@ -51,14 +52,7 @@ test.each([false, true])(
       ] as const;
       const savedPrompts = {
         skillsSnapshot: { prompt: "unneeded-group-prompt".repeat(4096), skills: [] },
-        systemPromptReport: {
-          source: "run" as const,
-          generatedAt: 1,
-          systemPrompt: { chars: 1, projectContextChars: 0, nonProjectContextChars: 1 },
-          injectedWorkspaceFiles: [],
-          skills: { promptChars: 0, entries: [] },
-          tools: { listChars: 0, schemaChars: 0, entries: [] },
-        },
+        systemPromptReport: promptReport(1, 1, 0),
       };
       const entry = { ...savedPrompts, category: " Shared work " };
       const config = await seedGroups(stateDir, scopes, entry, cold);
@@ -72,11 +66,12 @@ test.each([false, true])(
         return targets;
       };
       const expectRenamed = async (name: string) => {
-        const expected = new Map([
-          [name, [scopes[0]]],
-          ["Shared work", [scopes[1]]],
-        ]);
-        expect(await readTargets()).toEqual(expected);
+        expect(await readTargets()).toEqual(
+          new Map([
+            [name, [scopes[0]]],
+            ["Shared work", [scopes[1]]],
+          ]),
+        );
       };
       expect(await readTargets()).toEqual(new Map([["Shared work", scopes]]));
       await upsertSessionEntryCore(scopes[0], { category: "Renamed" });

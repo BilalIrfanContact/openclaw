@@ -1,5 +1,3 @@
-// Gateway CLI backend connect tests exercise the minimal WebSocket handshake,
-// device identity payload, auth token forwarding, and backend request framing.
 import type { AddressInfo } from "node:net";
 import { beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,8 +15,7 @@ import {
   sendMinimalGatewayResponse,
 } from "./minimal-gateway.test-helpers.js";
 
-const GATEWAY_CONNECT_OPERATION_TIMEOUT_MS = 1_000;
-const GATEWAY_CONNECT_TEST_TIMEOUT_MS = 15_000;
+const timeoutMs = 1_000;
 
 async function startMinimalGatewayServer(params: { token: string }) {
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
@@ -35,25 +32,15 @@ async function startMinimalGatewayServer(params: { token: string }) {
       requests.push(frame.method ?? "");
       if (frame.method === "connect") {
         connectParams = frame.params as Record<string, unknown> | undefined;
-        expect(frame.params?.auth?.token).toBe(params.token);
-        expect(frame.params?.device?.nonce).toBe("test-nonce");
+        expect(frame.params).toMatchObject({
+          auth: { token: params.token },
+          device: { nonce: "test-nonce" },
+        });
         sendMinimalGatewayResponse(
           ws,
           frame.id,
           buildMinimalGatewayHelloOkPayload({
-            connId: "conn-1",
             methods: ["health"],
-            snapshot: {
-              presence: [],
-              health: { ok: true },
-              stateVersion: { presence: 0, health: 0 },
-              uptimeMs: 0,
-            },
-            policy: {
-              maxPayload: 1,
-              maxBufferedBytes: 1,
-              tickIntervalMs: 60_000,
-            },
           }),
         );
         return;
@@ -74,9 +61,7 @@ async function startMinimalGatewayServer(params: { token: string }) {
       return connectParams;
     },
     url: `ws://127.0.0.1:${address.port}`,
-    close: async () => {
-      await closeMinimalGatewayServer(wss);
-    },
+    close: () => closeMinimalGatewayServer(wss),
   };
 }
 
@@ -107,30 +92,29 @@ describe("gateway cli backend connect", () => {
           url: server.url,
           token,
           deviceIdentity,
-          timeoutMs: GATEWAY_CONNECT_OPERATION_TIMEOUT_MS,
-          maxAttemptTimeoutMs: GATEWAY_CONNECT_OPERATION_TIMEOUT_MS,
+          timeoutMs,
+          maxAttemptTimeoutMs: timeoutMs,
           ...(caps ? { caps } : {}),
-          requestTimeoutMs: GATEWAY_CONNECT_OPERATION_TIMEOUT_MS,
+          requestTimeoutMs: timeoutMs,
           waitForEventLoopReady: false,
         });
-        const health = await client.request("health", undefined, {
-          timeoutMs: GATEWAY_CONNECT_OPERATION_TIMEOUT_MS,
-        });
-        const connectClient = server.connectParams?.client as Record<string, unknown> | undefined;
+        const health = await client.request("health", undefined, { timeoutMs });
         expect(health.ok).toBe(true);
-        expect(connectClient?.id).toBe(GATEWAY_CLIENT_NAMES.TEST);
-        expect(connectClient?.displayName).toBe("vitest-live");
-        expect(connectClient?.version).toBe("dev");
-        expect(connectClient?.mode).toBe(GATEWAY_CLIENT_MODES.TEST);
+        expect(server.connectParams).toMatchObject({
+          client: {
+            id: GATEWAY_CLIENT_NAMES.TEST,
+            displayName: "vitest-live",
+            version: "dev",
+            mode: GATEWAY_CLIENT_MODES.TEST,
+          },
+        });
         expect(server.connectParams?.caps).toEqual(caps ?? []);
         expect(server.requests).toEqual(["connect", "health"]);
       } finally {
-        await client
-          ?.stopAndWait({ timeoutMs: GATEWAY_CONNECT_OPERATION_TIMEOUT_MS })
-          .catch(() => {});
+        await client?.stopAndWait({ timeoutMs }).catch(() => {});
         await server.close();
       }
     },
-    GATEWAY_CONNECT_TEST_TIMEOUT_MS,
+    15_000,
   );
 });

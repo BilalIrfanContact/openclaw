@@ -17,25 +17,20 @@ function missingSecretRef(id: string) {
 function params(
   gateway: NonNullable<OpenClawConfig["gateway"]>,
   surface: "local" | "remote" = "local",
-  env = ambientAuth,
 ) {
   const config: OpenClawConfig = {
     gateway,
     secrets: { providers: { default: { source: "env" } } },
   };
-  return { config, surface, env };
+  return { config, surface, env: ambientAuth };
 }
 
 const token = missingSecretRef("MISSING_LOCAL_TOKEN");
 const password = missingSecretRef("MISSING_LOCAL_PASSWORD");
-const remoteToken = params(
-  { remote: { token: missingSecretRef("MISSING_REMOTE_TOKEN") } },
-  "remote",
-);
-const remotePassword = params(
-  { remote: { password: missingSecretRef("MISSING_REMOTE_PASSWORD") } },
-  "remote",
-);
+const remoteTokenRef = missingSecretRef("MISSING_REMOTE_TOKEN");
+const remotePasswordRef = missingSecretRef("MISSING_REMOTE_PASSWORD");
+const remoteToken = params({ remote: { token: remoteTokenRef } }, "remote");
+const remotePassword = params({ remote: { password: remotePasswordRef } }, "remote");
 
 it.each([
   ["local token mode", params({ auth: { mode: "token", token } }), "gateway.auth.token"],
@@ -63,7 +58,7 @@ it("preserves a healthy configured remote password when its sibling token ref fa
   const request = params(
     {
       remote: {
-        token: missingSecretRef("MISSING_REMOTE_TOKEN"),
+        token: remoteTokenRef,
         password: "configured-password", // pragma: allowlist secret
       },
     },
@@ -89,17 +84,17 @@ it.each([
 ] as const)(
   "ignores an unavailable $inactiveCredential ref when explicit $mode mode selects its sibling",
   async ({ mode, inactiveCredential }) => {
-    await expect(
-      probeAuth(
-        params({
-          auth: {
-            mode,
-            [mode]: `configured-${mode}`,
-            [inactiveCredential]: missingSecretRef("MISSING_INACTIVE_CREDENTIAL"),
-          },
-        }),
-      ),
-    ).resolves.toEqual({ [mode]: `configured-${mode}`, source: "config" });
+    const request = params({
+      auth: {
+        mode,
+        [mode]: `configured-${mode}`,
+        [inactiveCredential]: missingSecretRef("MISSING_INACTIVE_CREDENTIAL"),
+      },
+    });
+    await expect(probeAuth(request)).resolves.toEqual({
+      [mode]: `configured-${mode}`,
+      source: "config",
+    });
   },
 );
 
@@ -115,10 +110,7 @@ it.each([
   "keeps explicit %s authoritative over unavailable configured refs",
   async (_name, request, kind, value) => {
     await expect(interactiveAuth({ ...request, explicitAuth: { [kind]: value } })).resolves.toEqual(
-      {
-        token: kind === "token" ? value : undefined,
-        password: kind === "password" ? value : undefined,
-      },
+      { token: undefined, password: undefined, [kind]: value },
     );
   },
 );

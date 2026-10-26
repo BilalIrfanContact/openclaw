@@ -18,6 +18,7 @@ import { makeMockHttpResponse } from "./test-http-response.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
+const phaseNames = (stages: string[]) => stages.map((stage) => `control-ui.document.${stage}`);
 
 it.each([false, true])(
   "embeds the endpoint payload only in admitted documents (catalog failure: %s)",
@@ -89,8 +90,8 @@ it.each([false, true])(
     });
     const document = await request("/control/chat/main/topic", true, true);
     await waitForDiagnosticEventsDrained();
-    expect(phases.map(({ name: phaseName }) => phaseName).toSorted()).toEqual(
-      [
+    expect(phases.map(({ name: phase }) => phase).toSorted()).toEqual(
+      phaseNames([
         "auth_grants",
         "identity_avatar",
         "plugin_catalog",
@@ -98,9 +99,7 @@ it.each([false, true])(
         "preferences",
         "render",
         "total",
-      ]
-        .map((stage) => `control-ui.document.${stage}`)
-        .toSorted(),
+      ]).toSorted(),
     );
     for (const phase of phases) {
       expect(phase.durationMs).toBeGreaterThanOrEqual(0);
@@ -122,13 +121,8 @@ it.each([false, true])(
     expect(denied.res.statusCode).toBe(200);
     expect(denied.body).not.toContain(CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE);
     await waitForDiagnosticEventsDrained();
-    expect(phases.map(({ name: phaseName }) => phaseName)).toEqual([
-      "control-ui.document.auth_grants",
-      "control-ui.document.render",
-      "control-ui.document.total",
-      "control-ui.document.auth_grants",
-      "control-ui.document.render",
-      "control-ui.document.total",
-    ]);
+    expect(phases.map(({ name: phase }) => phase)).toEqual(
+      phaseNames(["auth_grants", "render", "total", "auth_grants", "render", "total"]),
+    );
   },
 );

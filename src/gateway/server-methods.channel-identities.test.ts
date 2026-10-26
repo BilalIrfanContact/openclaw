@@ -89,10 +89,9 @@ it.each(["person", "shared owner"] as const)(
         expect(denied).toEqual([false, undefined, expect.objectContaining({ code: "FORBIDDEN" })]);
       }
       expect(resolveUserChannelIdentity(identity)).toBeUndefined();
-      const queries = vi.spyOn(DatabaseSync.prototype, "prepare");
-      try {
-        // Cover initial selected-account/role admission, worker grants and response guards
-        // through the registered in-process route, which has no WS worker brand.
+      {
+        using queries = vi.spyOn(DatabaseSync.prototype, "prepare");
+        // Cover admission, worker grants and response guards without a WS worker brand.
         for (const [method, params, validate, expected] of operations) {
           const result = await request(method, params);
           expect(result?.[0]).toBe(true);
@@ -102,8 +101,6 @@ it.each(["person", "shared owner"] as const)(
           }
         }
         expect(queries).not.toHaveBeenCalled();
-      } finally {
-        queries.mockRestore();
       }
       expect(resolveUserChannelIdentity(identity)).toBeUndefined();
       expect(readResidentUserProfileIdentity(person.id)?.role).toBe("admin");

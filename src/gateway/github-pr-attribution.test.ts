@@ -20,6 +20,14 @@ vi.mock("./worker-environments/session-repository-checkpoints.js", async (import
   withSessionRepositoryCheckpoint: (...args: unknown[]) => checkpoint(...args),
 }));
 const mocks = githubPublicationTestMocks();
+function setPreference(profileId: string, value: boolean | string, disableCoauthor = false) {
+  expect(
+    setUserPreferences(profileId, {
+      [PR_ATTRIBUTION_PREFERENCE_KEY]: value,
+      ...(disableCoauthor ? { [GIT_COAUTHOR_PREFERENCE_KEY]: false } : {}),
+    }).ok,
+  ).toBe(true);
+}
 
 describe("managed PR attribution", () => {
   installGitHubPublicationTestHarness({
@@ -28,22 +36,16 @@ describe("managed PR attribution", () => {
     realWorktree: true,
   });
   it("omits optional branding when its preference cannot be read", async () => {
-    const read = vi
+    using _ = vi
       .spyOn(userPreferences, "getUserPreferenceValues")
       .mockRejectedValueOnce(new Error("Preference storage unavailable"));
-    try {
-      expect((await preparePrAttribution({ requesterProfileId: "unavailable-profile" }))()).toBe(
-        false,
-      );
-    } finally {
-      read.mockRestore();
-    }
+    expect((await preparePrAttribution({ requesterProfileId: "unavailable-profile" }))()).toBe(
+      false,
+    );
   });
   it("never uses an enabled person in incognito or without a verified requester", async () => {
     const f = await createRequesterPublicationFixture(checkpoint, "local");
-    expect(setUserPreferences(f.guestProfile, { [PR_ATTRIBUTION_PREFERENCE_KEY]: true }).ok).toBe(
-      true,
-    );
+    setPreference(f.guestProfile, true);
     expect((await preparePrAttribution({ requesterProfileId: f.guestProfile }))()).toBe(true);
     expect(
       (await preparePrAttribution({ requesterProfileId: f.guestProfile, incognito: true }))(),
@@ -74,12 +76,7 @@ describe("managed PR attribution", () => {
   )("$backend creation honors $state requester preference", async ({ backend, state }) => {
     const f = await createRequesterPublicationFixture(checkpoint, backend);
     if (state !== "missing") {
-      expect(
-        setUserPreferences(f.guestProfile, {
-          [PR_ATTRIBUTION_PREFERENCE_KEY]: state === "malformed" ? "true" : state !== "off",
-          [GIT_COAUTHOR_PREFERENCE_KEY]: false,
-        }).ok,
-      ).toBe(true);
+      setPreference(f.guestProfile, state === "malformed" ? "true" : state !== "off", true);
     }
     const inputBody =
       "Keep human credit and work-session links." +
@@ -93,9 +90,7 @@ describe("managed PR attribution", () => {
       }
       const reply = await transport(argv, options);
       if (state === "revoked" && (argv.includes("push") || argv.includes("graphql"))) {
-        expect(
-          setUserPreferences(f.guestProfile, { [PR_ATTRIBUTION_PREFERENCE_KEY]: false }).ok,
-        ).toBe(true);
+        setPreference(f.guestProfile, false);
       }
       return reply;
     });
