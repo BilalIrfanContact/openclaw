@@ -3,7 +3,6 @@ import {
   errorShape,
   validateSkillsWorkshopArchiveParams,
   validateSkillsWorkshopChangesParams,
-  validateSkillsWorkshopDraftParams,
   validateSkillsWorkshopListParams,
   validateSkillsWorkshopReadParams,
   validateSkillsWorkshopRestoreParams,
@@ -71,6 +70,13 @@ function workshopWriteContext(
   };
 }
 
+function requireDraftId(draftId: string | undefined): string {
+  if (!draftId) {
+    throw new WorkshopWriteError("draftId is required.");
+  }
+  return draftId;
+}
+
 export const skillsWorkshopHandlers: GatewayRequestHandlers = {
   "skills.workshop.list": defineWorkshopHandler(
     "skills.workshop.list",
@@ -131,19 +137,24 @@ export const skillsWorkshopHandlers: GatewayRequestHandlers = {
       }),
     }),
   ),
+  // Draft methods take the read params: `name` is the skill the caller reviewed.
   "skills.workshop.applyDraft": defineWorkshopHandler(
     "skills.workshop.applyDraft",
-    validateSkillsWorkshopDraftParams,
+    validateSkillsWorkshopReadParams,
     async (params, resolved, invocation) => ({
-      changes: await applyWorkshopDraft(workshopWriteContext(resolved, invocation), params.draftId),
+      changes: await applyWorkshopDraft(
+        workshopWriteContext(resolved, invocation),
+        requireDraftId(params.draftId),
+        params.name,
+      ),
     }),
   ),
   "skills.workshop.discardDraft": defineWorkshopHandler(
     "skills.workshop.discardDraft",
-    validateSkillsWorkshopDraftParams,
+    validateSkillsWorkshopReadParams,
     async (params, resolved, invocation) => {
       const { config, agentId, assertLive } = workshopWriteContext(resolved, invocation);
-      await discardWorkshopDraft(config, agentId, params.draftId, assertLive);
+      await discardWorkshopDraft(config, agentId, requireDraftId(params.draftId), assertLive);
       return { changes: [] };
     },
   ),

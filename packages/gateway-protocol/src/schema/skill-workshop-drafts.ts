@@ -13,15 +13,4 @@ export const SkillWorkshopDraftSchema = closedObject({
   createdAtMs: Type.Number({ minimum: 0 }),
 });
 
-/**
- * `skills.workshop.applyDraft` saves the draft's files as the live skill through versioned
- * writes; `skills.workshop.discardDraft` changes no skill. Both delete the draft and answer with
- * the changes made, as `SkillsWorkshopChangesResult`.
- */
-export const SkillsWorkshopDraftParamsSchema = closedObject({
-  agentId: Type.Optional(NonEmptyString),
-  draftId: NonEmptyString,
-});
-
 export type SkillWorkshopDraft = Static<typeof SkillWorkshopDraftSchema>;
-export type SkillsWorkshopDraftParams = Static<typeof SkillsWorkshopDraftParamsSchema>;

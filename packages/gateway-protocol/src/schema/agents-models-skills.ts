@@ -39,11 +39,8 @@ export { AgentsListParamsSchema, type AgentsListParams } from "./agents-list-ses
 
 export { SkillsSearchParamsSchema, SkillsSearchResultSchema } from "./skills-search.js";
 export type { SkillsSearchParams, SkillsSearchResult } from "./skills-search.js";
-export {
-  SkillsWorkshopDraftParamsSchema,
-  SkillWorkshopDraftSchema,
-} from "./skill-workshop-drafts.js";
-export type { SkillsWorkshopDraftParams, SkillWorkshopDraft } from "./skill-workshop-drafts.js";
+export { SkillWorkshopDraftSchema } from "./skill-workshop-drafts.js";
+export type { SkillWorkshopDraft } from "./skill-workshop-drafts.js";
 
 export {
   ModelChoiceSchema,
@@ -508,7 +505,8 @@ export const SkillsWorkshopChangesResultSchema = closedObject({
 
 /**
  * Reads one file of a live Workshop skill, of a saved version when `versionId` is set, or of a
- * waiting draft when `draftId` is set.
+ * waiting draft when `draftId` is set. `skills.workshop.applyDraft` and `discardDraft` take the
+ * same params with `draftId` required, and answer `SkillsWorkshopChangesResult`.
  */
 export const SkillsWorkshopReadParamsSchema = closedObject({
   agentId: Type.Optional(NonEmptyString),

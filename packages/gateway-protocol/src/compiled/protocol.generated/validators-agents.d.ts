@@ -48,7 +48,6 @@ export {
   isSkillsWorkshopArchiveParams,
   isSkillsWorkshopRestoreParams,
   isSkillsWorkshopUndoParams,
-  isSkillsWorkshopDraftParams,
   isSkillsSecurityVerdictsParams,
   isSkillsSkillCardParams,
   isSkillsFileGetParams,

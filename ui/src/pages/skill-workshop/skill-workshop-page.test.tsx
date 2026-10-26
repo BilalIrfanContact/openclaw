@@ -303,6 +303,7 @@ it("reviews a draft as a diff against the live skill, applies it, and follows th
   await waitForSolid(() =>
     expect(request).toHaveBeenCalledWith("skills.workshop.applyDraft", {
       agentId: "research",
+      name: SKILL,
       draftId: draft.id,
     }),
   );
@@ -323,24 +324,6 @@ it("shows only the drafts list on the Drafts tab of an agent with no learned ski
 
   await waitForSolid(() => expect(text(page, ".sw-list__rows .sw-row__uses")).toBe("New skill"));
   expect(text(page, ".sw-list__rows")).not.toMatch(/Nothing archived|No active skills/);
-});
-
-it("shows a large draft's first files and opens the rest on request", async () => {
-  const files = [
-    "SKILL.md",
-    ...Array.from({ length: 11 }, (_, index) => `references/r${index}.md`),
-  ];
-  const request = gateway({
-    list: { ...list, drafts: [draftFor("big-skill")] },
-    read: { ...skillRead, name: "big-skill", files },
-  });
-  const page = await mount(request);
-  await click(page, "Drafts 1");
-
-  // Eight files plus the "+N more files" row.
-  await waitForSolid(() => expect(page.querySelectorAll(".sw-files__item")).toHaveLength(9));
-  await click(page, "+4 more files");
-  await waitForSolid(() => expect(page.querySelectorAll(".sw-files__item")).toHaveLength(12));
 });
 
 it.each([

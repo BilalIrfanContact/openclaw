@@ -189,11 +189,17 @@ export async function discardWorkshopDraft(
 export async function applyWorkshopDraft(
   ctx: WorkshopMutationContext,
   id: string,
+  expectedSkillName?: string,
 ): Promise<WorkshopChange[]> {
   const draftDir = resolveDraftDir(ctx.config, ctx.agentId, id);
   const draft = await readDraft(path.dirname(draftDir), id);
   if (!draft) {
     throw new WorkshopWriteError(`No draft "${id}".`);
+  }
+  if (expectedSkillName !== undefined && expectedSkillName !== draft.skillName) {
+    throw new WorkshopWriteError(
+      `Draft "${id}" is for skill "${draft.skillName}", not "${expectedSkillName}". Reload the drafts.`,
+    );
   }
   const name = draft.skillName;
   const skillDir = path.join(resolveWorkshopSkillsDir(ctx.config, ctx.agentId), name);

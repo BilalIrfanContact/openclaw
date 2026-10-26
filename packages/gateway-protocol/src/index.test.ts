@@ -60,11 +60,13 @@ describe("precompiled protocol validators", () => {
     const archive = validation(p.validateSkillsWorkshopArchiveParams);
     const restore = validation(p.validateSkillsWorkshopRestoreParams);
     const undo = validation(p.validateSkillsWorkshopUndoParams);
-    const draft = validation(p.validateSkillsWorkshopDraftParams);
     changes.accepts({}, { agentId: "main", limit: 500, beforeMs: 1_700_000_000_000 });
     changes.rejects({ limit: 0 }, { limit: 501 });
-    read.accepts({ name: "deploy-notes", filePath: "references/api.md", versionId: "v1" });
-    read.rejects({}, { name: "" });
+    read.accepts(
+      { name: "deploy-notes", filePath: "references/api.md", versionId: "v1" },
+      { name: "deploy-notes", draftId: "deploy-notes-1a2b3c4d" },
+    );
+    read.rejects({}, { name: "" }, { name: "deploy-notes", draftId: "" });
     archive.accepts({ name: "deploy-notes", reason: "superseded" });
     archive.rejects(
       { name: "deploy-notes", reason: "" },
@@ -74,9 +76,6 @@ describe("precompiled protocol validators", () => {
     restore.rejects({ name: "deploy-notes", expectedRevisionHash: "a".repeat(64) });
     undo.accepts({ agentId: "main", runId: "skill-workshop-review:1" });
     undo.rejects({}, { runId: "" }, { name: "x" });
-    draft.accepts({ draftId: "deploy-1a2b3c4d" }, { agentId: "main", draftId: "deploy-1a2b3c4d" });
-    // The Control UI keeps the skill name for itself; the Gateway takes only the draft id.
-    draft.rejects({}, { draftId: "" }, { draftId: "deploy-1a2b3c4d", name: "deploy" });
   });
 
   it("validates registered Board content through exported checks", () => {

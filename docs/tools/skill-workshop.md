@@ -306,8 +306,8 @@ Gateway methods take an optional `agentId` (default agent when omitted):
 | `skills.workshop.archive`      | `operator.admin` | `name`, `reason`                           | `change`                                                                                                                                                        |
 | `skills.workshop.restore`      | `operator.admin` | `name`, `versionId`                        | `change`                                                                                                                                                        |
 | `skills.workshop.undo`         | `operator.admin` | `runId` (a review's run id)                | `status` (`undone` or `already-undone`), `changes` made by this call                                                                                            |
-| `skills.workshop.applyDraft`   | `operator.admin` | `draftId`                                  | `changes` made by saving the draft; the draft is deleted                                                                                                        |
-| `skills.workshop.discardDraft` | `operator.admin` | `draftId`                                  | `changes` (always empty); the draft is deleted                                                                                                                  |
+| `skills.workshop.applyDraft`   | `operator.admin` | `name`, `draftId`                          | `changes` made by saving the draft; the draft is deleted                                                                                                        |
+| `skills.workshop.discardDraft` | `operator.admin` | `name`, `draftId`                          | `changes` (always empty); the draft is deleted                                                                                                                  |
 
 Archive, restore, undo, and applied drafts from the CLI, Control UI, chat, or Gateway are
 recorded as `user` changes.

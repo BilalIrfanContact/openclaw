@@ -146,7 +146,7 @@ describe("skills.workshop gateway methods", () => {
           callGatewayHandler(
             skillsWorkshopHandlers,
             method,
-            { draftId: "deploy-notes-1a2b3c4d" },
+            { name: "deploy-notes", draftId: "deploy-notes-1a2b3c4d" },
             { client: { invalidated: true } as never, context },
           ),
         ).rejects.toThrow("Gateway requester authority changed");

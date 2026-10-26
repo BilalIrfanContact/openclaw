@@ -194,10 +194,6 @@ export const validateSkillsWorkshopUndoParams = createProtocolValidator(
   S.SkillsWorkshopUndoParamsSchema,
   Checks.isSkillsWorkshopUndoParams,
 );
-export const validateSkillsWorkshopDraftParams = createProtocolValidator(
-  S.SkillsWorkshopDraftParamsSchema,
-  Checks.isSkillsWorkshopDraftParams,
-);
 export const validateSkillsSecurityVerdictsParams = createProtocolValidator(
   S.SkillsSecurityVerdictsParamsSchema,
   Checks.isSkillsSecurityVerdictsParams,

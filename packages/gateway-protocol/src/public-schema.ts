@@ -535,7 +535,6 @@ export {
   SkillsWorkshopChangeResultSchema,
   SkillsWorkshopUndoParamsSchema,
   SkillsWorkshopUndoResultSchema,
-  SkillsWorkshopDraftParamsSchema,
   SkillsSecurityVerdictsParamsSchema,
   SkillsSecurityVerdictsResultSchema,
   SkillsFileGetParamsSchema,

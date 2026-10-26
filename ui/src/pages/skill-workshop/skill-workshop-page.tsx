@@ -299,12 +299,8 @@ class SkillWorkshopPageState {
     this.actionError = null;
     this.changed();
     try {
-      // A draft mutation names its skill only for the UI to follow; the Gateway takes the id.
       const { method, ...params } = mutation;
-      await scope.client.request(method, {
-        agentId: scope.agentId,
-        ...("draftId" in params ? { draftId: params.draftId } : params),
-      });
+      await scope.client.request(method, { agentId: scope.agentId, ...params });
       if (this.scope !== scope) {
         return;
       }

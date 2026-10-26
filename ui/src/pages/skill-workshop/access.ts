@@ -6,12 +6,8 @@ export function resolveWorkshopAccess(snapshot: ApplicationGatewaySnapshot | nul
   return {
     canArchive: canCallGatewayMethod(snapshot, "skills.workshop.archive", "operator.admin"),
     canRestore: canCallGatewayMethod(snapshot, "skills.workshop.restore", "operator.admin"),
-    canApplyDraft: canCallGatewayMethod(snapshot, "skills.workshop.applyDraft", "operator.admin"),
-    canDiscardDraft: canCallGatewayMethod(
-      snapshot,
-      "skills.workshop.discardDraft",
-      "operator.admin",
-    ),
+    // Apply and Discard ship together and share their scope.
+    canReviewDrafts: canCallGatewayMethod(snapshot, "skills.workshop.applyDraft", "operator.admin"),
     canSetMode: canCallGatewayMethod(snapshot, "config.patch", "operator.admin"),
   };
 }
@@ -23,7 +19,7 @@ export function canRunWorkshopMutation(
   return {
     "skills.workshop.archive": access.canArchive,
     "skills.workshop.restore": access.canRestore,
-    "skills.workshop.applyDraft": access.canApplyDraft,
-    "skills.workshop.discardDraft": access.canDiscardDraft,
+    "skills.workshop.applyDraft": access.canReviewDrafts,
+    "skills.workshop.discardDraft": access.canReviewDrafts,
   }[method];
 }

@@ -442,11 +442,6 @@ export function isSkillsWorkshopUndoParams(
 ): value is import("typebox").Static<
   typeof import("../../schema-modules.js").SkillsWorkshopUndoParamsSchema
 >;
-export function isSkillsWorkshopDraftParams(
-  value: unknown,
-): value is import("typebox").Static<
-  typeof import("../../schema-modules.js").SkillsWorkshopDraftParamsSchema
->;
 export function isSkillsSecurityVerdictsParams(
   value: unknown,
 ): value is import("typebox").Static<

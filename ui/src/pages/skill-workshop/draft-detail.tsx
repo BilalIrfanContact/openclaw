@@ -1,12 +1,10 @@
-import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
+import { createMemo, Errored, For, Loading, Show } from "solid-js";
 import { Icon } from "../../components/solid/icon.tsx";
 import { MarkdownHtml } from "../../components/solid/markdown-html.tsx";
 import { formatRelativeTimestamp } from "../../lib/format.ts";
 import { t } from "../../lib/reactive/i18n.ts";
 import { Diff, LoadState, splitFrontmatter } from "./detail.tsx";
 import { MutationButton, type WorkshopReads, type WorkshopView } from "./view-shared.tsx";
-
-const MAX_FILE_CHIPS = 8;
 
 /** A waiting draft: why it was proposed, what it would change, and Apply or Discard. */
 export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads }) {
@@ -20,10 +18,6 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
   );
   // The draft's files come with each read of it.
   const files = () => props.view().viewer?.result?.files ?? [];
-  // A bundle with many support files shows its first few; the rest open on request.
-  const [expandedDraft, setExpandedDraft] = createSignal<string | null>(null);
-  const shownFiles = () =>
-    expandedDraft() === target().draftId ? files() : files().slice(0, MAX_FILE_CHIPS);
   const meta = () => {
     const current = draft();
     if (!current) {
@@ -86,7 +80,7 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
               {/* The same two-column file view as a live skill's Files tab. */}
               <div class="sw-files">
                 <ul class="sw-files__list" aria-label={t("skillWorkshop.drafts.filesLabel")}>
-                  <For each={shownFiles()} keyed>
+                  <For each={files()} keyed>
                     {(file) => (
                       <li>
                         <button
@@ -106,19 +100,6 @@ export function DraftDetail(props: { view: WorkshopView; reads: WorkshopReads })
                       </li>
                     )}
                   </For>
-                  <Show when={files().length > shownFiles().length}>
-                    <li>
-                      <button
-                        type="button"
-                        class="sw-files__item"
-                        onClick={() => setExpandedDraft(target().draftId ?? null)}
-                      >
-                        {t("skillWorkshop.drafts.moreFiles", {
-                          count: String(files().length - shownFiles().length),
-                        })}
-                      </button>
-                    </li>
-                  </Show>
                 </ul>
                 <div class="sw-files__content">
                   <DraftContent reads={props.reads} />

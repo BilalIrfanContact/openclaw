@@ -73,6 +73,17 @@ it("applies a multi-file draft as one change that a single undo reverts", async 
   expect(restored.files).toEqual(["SKILL.md"]);
 });
 
+it("refuses to apply a draft under another skill's name", async () => {
+  const id = await saveWorkshopDraft({}, "main", {
+    name: "deploy",
+    content: skillFile("deploy", "Run make ship."),
+  });
+  await expect(applyWorkshopDraft(ctx, id, "release-notes")).rejects.toThrow(
+    /is for skill "deploy", not "release-notes"/,
+  );
+  expect((await listWorkshopDrafts({}, "main")).map((draft) => draft.id)).toEqual([id]);
+});
+
 it("publishes a binary support asset byte for byte", async () => {
   const draftDir = path.join(resolveWorkshopDraftsDir({}, "main"), "deploy-proposal-png");
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe, 0x80]);
