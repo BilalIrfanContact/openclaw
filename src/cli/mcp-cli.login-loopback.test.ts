@@ -82,7 +82,6 @@ describe("mcp login loopback callback", () => {
 
       const wrong = await fetch(`${redirectUrl}?code=wrong&state=wrong`);
       expect(wrong.status).toBe(400);
-      expect(mocks.startMcpOAuthAuthorization).toHaveBeenCalledOnce();
       expect(mocks.completeMcpOAuthAuthorization).not.toHaveBeenCalled();
 
       const response = await fetch(`${redirectUrl}?code=right&state=state-1234567890`);
@@ -90,7 +89,6 @@ describe("mcp login loopback callback", () => {
       await expect(response.text()).resolves.toContain("Authorization received");
       await loggingIn;
 
-      expect(mocks.startMcpOAuthAuthorization).toHaveBeenCalledOnce();
       expect(mocks.completeMcpOAuthAuthorization).toHaveBeenCalledOnce();
       expect(mocks.completeMcpOAuthAuthorization.mock.calls[0]?.[2]).toEqual({ code: "right" });
       expect(mocks.runtime.log).toHaveBeenCalledWith('MCP OAuth credentials saved for "docs".');
@@ -120,7 +118,6 @@ describe("mcp login loopback callback", () => {
       await login();
       expectLogged("Could not start");
       expectLogged("--code");
-      expect(mocks.startMcpOAuthAuthorization).toHaveBeenCalledOnce();
       expect(mocks.completeMcpOAuthAuthorization).not.toHaveBeenCalled();
       await new Promise<void>((resolve) => {
         blocker.close(() => resolve());

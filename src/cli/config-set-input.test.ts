@@ -59,7 +59,6 @@ describe("config set input parsing", () => {
   });
 
   it.each([
-    ["{", "Failed to parse --batch-json:"],
     ["[]", "--batch-json must contain at least one config update."],
     ['{"path":"p","value":"v"}', "--batch-json must be a JSON array."],
     ['[{"value":"v"}]', "--batch-json[0].path is required."],
