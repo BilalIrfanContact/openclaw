@@ -246,6 +246,9 @@ describe("Gateway state ownership", () => {
   it("retains accepted nested maintenance after the root stops lending", async () => {
     const owner = gatewayOwner(databasePath, root);
     const accepted = retain(tryBorrowGatewayStateOwner(databasePath));
+    const access = captureStateDatabaseAccess(databasePath);
+    const retained = { schemaLease: accepted };
+    const prepared = await access.prepareAccess(retained);
     const projection = projectionPath(root);
     assertStateDatabaseAccessAllowed(databasePath);
     expect(tryAcquireGatewayStateOwner(databasePath)).toBeNull();
@@ -255,6 +258,10 @@ describe("Gateway state ownership", () => {
     expect(() => owner.assertCurrent()).toThrow("no longer current");
     accepted.assertCurrent();
     accepted.assertDatabaseAccess(databasePath);
+    prepared();
+    const settling = await access.prepareAccess(retained);
+    settling();
+    await expect(access.prepareAccess()).rejects.toThrow();
     expect(() => assertStateDatabaseAccessAllowed(databasePath)).toThrow();
     accepted.run(() => assertStateDatabaseAccessAllowed(databasePath));
     expectExistence(true, owner.path, projection);
@@ -263,6 +270,8 @@ describe("Gateway state ownership", () => {
     );
     owner.release();
     accepted.release();
+    expect(prepared).toThrow();
+    expect(settling).toThrow();
     expectExistence(false, resolveGatewayStateOwnerPath(databasePath), projection, databasePath);
     const next = acquireGatewayStateOwner({ databasePath });
     next.release();
@@ -279,8 +288,12 @@ describe("Gateway state ownership", () => {
       }),
     );
     const schema = schemaLease();
+    const prepared = await captureStateDatabaseAccess(databasePath).prepareAccess({
+      schemaLease: schema,
+    });
     const projection = fs.readFileSync(gateway.stateLockPath);
     await gateway.release();
+    prepared();
     schema.assertCurrent();
     expect(fs.readFileSync(gateway.stateLockPath)).toEqual(projection);
     expectExistence(false, projectionPath(root));
@@ -320,9 +333,6 @@ describe("Gateway state ownership", () => {
           expect(() => assertStateDatabaseAccessAllowed(databasePath)).toThrow(
             "lock removed/replaced; restart the Gateway",
           );
-          expect(() => retainedAccess.assertAccessAllowed()).toThrow(
-            "lock removed/replaced; restart the Gateway",
-          );
         }
         expect(() => lease.assertCurrent()).toThrow("no longer current");
         expect(() => acquireStateDatabaseSchemaLease(databasePath)).toThrow(
@@ -334,6 +344,9 @@ describe("Gateway state ownership", () => {
           lease.run(replace);
         } else {
           replace();
+          await expect(retainedAccess.prepareAccess()).rejects.toThrow(
+            "lock removed/replaced; restart the Gateway",
+          );
         }
       } finally {
         if (original) {
