@@ -1,7 +1,8 @@
 import { resolveRuntimeProcessEntrypointUrl } from "../../infra/runtime-process-url.js";
-import type {
-  UsageOverviewPackedUsage,
-  UsageOverviewReportInput,
+import {
+  buildUsageOverviewReport,
+  type UsageOverviewPackedUsage,
+  type UsageOverviewReportInput,
 } from "../../infra/session-cost-usage-overview-report.js";
 import type { UsageDailyBucket } from "../../infra/session-cost-usage.js";
 import { WorkerTaskPool } from "../../infra/worker-task-pool.js";
@@ -27,18 +28,19 @@ const pool = new WorkerTaskPool<UsageOverviewReportInput, UsageOverviewSlice>({
   workerUrl: resolveRuntimeProcessEntrypointUrl("usageOverview"),
 });
 
-/**
- * Aggregate the visible overview rows off the Gateway thread. The worker receives only
- * the row fields the shared overview owner reads; the Gateway restores full rows on the
- * returned page.
- */
-function runUsageOverviewReport(params: {
-  rows: SessionUsageEntry[];
+type UsageOverviewReportParams = {
   usage: UsageOverviewUsage;
   options: UsageOverviewOptions;
   dayBucket: UsageDailyBucket;
-  signal?: AbortSignal;
-}): Promise<UsageOverviewSlice> {
+};
+
+/**
+ * Report input for the visible rows. Rows carry only the fields the shared overview
+ * owner reads; the Gateway restores full rows on the returned page.
+ */
+function usageOverviewReportInput(
+  params: UsageOverviewReportParams & { rows: SessionUsageEntry[] },
+): UsageOverviewReportInput {
   const rows = params.rows.map((row): UsageOverviewReportInput["rows"][number] => ({
     key: row.key,
     label: row.label,
@@ -58,45 +60,60 @@ function runUsageOverviewReport(params: {
     usage: row.usage,
     usageRef: params.usage.refs.get(usageOverviewRowKey(row)),
   }));
-  const packedBytes = params.usage.packed.reduce(
-    (sum, { batch }) => sum + batch.values.byteLength + batch.offsets.byteLength,
-    0,
-  );
-  return pool.run(
-    { packed: params.usage.packed, rows, options: params.options, dayBucket: params.dayBucket },
-    { signal: params.signal, inputBytes: packedBytes + rows.length * 512 },
-  );
+  return {
+    packed: params.usage.packed,
+    rows,
+    options: params.options,
+    dayBucket: params.dayBucket,
+  };
 }
 
-/**
- * Memoized report runner for one request: the overview is recomputed only when the
- * visible membership changes. `undefined` when the request has no packed overview.
- */
+// Membership includes context availability: query filters can read it.
+const usageOverviewMembers = (rows: readonly SessionUsageEntry[]) =>
+  rows.map((row) => `${usageOverviewRowKey(row)}\u0000${row.hasContextWeight ? 1 : 0}`).join("\n");
+
+/** Overview report runner for one request; `undefined` when it has no packed overview. */
+export type UsageOverviewReporter = {
+  /** Aggregate off the Gateway thread; repeated rows reuse the running report. */
+  run: (rows: SessionUsageEntry[]) => Promise<UsageOverviewSlice>;
+  /** True when the last `run` covered exactly these rows. */
+  covers: (rows: readonly SessionUsageEntry[]) => boolean;
+  /** Aggregate on the calling thread without an await. */
+  local: (rows: SessionUsageEntry[]) => UsageOverviewSlice;
+};
+
 export function createUsageOverviewReporter(params: {
   usage: UsageOverviewUsage | undefined;
   options: UsageOverviewOptions | undefined;
   dayBucket: UsageDailyBucket;
-}): ((rows: SessionUsageEntry[]) => Promise<UsageOverviewSlice>) | undefined {
-  const { usage, options } = params;
+}): UsageOverviewReporter | undefined {
+  const { usage, options, dayBucket } = params;
   if (!usage || !options) {
     return undefined;
   }
   let report: { members: string; slice: Promise<UsageOverviewSlice> } | undefined;
-  return (rows) => {
-    const members = rows.map(usageOverviewRowKey).join("\n");
-    if (report?.members !== members) {
-      report = {
-        members,
-        slice: runUsageOverviewReport({
-          rows,
-          usage,
-          options,
-          dayBucket: params.dayBucket,
-          signal: getAsyncWorkSignal(),
-        }),
-      };
-    }
-    return report.slice;
+  return {
+    run(rows) {
+      const members = usageOverviewMembers(rows);
+      if (report?.members !== members) {
+        const input = usageOverviewReportInput({ rows, usage, options, dayBucket });
+        const packedBytes = usage.packed.reduce(
+          (sum, { batch }) => sum + batch.values.byteLength + batch.offsets.byteLength,
+          0,
+        );
+        report = {
+          members,
+          slice: pool.run(input, {
+            signal: getAsyncWorkSignal(),
+            inputBytes: packedBytes + input.rows.length * 512,
+          }),
+        };
+      }
+      return report.slice;
+    },
+    covers: (rows) => report?.members === usageOverviewMembers(rows),
+    local: (rows) =>
+      buildUsageOverviewReport(usageOverviewReportInput({ rows, usage, options, dayBucket })),
   };
 }
 

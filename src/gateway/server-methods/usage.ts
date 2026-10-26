@@ -22,6 +22,7 @@ import type {
   SessionsUsageAggregates,
   SessionsUsageResult,
   UsageOverviewOptions,
+  UsageOverviewSlice,
 } from "../../shared/usage-types.js";
 import {
   sessionDeliveryChannel,
@@ -557,7 +558,7 @@ export const usageHandlers: GatewayRequestHandlers = {
         visible = readVisibleRows();
         const selected = selectRows(visible);
         const page = reportFor
-          ? (await reportFor(selected)).sessions
+          ? (await reportFor.run(selected)).sessions
           : overviewOptions
             ? selectUsageOverviewPage({
                 rows: selected,
@@ -603,21 +604,26 @@ export const usageHandlers: GatewayRequestHandlers = {
         await budget.read(prepareUnavailableSources, () => undefined);
         visible = readVisibleRows();
       }
-      const creatorOptions = new Map<string, SessionUsageCreator>();
-      for (const row of visible) {
-        if (row.creatorKey) {
-          creatorOptions.set(row.creatorKey, { key: row.creatorKey, actor: row.createdActor });
-        }
-      }
-      const selected = selectRows(visible);
+      let selected = selectRows(visible);
       const accumulator = createUsageAggregateAccumulator();
       if (!overviewOptions) {
         selected.forEach((row) => accumulator.add(row));
       }
-      // Reports always cover exactly the final visible rows.
-      const slice = reportFor
-        ? withVisibleUsageOverviewRows(await reportFor(selected), visible)
-        : overviewOptions
+      let slice:
+        | UsageOverviewSlice
+        | Pick<UsageOverviewSlice, "sessions" | "totals" | "aggregates">;
+      if (reportFor) {
+        const report = await reportFor.run(selected);
+        // Access can change while the worker aggregates. Publish only what the current
+        // authority permits: re-read visibility with no await before the response.
+        visible = readVisibleRows();
+        selected = selectRows(visible);
+        slice = withVisibleUsageOverviewRows(
+          reportFor.covers(selected) ? report : reportFor.local(selected),
+          visible,
+        );
+      } else {
+        slice = overviewOptions
           ? buildUsageOverview({
               rows: selected,
               options: overviewOptions,
@@ -629,6 +635,13 @@ export const usageHandlers: GatewayRequestHandlers = {
               totals: accumulator.totals,
               aggregates: accumulator.finish(),
             };
+      }
+      const creatorOptions = new Map<string, SessionUsageCreator>();
+      for (const row of visible) {
+        if (row.creatorKey) {
+          creatorOptions.set(row.creatorKey, { key: row.creatorKey, actor: row.createdActor });
+        }
+      }
       const partial = budget.exhausted()
         ? { reason: "time-budget" as const, message: budget.hint }
         : (result.partial ?? result.cacheStatus?.partial);
