@@ -49,6 +49,9 @@ export type UsageCostWorkerSession = {
   transcriptFile?: UsageCostTranscriptFile;
 };
 
+/** A SQLite transcript as `[stores index, session id]`, so worker inputs name each store once. */
+export type UsageCostOverviewInstance = UsageCostWorkerSession | [store: number, sessionId: string];
+
 export type UsageCostWorkerOperation =
   | {
       kind: "inventory";
@@ -76,7 +79,8 @@ export type UsageCostWorkerOperation =
       kind: "overview";
       pricingFingerprint: string;
       /** Each family folds its instances into one row, in this order. */
-      families: Array<UsageCostWorkerSession[]>;
+      families: Array<UsageCostOverviewInstance[]>;
+      stores: Array<{ agentId: string; storePath: string }>;
       includeUntimestamped?: boolean;
     } & UsageCostWorkerRange)
   | {

@@ -10,6 +10,7 @@ import {
   type UsageCostCollectionAccess,
 } from "./session-cost-usage-collection.js";
 import { createUsageOverviewBatchBuilder } from "./session-cost-usage-overview-batch.js";
+import { expandUsageOverviewFamilies } from "./session-cost-usage-overview-load.js";
 import {
   createUsageDayKeyFormatter,
   finishUsageCostSummary,
@@ -333,7 +334,8 @@ export async function projectUsageCostQuartersInWorker(params: {
     };
   }
 
-  const instances = operation.families.flat();
+  const families = expandUsageOverviewFamilies(operation);
+  const instances = families.flat();
   const paths = await resolveUsageCostTranscriptPaths(
     instances.map((instance) => instance.sessionFile),
     access,
@@ -383,7 +385,7 @@ export async function projectUsageCostQuartersInWorker(params: {
   const staleSessionFiles = new Set<string>();
   const fold = createUsageOverviewFold(range);
   let offset = 0;
-  for (const family of operation.families) {
+  for (const family of families) {
     params.throwIfCancelled();
     let covered = 0;
     let incomplete = false;

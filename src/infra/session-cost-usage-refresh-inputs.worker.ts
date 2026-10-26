@@ -88,7 +88,11 @@ export function createUsageCostCollectionAccess(params: {
     return JSON.stringify([database.path, database.agentId, marker.sessionId]);
   };
   if (operation.kind === "sessions" || operation.kind === "overview") {
-    const sessions = operation.kind === "sessions" ? operation.sessions : operation.families.flat();
+    // Compact overview instances carry no transcript statistics.
+    const sessions =
+      operation.kind === "sessions"
+        ? operation.sessions
+        : operation.families.flat().flatMap((session) => (Array.isArray(session) ? [] : [session]));
     for (const session of sessions) {
       const file = session.transcriptFile;
       const marker = file && parseSqliteSessionFileMarker(session.sessionFile);

@@ -1,10 +1,64 @@
+import {
+  formatSqliteSessionFileMarker,
+  parseSqliteSessionFileMarker,
+} from "../config/sessions/legacy-sqlite-marker.js";
 import type { UsageOverviewSessionSummary } from "../shared/usage-types.js";
 import type { UsageOverviewPackedUsage } from "./session-cost-usage-overview-report.js";
 import { createSessionCostSummaryAccumulator } from "./session-cost-usage-rollup.js";
 import type {
+  UsageCostOverviewInstance,
+  UsageCostWorkerOperation,
   UsageCostWorkerResult,
   UsageCostWorkerSession,
 } from "./session-cost-usage-worker.types.js";
+
+/**
+ * Overview worker input with each SQLite store named once. Worker inputs share the
+ * pool's input-byte budget; a session's marker otherwise repeats its store path.
+ */
+export function compactUsageOverviewFamilies(
+  families: readonly UsageCostWorkerSession[][],
+): Pick<Extract<UsageCostWorkerOperation, { kind: "overview" }>, "families" | "stores"> {
+  const stores: Array<{ agentId: string; storePath: string }> = [];
+  const storeIndex = new Map<string, number>();
+  const compact = (instance: UsageCostWorkerSession): UsageCostOverviewInstance => {
+    const marker = instance.transcriptFile
+      ? undefined
+      : parseSqliteSessionFileMarker(instance.sessionFile);
+    // Only markers that rebuild to the same cache key travel compactly.
+    if (!marker || formatSqliteSessionFileMarker(marker) !== instance.sessionFile) {
+      return instance;
+    }
+    const key = `${marker.agentId}\u0000${marker.storePath}`;
+    let index = storeIndex.get(key);
+    if (index === undefined) {
+      index = stores.length;
+      stores.push({ agentId: marker.agentId, storePath: marker.storePath });
+      storeIndex.set(key, index);
+    }
+    return [index, marker.sessionId];
+  };
+  return { stores, families: families.map((family) => family.map(compact)) };
+}
+
+/** Worker-side inverse of `compactUsageOverviewFamilies`. */
+export function expandUsageOverviewFamilies(
+  operation: Pick<Extract<UsageCostWorkerOperation, { kind: "overview" }>, "families" | "stores">,
+): UsageCostWorkerSession[][] {
+  return operation.families.map((family) =>
+    family.map((instance) =>
+      Array.isArray(instance)
+        ? {
+            sessionId: instance[1],
+            sessionFile: formatSqliteSessionFileMarker({
+              ...operation.stores[instance[0]]!,
+              sessionId: instance[1],
+            }),
+          }
+        : instance,
+    ),
+  );
+}
 
 /** One agent's overview read, as the Gateway's session loader consumes it. */
 export type UsageOverviewLoad = Omit<

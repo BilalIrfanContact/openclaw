@@ -15,6 +15,7 @@ import type { SessionCostUsageRollupRow } from "./session-cost-usage-cache.kerne
 import { isSessionCostUsageRefreshRunning } from "./session-cost-usage-cache.sqlite.js";
 import { isSessionActorUsageRefreshRunning } from "./session-cost-usage-memory.js";
 import {
+  compactUsageOverviewFamilies,
   foldUsageOverviewFamilies,
   type UsageOverviewLoad,
 } from "./session-cost-usage-overview-load.js";
@@ -413,11 +414,12 @@ export async function loadSessionUsageOverviewFromCache(params: {
     prepared.config,
     prepared.agentDir,
   );
+  const families = compactUsageOverviewFamilies(params.families);
   const result = await runUsageReportAfterRefresh(prepared, params, async () => {
     const pass = await runUsageCostWorker(prepared, {
       kind: "overview",
       pricingFingerprint,
-      families: params.families,
+      ...families,
       startMs: params.startMs,
       endMs: params.endMs,
       includeUntimestamped: params.includeUntimestamped,
