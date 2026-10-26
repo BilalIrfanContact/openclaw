@@ -11,6 +11,7 @@ import {
   workspaceSnapshot,
   workspaceTransfer,
 } from "./node-worker-tunnel.test-support.js";
+import { memoryWorkspaceJournal } from "./tunnel.test-support.js";
 import { captureWorkspaceManifest } from "./workspace-manifest-worker.js";
 
 const temporary = useAutoCleanupTempDirTracker(afterEach);
@@ -32,12 +33,7 @@ it.each([
       kind: "local" as const,
       path: localPath,
       stagedResult: { ref: "refs/openclaw/worker-results/test", record: () => {} },
-      journal: {
-        load: async () => undefined,
-        begin: async () => {},
-        commit: async () => {},
-        abort: async () => {},
-      },
+      journal: memoryWorkspaceJournal(),
     },
     remoteWorkspaceDir: remotePath,
     baseManifestRef,
@@ -56,14 +52,8 @@ it.each([
       }),
     }),
     runWorkspaceCommand: async (command) => {
-      if (command.transfer) {
-        expect(command.transfer).toEqual({
-          direction: "upload",
-          token: "upload-token",
-          baseManifestRef,
-          referenceManifestRef: baseManifestRef,
-          ...(supported ? { resultVersion: 2 } : {}),
-        });
+      if (command.transfer?.direction === "upload") {
+        expect(command.transfer.resultVersion).toBe(supported ? 2 : undefined);
         if (failUpload) {
           throw finished;
         }

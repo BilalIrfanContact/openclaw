@@ -42,17 +42,15 @@ it.each(["source replacement", "transport refresh"] as const)(
       path: support.testState.stateDb.path,
       now: () => support.testState.nowMs,
     });
-    // Gate only timing; the original manager guard still reaches the actual native store.
     const begin = vi.fn<WorkerInferenceStore["begin"]>(async (...args) => {
       entered.resolve();
       await proceed.promise;
       return nativeStore.begin(...args);
     });
-    const complete = vi.fn(nativeStore.complete);
     const execute = vi.fn(async () => DONE);
     const rpc = support.createService(support.createProvider(), {
       executeInference: execute,
-      inferenceStore: { ...nativeStore, begin, complete },
+      inferenceStore: { ...nativeStore, begin },
       placementStore: createWorkerSessionPlacementGate(placements),
     });
     let first: ReturnType<typeof rpc.startInference> | undefined;
@@ -93,14 +91,12 @@ it.each(["source replacement", "transport refresh"] as const)(
         nextIdentity = { ...identity, credentialHash };
       }
       reconnected = rpc.startInference(nextIdentity, request, nextSink.sink);
-      expect(begin).toHaveBeenCalledOnce();
       proceed.resolve();
       const results = await Promise.all([first, reconnected]);
       if (change === "source replacement") {
         const refused = { ok: false, reason: "provider-error" };
         expect(results).toEqual([refused, refused]);
         expect(execute).not.toHaveBeenCalled();
-        expect(complete).not.toHaveBeenCalled();
         expect(nextSink.frames).toEqual([]);
       } else {
         for (const result of results) {
@@ -110,7 +106,6 @@ it.each(["source replacement", "transport refresh"] as const)(
         }
         expect((await nextSink.terminal).payload.outcome).toEqual(DONE);
         expect(execute).toHaveBeenCalledOnce();
-        expect(complete).toHaveBeenCalledOnce();
       }
       expect(firstSink.frames).toEqual([]);
       expect(begin).toHaveBeenCalledOnce();

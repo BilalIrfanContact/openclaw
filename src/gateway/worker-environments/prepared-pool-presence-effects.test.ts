@@ -64,17 +64,17 @@ it("uses the real provider lifecycle and authorized private Git transport for pr
       return Response.json(responses.find(([route]) => route.test(pathname))?.[1] ?? metadata);
     }),
   );
-  const upload = vi.fn(git.transport.upload);
-  const allocate = vi.fn(async (options: ProvisionOptions) => {
-    const result = await options.project!.prepare({ ...git.transport, upload });
+  const prepared: Array<[boolean, string]> = [];
+  const allocate = async (options: ProvisionOptions) => {
+    const result = await options.project!.prepare(git.transport);
     const { workspaceDir } = result.preparedWorkspace!;
-    expect(await fs.readFile(path.join(workspaceDir, "input.txt"), "utf8")).toBe(
-      "pinned private content\n",
-    );
-    expect(result.cacheHit).toBe(false);
+    prepared.push([
+      result.cacheHit,
+      await fs.readFile(path.join(workspaceDir, "input.txt"), "utf8"),
+    ]);
     // Stop after real transfer; do not advertise synthetic node readiness.
     throw new Error("Owned allocation observer completed");
-  });
+  };
   const provider = {
     requiresNodeEnrollment: true,
     provisionBeforeInstallation: true,
@@ -104,8 +104,7 @@ it("uses the real provider lifecycle and authorized private Git transport for pr
     },
   });
   await service.setHumanPresence(true);
-  expect(allocate).toHaveBeenCalledOnce();
-  expect(upload).toHaveBeenCalledOnce();
+  expect(prepared).toEqual([[false, "pinned private content\n"]]);
   expect(git.requests.length).toBeGreaterThan(0);
   expect(git.requests.every((value) => value === AUTHORIZATION)).toBe(true);
   expect(git.fetches).toMatchObject([{ settled: true }]);

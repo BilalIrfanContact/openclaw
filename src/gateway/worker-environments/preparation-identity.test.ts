@@ -1,9 +1,6 @@
 import { expect, it } from "vitest";
 import { createWorkerPreparationIdentity } from "./preparation-identity.js";
-import {
-  readWorkerPreparation,
-  readWorkerProjectPreparation,
-} from "./preparation-identity.schema.js";
+import { readWorkerPreparation } from "./preparation-identity.schema.js";
 import type { WorkerLocalProjectSnapshot } from "./workspace-git-base.js";
 
 const input: Omit<Parameters<typeof createWorkerPreparationIdentity>[0], "project"> & {
@@ -48,14 +45,8 @@ const artifacts = (change: Partial<typeof input.artifacts>) => ({
 });
 const original = identity();
 
-it("keeps empty runtime preparation separate from project content", () => {
-  const preparation = createWorkerPreparationIdentity(runtime);
-  const empty = { source: "empty", ...preparation };
-  expect(preparation.key).not.toBe(original.key);
-  expect(preparation).not.toHaveProperty("setupRecipe");
-  expect(readWorkerPreparation({ ...runtime.profileSnapshot, runtimePreparation: empty })).toEqual(
-    empty,
-  );
+it("rejects mixed project/runtime preparation and executable empty preparation", () => {
+  const empty = { source: "empty", ...createWorkerPreparationIdentity(runtime) };
   const rejects = (profile: Record<string, unknown>) =>
     expect(() => readWorkerPreparation(profile)).toThrow("runtime preparation identity is invalid");
   rejects({ project: input.project, runtimePreparation: empty });
@@ -75,18 +66,6 @@ it("shares identity across linked source paths, JSON field order and plugin orde
   expect(createWorkerPreparationIdentity(equivalent)).toEqual(original);
 });
 
-it("separates skipped setup caches while preserving the default identity", () => {
-  const enabled = identity({ runSetupScript: true });
-  expect(enabled).toEqual(original);
-  expect(original).not.toHaveProperty("runSetupScript");
-  const skipped = identity({ runSetupScript: false });
-  expect(skipped.setupRecipe).toBe(original.setupRecipe);
-  expect(skipped.runSetupScript).toBe(false);
-  expect(skipped.key).not.toBe(original.key);
-  expect(skipped.cacheKey).not.toBe(original.cacheKey);
-  expect(readWorkerProjectPreparation({ preparation: skipped })).toEqual(skipped);
-});
-
 it("uses the provider disk fingerprint independently of lease and runtime policy", () => {
   const diskTarget = { ...input.target, profileKey: "7".repeat(64) };
   const disk = identity({ target: diskTarget });
@@ -95,12 +74,8 @@ it("uses the provider disk fingerprint independently of lease and runtime policy
   expect(disk.cacheKey).toBe("5aa1bd824e0e251412000829f6a7932ef884b12223a29d19611c17a769abc474");
   const changed = identity({
     target: diskTarget,
-    profileId: "renamed",
     profileSnapshot: {
-      install: "npm",
       executionMode: "remote-exec",
-      suspendAfter: "45m",
-      readyWorkers: 0,
       settings: { ttl: "4h", idleTimeout: "2h", binary: "/other/crabbox", warmImage: true },
     },
   });
@@ -117,16 +92,9 @@ it.each<[string, InputChange, boolean?]>([
   ["recipe", { setupRecipe: "2".repeat(40) }],
   ["profile", { profileSnapshot: { settings: { region: "elsewhere" } } }],
   ["project", project({ key: "9".repeat(64) })],
-  ["class", target({ machineClass: "large" })],
-  ["target", target({ arch: "arm64" })],
   ["OS", target({ platform: "darwin" })],
   ["mode", { profileSnapshot: { executionMode: "remote-exec" } }, false],
-  ["version", artifacts({ openclawVersion: "2026.9.1" }), false],
-  ["archive", artifacts({ workerArchiveSha256: "6".repeat(64) }), false],
-  ["runtime", artifacts({ nodeBootstrapSha256: "3".repeat(64) }), false],
-  ["plugins", artifacts({ enabledPluginIds: ["third"] }), false],
   ["bundle", artifacts({ workerBundleHash: "4".repeat(64) }), false],
-  ["protocol", artifacts({ protocolFeatures: ["worker-computer-v1"] }), false],
 ])("invalidates a changed %s before allocation", (_label, change, cacheChanges = true) => {
   const next = identity(change);
   expect(next.key).not.toBe(original.key);

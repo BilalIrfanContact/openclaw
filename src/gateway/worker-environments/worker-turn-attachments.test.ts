@@ -109,8 +109,11 @@ describe("cloud attachment transfer confinement", () => {
     expect(runWorkspaceCommand).not.toHaveBeenCalled();
   });
 
-  it("uses a managed original URL when the runtime path was already staged on the Gateway", async () => {
-    const note = await prepare(undefined, [
+  it("stages the managed original URL with a monotonic integer transfer budget", async () => {
+    vi.spyOn(performance, "now").mockReturnValueOnce(500).mockReturnValue(500.25);
+    vi.spyOn(Date, "now").mockReturnValueOnce(500).mockReturnValue(-89_500);
+    const runWorkspaceCommand = vi.fn(execute);
+    const note = await prepare(runWorkspaceCommand, [
       {
         path: path.join(root, "gateway-copy.pdf"),
         url: originalPath,
@@ -120,13 +123,6 @@ describe("cloud attachment transfer confinement", () => {
     const [directory] = await fs.readdir(remote);
     expect(note).toContain(directory);
     expect(await fs.readFile(path.join(remote, directory!, "1-original.pdf"))).toEqual(bytes);
-  });
-
-  it("bounds transfer commands by the monotonic turn budget when the wall clock rewinds", async () => {
-    vi.spyOn(performance, "now").mockReturnValueOnce(500).mockReturnValue(500.25);
-    vi.spyOn(Date, "now").mockReturnValueOnce(500).mockReturnValue(-89_500);
-    const runWorkspaceCommand = vi.fn(execute);
-    await prepare(runWorkspaceCommand);
     // Integral budget: the node protocol rejects fractional timeoutMs.
     expect(runWorkspaceCommand.mock.calls.map(([command]) => command.timeoutMs)).toEqual([
       4999, 4999,
