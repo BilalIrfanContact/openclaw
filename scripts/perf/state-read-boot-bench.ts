@@ -27,6 +27,7 @@ import { parseArgs } from "node:util";
 import type * as Roles from "../../src/infra/database-engine/admission-scope.js";
 import type * as Diagnostics from "../../src/infra/worker-cpu.js";
 import type * as Native from "../../src/infra/worker-native-lifecycle.js";
+import type * as MachineState from "../../src/state/config-machine-state-write.js";
 import type * as Reads from "../../src/state/openclaw-state-db-readonly.js";
 import type * as State from "../../src/state/openclaw-state-db.js";
 import type { OpenClawStateReadCommand } from "../../src/state/openclaw-state-read.types.js";
@@ -96,9 +97,13 @@ const installRole = await built<typeof Roles.installDatabaseProcessRole>(
   "admission-scope",
   "installDatabaseProcessRole",
 );
-const open = await built<typeof State.openOpenClawStateDatabase>(
+const writeTransaction = await built<typeof State.runOpenClawStateWriteTransaction>(
   "openclaw-state-db",
-  "openOpenClawStateDatabase",
+  "runOpenClawStateWriteTransaction",
+);
+const writeMachineState = await built<typeof MachineState.writeConfigMachineStateInDatabase>(
+  "config-machine-state-write",
+  "writeConfigMachineStateInDatabase",
 );
 const close = await built<typeof State.closeOpenClawStateDatabaseAsync>(
   "openclaw-state-db-cache",
@@ -174,17 +179,16 @@ async function measure(run: () => Promise<void>, operations: number) {
 }
 
 try {
-  const database = open();
-  database.db.exec("BEGIN");
-  const insert = database.db.prepare("INSERT INTO config_machine_state VALUES (?, ?, 1)");
-  for (let index = 0; index < 10_000; index++) {
-    insert.run(`synthetic.${index}`, JSON.stringify({ value: index }));
-  }
-  insert.run(
-    "plugins.installedIndex",
-    JSON.stringify(Array.from({ length: 40 }, (_, index) => ({ id: `synthetic-${index}` }))),
-  );
-  database.db.exec("COMMIT");
+  writeTransaction(({ db }) => {
+    for (let index = 0; index < 10_000; index++) {
+      writeMachineState(db, `synthetic.${index}`, { value: index });
+    }
+    writeMachineState(
+      db,
+      "plugins.installedIndex",
+      Array.from({ length: 40 }, (_, index) => ({ id: `synthetic-${index}` })),
+    );
+  });
   await close();
   const commands: OpenClawStateReadCommand[] = [
     { type: "config.health.read", input: undefined },

@@ -6,7 +6,7 @@ import { isMainThread } from "node:worker_threads";
 
 if (isMainThread && process.send) {
   let lifecycle;
-  process.on("message", async (message) => {
+  const sample = async (message) => {
     if (message?.channel !== "state-read-gateway-boot") {
       return;
     }
@@ -45,6 +45,9 @@ if (isMainThread && process.send) {
     } catch (error) {
       process.send({ channel: message.channel, id: message.id, error: String(error) });
     }
+  };
+  process.on("message", (message) => {
+    void sample(message);
   });
   process.channel?.unref();
 }
