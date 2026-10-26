@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { ChatQueueItem } from "../../lib/chat/chat-types.ts";
 import { INTERRUPTED_SETTINGS_WAIT_ERROR } from "../../lib/chat/outbox-store-codec.ts";
-import { makeChatHost } from "./chat-host.test-support.ts";
+import { expectNoRpc, makeChatHost } from "./chat-host.test-support.ts";
 import { admitHostQueueItems } from "./chat-outbox-recovery.test-support.ts";
 import {
   keepVolatileQueuedMessage,
@@ -65,17 +65,16 @@ it.each(
       storageMode,
       canDispatch: () => canDispatch,
     });
-    try {
-      await requested.promise;
-      expect(host.request).not.toHaveBeenCalledWith(
-        "chat.send",
-        expect.anything(),
-        expect.anything(),
-      );
+    const expectQueued = (fields: Partial<ChatQueueItem>) =>
       expect(readQueuedMessageById(host, item.id)).toMatchObject({
         text: item.text,
         sendAttempts: 0,
+        ...fields,
       });
+    try {
+      await requested.promise;
+      expectNoRpc(host.request, "chat.send");
+      expectQueued({});
       if (scenario === "connection replaced") {
         host.connectionEpoch += 1;
       } else if (scenario === "row replaced") {
@@ -103,30 +102,19 @@ it.each(
         );
         return;
       }
-      expect(host.request).not.toHaveBeenCalledWith(
-        "chat.send",
-        expect.anything(),
-        expect.anything(),
-      );
+      expectNoRpc(host.request, "chat.send");
       if (scenario === "rejected" || scenario === "cancelled") {
         const error =
           scenario === "cancelled"
             ? INTERRUPTED_SETTINGS_WAIT_ERROR
             : "Synthetic reply preparation unavailable";
         expect(result).toBe("failed");
-        expect(readQueuedMessageById(host, item.id)).toMatchObject({
-          text: item.text,
-          sendAttempts: 0,
-          sendState: "failed",
-          sendError: error,
-        });
-        expect(host.chatError).toBe(error);
-        expect(host.lastError).toBe(error);
+        expectQueued({ sendState: "failed", sendError: error });
+        expect(host).toMatchObject({ chatError: error, lastError: error });
       } else {
         expect(result).toBe("pending");
-        expect(readQueuedMessageById(host, item.id)).toMatchObject({
+        expectQueued({
           text: scenario === "row replaced" ? "Newer queued text" : item.text,
-          sendAttempts: 0,
           sendState: "waiting-idle",
         });
         expect(host.chatError).toBe(previousError);

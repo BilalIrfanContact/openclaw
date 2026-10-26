@@ -22,7 +22,9 @@ function drawBanner(overrides: Partial<NonNullable<Banner>> = {}) {
     },
   });
   const banner = view.container.querySelector(".agent-chat__disabled-banner")!;
-  return { ...view, banner, action: banner.querySelector<HTMLButtonElement>("button")! };
+  const update = (disabledBanner: Banner) =>
+    renderComposerInto(view.container, { ...view.props, disabledBanner });
+  return { ...view, update, banner, action: banner.querySelector<HTMLButtonElement>("button")! };
 }
 
 function expectClasses(element: Element, classes: string) {
@@ -33,7 +35,7 @@ it("keeps the focused action through a banner refresh and uses the current actio
   const initialAction = vi.fn();
   const refreshedAction = vi.fn();
   const text = "This session is still archived.";
-  const { container, props, action, banner } = drawBanner({ onAction: initialAction });
+  const { container, update, action, banner } = drawBanner({ onAction: initialAction });
   document.body.append(container);
   action.focus();
   expectClasses(
@@ -41,14 +43,11 @@ it("keeps the focused action through a banner refresh and uses the current actio
     "agent-chat__disabled-banner agent-chat__disabled-banner--replacement callout info callout--action",
   );
 
-  renderComposerInto(container, {
-    ...props,
-    disabledBanner: {
-      ...props.disabledBanner!,
-      text,
-      actionLabel: "Unarchive",
-      onAction: refreshedAction,
-    },
+  update({
+    kind: "composer-replacement",
+    text,
+    actionLabel: "Unarchive",
+    onAction: refreshedAction,
   });
 
   expect(container.querySelector(".agent-chat__disabled-banner")?.textContent).toContain(text);
@@ -99,46 +98,31 @@ it("renders a standard primary action with progress feedback", () => {
 it("keeps notice Stop focused, uses the current callback and removes it when no action is supplied", () => {
   const initialAbort = vi.fn();
   const currentAbort = vi.fn();
-  const { container, props } = renderComposerFixture({
-    canSend: false,
-    disabledBanner: {
-      kind: "composer-replacement",
-      text: "This subagent is working.",
-      stop: { onAbort: initialAbort },
-    },
+  const { container, update } = drawBanner({
+    text: "This subagent is working.",
+    actionLabel: undefined,
+    onAction: undefined,
+    stop: { onAbort: initialAbort },
   });
   document.body.append(container);
-  const stop = container.querySelector<HTMLButtonElement>(
-    '.agent-chat__disabled-banner button[aria-label="Stop generating"]',
-  )!;
+  const findStop = () =>
+    container.querySelector<HTMLButtonElement>('[aria-label="Stop generating"]');
+  const stop = findStop()!;
   expect(stop).not.toBeNull();
   stop.focus();
 
-  renderComposerInto(container, {
-    ...props,
-    disabledBanner: {
-      kind: "composer-replacement",
-      text: "This subagent is still working.",
-      stop: { onAbort: currentAbort },
-    },
+  update({
+    kind: "composer-replacement",
+    text: "This subagent is still working.",
+    stop: { onAbort: currentAbort },
   });
-  expect(
-    container.querySelector('.agent-chat__disabled-banner button[aria-label="Stop generating"]'),
-  ).toBe(stop);
+  expect(findStop()).toBe(stop);
   expect(document.activeElement).toBe(stop);
   stop.click();
   expect(initialAbort).not.toHaveBeenCalled();
   expect(currentAbort).toHaveBeenCalledOnce();
 
-  renderComposerInto(container, {
-    ...props,
-    disabledBanner: {
-      kind: "composer-replacement",
-      text: "This subagent finished.",
-    },
-  });
-  expect(
-    container.querySelector('.agent-chat__disabled-banner button[aria-label="Stop generating"]'),
-  ).toBeNull();
+  update({ kind: "composer-replacement", text: "This subagent finished." });
+  expect(findStop()).toBeNull();
   expect(currentAbort).toHaveBeenCalledOnce();
 });
