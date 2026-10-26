@@ -5,6 +5,7 @@ import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import type { DraftCloudProfile } from "./discovery.ts";
 import { createRepositoryFixture } from "./draft-place-state.test-support.ts";
 import * as hosted from "./hosted-environments.ts";
+import { placementControls } from "./placement.test-support.ts";
 import type { NewSessionPlaceControlsOptions } from "./target-controls.ts";
 import { resolveWhereChip } from "./where-chip.ts";
 import { WhereChip } from "./where-chip.tsx";
@@ -100,18 +101,8 @@ export function pickerParams(
         : original(control, profile),
     );
   }
-  const params: NewSessionPlaceControlsOptions = {
-    place,
-    gateway,
-    context: undefined,
-    data: undefined,
-    submitting: false,
-    pendingPlacement: false,
-    onConnectMachine: presentation.onConnectMachine ?? vi.fn(),
-    onNavigate: vi.fn(),
-    onFocusComposer: vi.fn(),
-    onChange: vi.fn(),
-  };
+  const params = placementControls({ place, gateway, context: undefined });
+  params.onConnectMachine = presentation.onConnectMachine ?? params.onConnectMachine;
   return { params, state };
 }
 

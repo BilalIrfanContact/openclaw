@@ -1,11 +1,10 @@
 /* @vitest-environment jsdom */
 import { getQueriesForElement } from "@solidjs/testing-library";
-import { createMemo, createSignal } from "solid-js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { DevicePairJoinSetup } from "../../lib/device-pair-setup.ts";
-import { mountSolid } from "../../test-helpers/mount-solid.ts";
-import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { mountSolid } from "../../test-helpers/solid-render.tsx";
+import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { ConnectMachineDialog } from "./connect-machine-dialog-view.tsx";
 import { ConnectMachineSetupState } from "./connect-machine-dialog.ts";
 
@@ -32,30 +31,21 @@ function mountSetup() {
     client: new GatewayBrowserClient({ url: "wss://gateway.example.test" }),
     connected: true,
   };
-  let changed = () => {};
+  const props = () => setup.view(true, () => {});
   const setup = new ConnectMachineSetupState(
     () => gateway,
-    () => changed(),
+    () => view.update(props()),
   );
-  const view = mountSolid(() => {
-    const [revision, publish] = createSignal(0);
-    changed = () => publish((value) => value + 1);
-    const props = createMemo(() => {
-      revision();
-      return setup.view(true, () => {});
-    });
-    return (
-      <>
-        <button onClick={() => setup.start()}>Connect</button>
-        <ConnectMachineDialog {...props()} />
-      </>
-    );
+  const container = document.body.appendChild(document.createElement("div"));
+  const view = mountSolid(ConnectMachineDialog, props(), container);
+  onTestFinished(() => {
+    setup.close();
+    container.remove();
   });
-  onTestFinished(() => setup.close());
-  flush();
   const queries = getQueriesForElement(document.body);
   return {
     gateway,
+    start: () => setup.start(),
     ...queries,
     button: (name: string) => queries.getByRole<HTMLButtonElement>("button", { name }),
     dialog: () => view.container.querySelector("openclaw-modal-dialog"),
@@ -69,7 +59,7 @@ it("retains the command and dialog through minting, refresh failure and retry", 
   const f = mountSetup();
   const initial = Promise.withResolvers<DevicePairJoinSetup>();
   const request = vi.spyOn(f.gateway.client, "request").mockReturnValueOnce(initial.promise);
-  f.button("Connect").click();
+  f.start();
   await waitForSolid(() =>
     expect(f.getByRole("status").textContent).toBe("Creating a secure connection link…"),
   );
@@ -104,7 +94,7 @@ it.each(["resolve", "reject"] as const)(
     const originalRequest = vi
       .spyOn(f.gateway.client, "request")
       .mockReturnValueOnce(retired.promise);
-    f.button("Connect").click();
+    f.start();
     await waitForSolid(() => expect(originalRequest).toHaveBeenCalledOnce());
     f.button("Dismiss").click();
     await waitForSolid(() => expect(f.dialog()).toBeNull());
@@ -113,7 +103,7 @@ it.each(["resolve", "reject"] as const)(
     const nextRequest = vi
       .spyOn(f.gateway.client, "request")
       .mockReturnValueOnce(replacement.promise);
-    f.button("Connect").click();
+    f.start();
     await waitForSolid(() => expect(nextRequest).toHaveBeenCalledOnce());
     if (outcome === "resolve") {
       retired.resolve(code("retired-secret"));

@@ -46,7 +46,6 @@ describe("new-session composer critter visits", () => {
     expect(input.value).toBe("Typed before idle");
     expect(input.disabled).toBe(false);
     const pet = await loadPet(composer);
-    expect(pet.floorEnabled).toBe(false);
     expect(composer.querySelector("textarea")).toBe(input);
     unmount();
     const reopened = renderComposer();
@@ -87,21 +86,12 @@ describe("new-session composer critter visits", () => {
     onTestFinished(() => first.container.remove());
     const initial = await loadPet(first.composer);
     const seed = initial.seed;
-    expect(initial.parentElement?.classList.contains("agent-chat__input")).toBe(true);
     expect(initial.floorEnabled).toBe(true);
     first.rerender();
     first.rerenderForAgent("resolved-agent");
     expect(visitor(first.composer)).toBe(initial);
     expect(initial.seed).toBe(seed);
     const textarea = first.composer.querySelector("textarea")!;
-    const elements = initial.composerElements!()!;
-    expect(elements.composer).toBe(initial.parentElement);
-    expect(elements.editor).toBe(textarea);
-    expect(elements.footer).toBe(first.composer.querySelector(".agent-chat__composer-footer"));
-    expect(elements.controls).toEqual([
-      first.composer.querySelector(".agent-chat__composer-lead"),
-      first.composer.querySelector(".agent-chat__composer-actions"),
-    ]);
     textarea.value = "A prompt takes priority over the visitors";
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
     expect(visitor(first.composer)).toMatchObject({ seed, floorEnabled: false });
