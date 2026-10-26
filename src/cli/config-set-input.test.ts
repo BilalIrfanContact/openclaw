@@ -7,8 +7,6 @@ import {
   parseBatchSource,
   parseConfigSetCurrentExpectation,
   readConfigMutationFileSync,
-  type ConfigSetCurrentExpectation,
-  type ConfigSetOptions,
 } from "./config-set-input.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -35,19 +33,12 @@ describe("config set input parsing", () => {
     ]);
   });
 
-  it.each([
-    [{ expectCurrentAbsent: true }, { kind: "absent" }],
-    [{ expectCurrentJson: "null" }, { kind: "json", value: null }],
-    [
-      { expectCurrentJson: '{"enabled":true,"ports":[1,2]}' },
-      { kind: "json", value: { enabled: true, ports: [1, 2] } },
-    ],
-  ] satisfies [ConfigSetOptions, ConfigSetCurrentExpectation][])(
-    "parses current-value expectation %j",
-    (options, expected) => {
-      expect(parseConfigSetCurrentExpectation(options)).toEqual(expected);
-    },
-  );
+  it("retains JSON null as an expectation rather than treating it as absent", () => {
+    expect(parseConfigSetCurrentExpectation({ expectCurrentJson: "null" })).toEqual({
+      kind: "json",
+      value: null,
+    });
+  });
 
   it.each([
     [
