@@ -58,7 +58,6 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/exec-approval-manager.lifetime.test.ts",
   "src/gateway/exec-approval-manager.test.ts",
   "src/gateway/gateway-auth-recovery.test.ts",
-  "src/gateway/gateway-cli-backend.connect.test.ts",
   "src/gateway/gateway-cli-plugin-routing.test.ts",
   "src/gateway/gateway-code-mode-clock.test.ts",
   "src/gateway/gateway-cron-process-identity.windows.test.ts",

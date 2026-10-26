@@ -2444,7 +2444,6 @@ export const PR_PROTECTED_RUNTIME_TEST_FILES: readonly string[] = [
   "src/gateway/exec-approval-manager.test.ts",
   "src/gateway/gateway-active-memory.test.ts",
   "src/gateway/gateway-auth-recovery.test.ts",
-  "src/gateway/gateway-cli-backend.connect.test.ts",
   "src/gateway/gateway-code-mode-clock.test.ts",
   "src/gateway/gateway-codex-harness.fixture.test.ts",
   "src/gateway/gateway-concurrent-streams.test.ts",

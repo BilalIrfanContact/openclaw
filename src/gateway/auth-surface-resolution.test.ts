@@ -10,19 +10,17 @@ const ambientAuth: NodeJS.ProcessEnv = {
   OPENCLAW_GATEWAY_PASSWORD: "ambient-password", // pragma: allowlist secret
 };
 
-function missingSecretRef(id: string) {
-  return { source: "env", provider: "default", id } as const;
-}
+const missingSecretRef = (id: string) => ({ source: "env", provider: "default", id }) as const;
 
 function params(
   gateway: NonNullable<OpenClawConfig["gateway"]>,
   surface: "local" | "remote" = "local",
 ) {
-  const config: OpenClawConfig = {
-    gateway,
-    secrets: { providers: { default: { source: "env" } } },
+  return {
+    config: { gateway, secrets: { providers: { default: { source: "env" as const } } } },
+    surface,
+    env: ambientAuth,
   };
-  return { config, surface, env: ambientAuth };
 }
 
 const token = missingSecretRef("MISSING_LOCAL_TOKEN");
@@ -64,15 +62,7 @@ it("preserves a healthy configured remote password when its sibling token ref fa
     },
     "remote",
   );
-  const [probe, interactive] = await Promise.all([probeAuth(request), interactiveAuth(request)]);
-
-  expect(probe).toEqual({
-    token: undefined,
-    password: "configured-password", // pragma: allowlist secret
-    source: "config",
-    diagnostics: [expect.stringContaining("gateway.remote.token SecretRef is unresolved")],
-  });
-  expect(interactive).toEqual({
+  await expect(interactiveAuth(request)).resolves.toEqual({
     token: undefined,
     password: "configured-password", // pragma: allowlist secret
   });

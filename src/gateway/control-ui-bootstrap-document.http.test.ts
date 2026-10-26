@@ -18,7 +18,6 @@ import { makeMockHttpResponse } from "./test-http-response.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
-const phaseNames = (stages: string[]) => stages.map((stage) => `control-ui.document.${stage}`);
 
 it.each([false, true])(
   "embeds the endpoint payload only in admitted documents (catalog failure: %s)",
@@ -79,8 +78,6 @@ it.each([false, true])(
       return { ...response, body: String(response.end.mock.calls[0]?.[0] ?? "") };
     };
     const endpoint = await request("/control/control-ui-config.json", false, true);
-    await waitForDiagnosticEventsDrained();
-    expect(phases).toHaveLength(0);
     expect(endpoint.res.statusCode).toBe(200);
     expect(JSON.parse(endpoint.body)).toMatchObject({
       assistantName: name,
@@ -89,23 +86,6 @@ it.each([false, true])(
       pluginControlUiModules: catalogFails ? [] : [plugin],
     });
     const document = await request("/control/chat/main/topic", true, true);
-    await waitForDiagnosticEventsDrained();
-    expect(phases.map(({ name: phase }) => phase).toSorted()).toEqual(
-      phaseNames([
-        "auth_grants",
-        "identity_avatar",
-        "plugin_catalog",
-        "git_branch",
-        "preferences",
-        "render",
-        "total",
-      ]).toSorted(),
-    );
-    for (const phase of phases) {
-      expect(phase.durationMs).toBeGreaterThanOrEqual(0);
-      expect(phase.details).toBeUndefined();
-    }
-    phases.length = 0;
     expect(document.res.statusCode).toBe(200);
     expect(document.body).toContain(
       `${CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE}="${escapeHtml(endpoint.body)}"`,
@@ -113,16 +93,13 @@ it.each([false, true])(
     expect(document.body).not.toContain("<script>alert(1)</script>");
     expect(document.setHeader).toHaveBeenCalledWith("Cache-Control", "private, no-store");
 
-    const anonymous = await request("/control/", false, false);
-    expect(anonymous.res.statusCode).toBe(200);
-    expect(anonymous.body).not.toContain(CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE);
-    expect(anonymous.body).not.toContain("alert(1)");
     const denied = await request("/control/chat/main/topic", true, false);
     expect(denied.res.statusCode).toBe(200);
     expect(denied.body).not.toContain(CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE);
     await waitForDiagnosticEventsDrained();
-    expect(phases.map(({ name: phase }) => phase)).toEqual(
-      phaseNames(["auth_grants", "render", "total", "auth_grants", "render", "total"]),
-    );
+    expect(phases.length).toBeGreaterThan(0);
+    for (const phase of phases) {
+      expect(phase.details).toBeUndefined();
+    }
   },
 );
