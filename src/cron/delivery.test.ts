@@ -35,12 +35,15 @@ function failure(
 function announce(channel: string, to?: string, accountId?: string) {
   return { mode: "announce" as const, channel, to, accountId };
 }
+const webhook = { mode: "webhook", to: "https://example.invalid/cron" } as const;
 
 const baseChannels = () => [
   channelPlugin("telegram", ["telegram", "tg"]),
   channelPlugin("slack", ["slack"]),
   channelPlugin("googlechat", ["googlechat", "gchat", "google-chat"], ["gchat", "google-chat"]),
 ];
+const registerTeams = () =>
+  register([...baseChannels(), channelPlugin("msteams", ["msteams", "teams"], ["teams"])]);
 beforeEach(() => register(baseChannels()));
 afterEach(() => resetPluginRuntimeStateForTest());
 
@@ -54,15 +57,10 @@ it("rejects an unrepaired primary route while retaining an explicit failure dest
 });
 
 it("resolves webhook mode without channel routing", () => {
-  expect(
-    resolveCronDeliveryPlan({
-      delivery: { mode: "webhook", to: "https://example.invalid/cron" },
-    }),
-  ).toMatchObject({
-    mode: "webhook",
+  expect(resolveCronDeliveryPlan({ delivery: webhook })).toMatchObject({
+    ...webhook,
     requested: false,
     channel: undefined,
-    to: "https://example.invalid/cron",
   });
 });
 
@@ -76,7 +74,7 @@ it("uses Synology Chat provider prefixes with underscores and short spelling", (
 });
 
 it("preserves msteams failure routing from its global alias through a job alert", () => {
-  register([...baseChannels(), channelPlugin("msteams", ["msteams", "teams"], ["teams"])]);
+  registerTeams();
   expect(
     resolveFailureDestination(
       { delivery: { mode: "none" } },
@@ -86,48 +84,42 @@ it("preserves msteams failure routing from its global alias through a job alert"
   ).toEqual(announce("msteams", "msteams:alerts", "msteams-bot"));
 });
 
-it.each([
-  ["teams", announce("gchat", "googlechat:alerts", "googlechat-bot"), "msteams"],
-  ["last", announce("slack", "slack:cron-alerts", "slack-bot"), "last"],
-  ["slack", { mode: "webhook", to: "https://hook.example/cron" }, "slack"],
-] as const)(
-  "does not reuse foreign routing for channel override %s",
-  (channel, inherited, expected) => {
-    register([...baseChannels(), channelPlugin("msteams", ["msteams", "teams"], ["teams"])]);
-    expect(failure({ channel }, inherited)).toEqual(announce(expected));
-  },
-);
-
-it("rejects webhook mode without a URL", () => {
-  expect(failure({ mode: "webhook" })).toBeNull();
-});
+const slack = announce("slack", "slack:cron-alerts", "slack-bot");
+const signal = announce("signal", "group-abc", "global-account");
+const telegram = announce("telegram", "telegram:alerts", "telegram-bot");
 
 it.each([
   [announce("telegram", "111", "bot-a"), announce("telegram", "111", "bot-a")],
   [announce("last", "telegram:123"), { mode: "announce", to: "telegram:123" }],
-  [
-    { mode: "webhook", to: "https://example.invalid/cron" },
-    { mode: "webhook", to: "https://example.invalid/cron" },
-  ],
+  [webhook, webhook],
 ] as const)("deduplicates primary %j against failure route %j", (primary, route) => {
   expect(failure(route, undefined, primary)).toBeNull();
 });
 
 it.each([
-  [{ mode: "webhook" }, announce("signal", "group-abc"), null],
   [
-    { mode: undefined },
-    announce("signal", "group-abc", "global-account"),
-    announce("signal", "group-abc", "global-account"),
+    "foreign channel",
+    { channel: "teams" },
+    announce("gchat", "googlechat:alerts", "googlechat-bot"),
+    announce("msteams"),
   ],
+  ["last channel", { channel: "last" }, slack, announce("last")],
+  ["webhook to channel", { channel: "slack" }, webhook, announce("slack")],
+  ["missing webhook URL", { mode: "webhook" }, undefined, null],
+  ["announce to webhook", { mode: "webhook" }, announce("signal", "group-abc"), null],
+  ["undefined mode", { mode: undefined }, signal, signal],
   [
+    "prefixed target",
     { mode: "announce", to: "slack:U123" },
-    announce("telegram", "telegram:alerts", "telegram-bot"),
+    telegram,
     announce("slack", "slack:U123"),
   ],
 ] as const)(
-  "merges failure override %j without crossing routing ownership",
-  (override, inherited, expected) => {
+  "merges %s override without crossing routing ownership",
+  (name, override, inherited, expected) => {
+    if (name === "foreign channel") {
+      registerTeams();
+    }
     expect(failure(override, inherited, announce("telegram", "111"))).toEqual(expected);
   },
 );

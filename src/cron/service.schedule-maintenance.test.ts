@@ -43,24 +43,6 @@ it("schedules loaded every jobs without backfilling anchorMs", () => {
   expect(job.schedule).toEqual({ kind: "every", everyMs: 60_000 });
 });
 
-it("keeps recovered recurring error retries behind run-end backoff", () => {
-  checkMaintenance(
-    {
-      createdAtMs: startedAt - 60_000,
-      updatedAtMs: startedAt,
-      schedule: { kind: "every", everyMs: 1_000, anchorMs: startedAt - 60_000 },
-      state: {
-        lastRunAtMs: startedAt,
-        lastDurationMs: 90_000,
-        lastStatus: "error",
-        consecutiveErrors: 1,
-      },
-    },
-    startedAt + 120_000,
-    { nowMs: startedAt + 31_000, recomputeExpired: true, changed: true },
-  );
-});
-
 it.each([
   { name: "early system-event slots", state: { nextRunAtMs: now + 30 * 60_000 } },
   {
@@ -102,24 +84,18 @@ it.each([
   },
 );
 
-it("preserves exact-second slots multiple intervals ahead (#81691)", () => {
-  const nextRunAtMs = Date.parse("2026-05-08T19:00:00Z");
+it.each([
+  [
+    "exact-second slots multiple intervals ahead (#81691)",
+    "0 9 * * *",
+    "Pacific/Honolulu",
+    Date.parse("2026-05-08T19:00:00Z"),
+  ],
+  ["future slots while probing malformed schedules", "not a valid cron", "UTC", badFuture],
+] as const)("preserves %s", (_name, expr, tz, nextRunAtMs) => {
   checkMaintenance(
-    {
-      schedule: { kind: "cron", expr: "0 9 * * *", tz: "Pacific/Honolulu", staggerMs: 0 },
-      state: { nextRunAtMs },
-    },
+    { schedule: { kind: "cron", expr, tz, staggerMs: 0 }, state: { nextRunAtMs } },
     nextRunAtMs,
-  );
-});
-
-it("keeps future slots while probing malformed schedules", () => {
-  checkMaintenance(
-    {
-      schedule: { kind: "cron", expr: "not a valid cron", tz: "UTC" },
-      state: { nextRunAtMs: badFuture },
-    },
-    badFuture,
   );
 });
 

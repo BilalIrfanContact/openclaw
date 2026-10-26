@@ -6,7 +6,7 @@ import {
   writeConfigMachineStateInDatabase,
 } from "../state/config-machine-state-write.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
-import { observeMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
+import { expectNoMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import {
   createDefaultProactiveJob,
@@ -56,8 +56,7 @@ it("provisions only the ambient owner once in the selected partition without hos
   await withOpenClawTestState({ label: "proactive-provision" }, async (state) => {
     const storePath = state.statePath("selected", "jobs.json");
     writeConfigMachineState("cron.store", storePath);
-    const sql = observeMainThreadSql();
-    try {
+    await expectNoMainThreadSql(async () => {
       const before = getCronJobsStoreRevision(storePath);
       expect(
         await provision("main", {
@@ -88,10 +87,7 @@ it("provisions only the ambient owner once in the selected partition without hos
       expect((await readDefaultProactiveJobReceiptsAsync(undefined, ["main"])).main?.jobId).toBe(
         job?.id,
       );
-      sql.expectIdle();
-    } finally {
-      sql.restore();
-    }
+    });
   });
 });
 
@@ -130,15 +126,9 @@ it("reports complete receipt jobs primary-first while excluding incomplete cutov
       recordConvertedProactiveJobInDatabase(db, storeKey, "main", converted.id);
       recordDefaultProactiveJobInDatabase(db, storeKey, "helper", pending.id, 3, "pending");
     });
-    const sql = observeMainThreadSql();
-    try {
-      expect(await readDefaultProactiveJobsAsync(undefined, ["main", "helper"])).toEqual([
-        primary,
-        converted,
-      ]);
-      sql.expectIdle();
-    } finally {
-      sql.restore();
-    }
+    await expectNoMainThreadSql(async () => {
+      const jobs = await readDefaultProactiveJobsAsync(undefined, ["main", "helper"]);
+      expect(jobs).toEqual([primary, converted]);
+    });
   });
 });
