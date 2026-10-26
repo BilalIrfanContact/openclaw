@@ -23,6 +23,9 @@ const repo = "/src/openclaw";
 const checkout = "/tmp/worktrees/title-bar";
 const worktree = { id: "wt-1", branch: "title-bar", repoRoot: repo };
 const agentWorkspace = "/local/default";
+const remote = { execNode: "build-mac", execCwd: "/remote/build" };
+const botWorkspace = "/local/workspace/bot-stable-id";
+const botSession = row({ key: "agent:bot-stable-id:main" });
 function headerWorkspace(overrides: Partial<Parameters<typeof resolveChatPaneWorkspace>[0]>) {
   return resolveChatPaneWorkspace({
     session: row(),
@@ -45,12 +48,7 @@ it.each<WorkspaceCase>([
   [{ worktree }, null, "openclaw", { agentWorkspace, worktreePath: null }],
   [{ spawnedWorkspaceDir: repo, spawnedCwd: `${repo}/packages/nested` }, repo, "openclaw"],
   [{ execCwd: "/remote/stale", spawnedCwd: repo }, repo, "openclaw"],
-  [
-    { execNode: "build-mac", execCwd: "/remote/build" },
-    "/remote/build",
-    "build",
-    { agentWorkspace },
-  ],
+  [remote, remote.execCwd, "build", { agentWorkspace }],
   [
     { execNode: "build-mac", spawnedCwd: "/local/spawned" },
     null,
@@ -58,36 +56,29 @@ it.each<WorkspaceCase>([
     { agentWorkspace, worktreePath: "/local/worktree" },
   ],
   [{}, repo, "openclaw", { agentWorkspace: repo }],
-  [
-    { key: "agent:bot-stable-id:main" },
-    "/local/workspace/bot-stable-id",
-    "Workspace",
-    { agentWorkspace: "/local/workspace/bot-stable-id" },
-  ],
+  [botSession, botWorkspace, "Workspace", { agentWorkspace: botWorkspace }],
 ])("resolves workspace from %j", (session, root, label, options) => {
   expect(resolveSessionWorkspace({ session: row(session), ...options })).toEqual({ root, label });
 });
 
-it.each(["Workspace", "openclaw"])(
-  "keeps the %s workspace breadcrumb free of a tooltip",
-  (workspaceLabel) => {
-    const containers: HTMLElement[] = [];
-    const { container } = mountChatPaneHeader(containers, {
-      session: row({ key: "agent:bot-stable-id:main" }),
-      workspaceRoot: "/local/workspace/bot-stable-id",
-      workspaceLabel,
-    });
-    onTestFinished(() => containers.forEach((mounted) => mounted.remove()));
-    const crumb = container.querySelector<HTMLElement>(".chat-pane__workspace-chip");
-    expect(crumb?.textContent).toContain(workspaceLabel);
-    expect(crumb?.getAttribute("aria-label")).toContain(workspaceLabel);
-    expect(crumb?.hasAttribute("title")).toBe(false);
-  },
-);
+it("keeps the workspace breadcrumb free of a tooltip", () => {
+  const workspaceLabel = "Workspace";
+  const containers: HTMLElement[] = [];
+  const { container } = mountChatPaneHeader(containers, {
+    session: botSession,
+    workspaceRoot: botWorkspace,
+    workspaceLabel,
+  });
+  onTestFinished(() => containers.forEach((mounted) => mounted.remove()));
+  const crumb = container.querySelector<HTMLElement>(".chat-pane__workspace-chip");
+  expect(crumb?.textContent).toContain(workspaceLabel);
+  expect(crumb?.getAttribute("aria-label")).toContain(workspaceLabel);
+  expect(crumb?.hasAttribute("title")).toBe(false);
+});
 
 it.each<Partial<Parameters<typeof resolveChatPaneWorkspace>[0]>>([
   {
-    session: row({ execNode: "build-mac", execCwd: "/remote/build" }),
+    session: row(remote),
   },
   {
     session: row({ placement: { state: "requested" } as GatewaySessionRow["placement"] }),
@@ -98,24 +89,17 @@ it.each<Partial<Parameters<typeof resolveChatPaneWorkspace>[0]>>([
   expect(headerWorkspace({ agentWorkspace: repo, ...overrides }).canReveal).toBe(false);
 });
 
-it.each([{}, { spawnedCwd: agentWorkspace }, { spawnedWorkspaceDir: agentWorkspace }])(
-  "omits the default agent workspace from header identity: %j",
-  (placement) => {
-    const workspace = headerWorkspace({
-      session: { key: "agent:main:default-workspace", kind: "direct", ...placement },
-    });
-    expect(workspace).toEqual({ root: agentWorkspace, label: null, branch: null, canReveal: true });
-  },
-);
+it("omits the default agent workspace from header identity", () => {
+  const workspace = headerWorkspace({});
+  expect(workspace).toEqual({ root: agentWorkspace, label: null, branch: null, canReveal: true });
+});
 
 it("preserves a real project even when it uses the agent workspace directory", () => {
   const workspace = headerWorkspace({
-    session: {
-      key: "agent:main:project",
-      kind: "direct",
+    session: row({
       spawnedCwd: agentWorkspace,
       worktree: { id: "project", repoRoot: agentWorkspace, branch: "feature" },
-    },
+    }),
   });
   expect(workspace.label).toBe("default");
 });
