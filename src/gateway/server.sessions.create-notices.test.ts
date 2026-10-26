@@ -113,8 +113,8 @@ test("sessions.create preserves creation and notices after an unknown signal out
     expect(hinted.payload?.entry).toMatchObject({
       createdVia: "spawn",
       createdActor: expectedCreator,
-      sandbox,
     });
+    expect(hinted.payload?.entry?.sandbox).toBe(sandbox);
     const hintedKey = expectDefined(hinted.payload?.key, "delegated session key");
     const stored = loadSessionEntry({ sessionKey: hintedKey, storePath });
     expect(stored?.createdVia).toBe("spawn");
