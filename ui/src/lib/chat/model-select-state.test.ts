@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-import type { ModelCatalogEntry } from "../../api/types.ts";
+import type { ModelCatalogEntry, SessionsListResult } from "../../api/types.ts";
 import { createSessionsListResult } from "../../test-helpers/chat-model.ts";
 import {
   normalizeChatFastModeInput,
@@ -50,7 +50,7 @@ type FastInput = Parameters<typeof resolveChatFastModeSelectState>[0];
 
 type FastState = ReturnType<typeof resolveChatFastModeSelectState>;
 function expectFast(
-  input: Pick<FastInput, "sessionsResult"> & Partial<FastInput>,
+  input: { sessionsResult: SessionsListResult | null } & Partial<Omit<FastInput, "sessionsResult">>,
   expected: Partial<FastState>,
 ) {
   expect(
