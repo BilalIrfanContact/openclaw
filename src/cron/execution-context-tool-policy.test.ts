@@ -37,6 +37,13 @@ vi.mock("../agents/tools/gateway.js", async (importOriginal) => ({
   },
 }));
 
+// The resident profile catalog is the profile requester's owner check; this
+// requester's profile is current, so an owner child gets the owner scope.
+vi.mock("../state/user-profile-list.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../state/user-profile-list.js")>()),
+  captureResidentUserProfileAccess: () => ({ assertCurrent: () => {} }),
+}));
+
 const { claimAgentRunContext, releaseAgentRunContext } =
   await import("../infra/agent-run-registry.js");
 const { resolveAdmittedRunActiveAssertion } = await import("../agents/admitted-run-context.js");
@@ -169,6 +176,7 @@ async function admitRun(stored: CronStoredJob, runKey: string, toolsAllow: strin
     admitted,
     runKey,
     toolsAllow,
+    automationsScope: result.facts.toolPolicy.automations.scope,
     senderIsOwner: resolveScheduledSenderBit(result)?.senderIsOwner,
   };
 }
@@ -350,6 +358,36 @@ describe("scheduled automations scope", () => {
     });
     expect(tools.map((tool) => tool.name)).toContain("sessions_yield");
   });
+});
+
+// The context can name a parent wake for an owner child, but the wake action is
+// deferred to the automations wake design (openclaw-0d5.9 / 0d5.23). Until then
+// the scope offers exactly the self actions.
+describe("self-and-parent-wake scope before the wake action lands", () => {
+  it.each(["embedded", "cli"] as const)(
+    "%s run gets its own job only, no sibling access and no wake",
+    async (runtime) => {
+      const run = await admitRun(job({ ...linked, createdActor: PROFILE }), RUN_KEY, ["*"]);
+      expect(run.automationsScope).toBe("self-and-parent-wake");
+      const tools = runtime === "embedded" ? await embeddedTools(run) : await cliTools(run);
+      const automations = tools.find((tool) => tool.name === AUTOMATIONS_TOOL_NAME)!;
+      expect(readActionEnum(automations)).not.toContain("wake");
+      for (const call of [
+        { action: "wake", text: "wake the parent" },
+        { action: "wake", mode: "now", text: "wake the parent" },
+        { action: "update", jobId: "sibling-job", patch: { enabled: false } },
+        { action: "update", jobId: "job-1", patch: { enabled: false } },
+        { action: "remove", jobId: "sibling-job" },
+        { action: "add", job: { name: "new" } },
+      ]) {
+        expect(await callError(automations, call), JSON.stringify(call)).toContain(SCOPE_ERROR);
+      }
+      expect(dispatched()).toEqual([]);
+      const listed = await automations.execute("list", { action: "list" }, undefined, undefined);
+      const jobs = (listed.details as { jobs?: { id: string }[] }).jobs ?? [];
+      expect(jobs.map((listedJob) => listedJob.id)).toEqual(["job-1"]);
+    },
+  );
 });
 
 describe("retained CLI self-management authority", () => {
