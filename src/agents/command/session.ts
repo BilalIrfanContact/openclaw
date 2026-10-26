@@ -25,7 +25,6 @@ import {
   resolveSessionResetPolicy,
 } from "../../config/sessions/reset-policy.js";
 import { resolveChannelResetConfig, resolveSessionResetType } from "../../config/sessions/reset.js";
-import { buildRestartRecoveryClaimCleanupPatch } from "../../config/sessions/restart-recovery-state.js";
 import type { SessionEntrySummary } from "../../config/sessions/session-accessor.types.js";
 import {
   captureSessionActorStorageOwner,
@@ -59,8 +58,7 @@ import {
   listAgentIds,
   resolveDefaultAgentId,
 } from "../agent-scope.js";
-import { clearAllCliSessions } from "../cli-session.js";
-import { transitionMainSessionRecovery } from "../main-session-recovery/main-session-recovery-state.js";
+import { clearRotatedSessionMetadata } from "../session-reset-metadata.js";
 
 type SessionResolution = {
   sessionAgentId: string;
@@ -92,31 +90,6 @@ type SessionRequest = {
   sessionKey?: string;
   agentId?: string;
 };
-
-export function clearRotatedSessionMetadata(entry: InternalSessionEntry): InternalSessionEntry {
-  const next = {
-    ...entry,
-    ...buildRestartRecoveryClaimCleanupPatch({ entry, recordTerminalSource: false }),
-    sessionFile: undefined,
-    status: undefined,
-    lifecycleRunId: undefined,
-    lastRunId: undefined,
-    startedAt: undefined,
-    endedAt: undefined,
-    runtimeMs: undefined,
-    abortedLastRun: undefined,
-    restartRecoveryTerminalDeliveryEvidence: undefined,
-    restartRecoveryTerminalRunIds: undefined,
-    sessionStartedAt: undefined,
-    sessionDiffBaseline: undefined,
-    sessionDiffBaselineCapture: undefined,
-    lastInteractionAt: undefined,
-    pendingTranscriptRepair: undefined,
-  };
-  transitionMainSessionRecovery(next, { kind: "clear" });
-  clearAllCliSessions(next);
-  return next;
-}
 
 type SessionIdMatchSet = {
   candidates: SessionIdMatchCandidate[];
