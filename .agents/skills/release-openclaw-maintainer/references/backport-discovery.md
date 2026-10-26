@@ -4,6 +4,15 @@ Use this before selecting backports for any OpenClaw release line: regular
 beta/stable, extended-stable, or a release-repair branch. It is an audit before the candidate is
 mutated, not a title search and not permission to expand a frozen release.
 
+## Start from the shared ledger
+
+Prefer the [hotfix ledger](hotfix-ledger-management.md) for candidate decisions
+and release-specific assessments. Load carry-forward items and prior-release
+evidence before new discovery, then sync newly found fixes and dispositions
+back to it. An empty or incomplete ledger does not replace the pinned inventory
+below: continue looking at main and sibling releases for missed P0/P1 fixes.
+Use the existing local evidence workflow when the service or access is unavailable.
+
 ## Freeze the Audit
 
 1. Pin the exact maintenance-line baseline and the exact `origin/main` SHA.
@@ -26,8 +35,10 @@ bounds and pinned SHAs, baseline identity, total/equivalent/non-equivalent
 counts, filters, every candidate decision, applicability result, exclusions,
 dependency groups, and carry-forward blocked items. Security rows in public
 evidence must remain opaque; retain private identifiers only in the approved
-security record. The next accepted audit uses this ledger's `scan_end` as its
-cursor.
+security record. Keep scan bounds, counts, and the full commit inventory in the
+existing staging evidence, linked from the service assessments; they need not
+be separate API fields or one hotfix record per unrelated commit. The next
+accepted audit uses that evidence's `scan_end` as its cursor.
 
 ## Reconcile Stable-Maturity Issues
 

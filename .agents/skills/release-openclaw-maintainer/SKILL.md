@@ -41,6 +41,17 @@ Read only the references needed for the selected phase:
 - Release notes: `$openclaw-changelog-update`, including its separate approved post-release docs-mirror route. Initial release generation keeps its existing format; docs publication does not run automatically during release. Requested announcements: `$release-openclaw-announcement` for Discord, `$release-tweets` for X. Announcements never gate publication and require explicit posting authorization.
 - Published artifact verification: `$verify-release`. GHSA operations: `$openclaw-ghsa-maintainer` only with explicit security-workflow authorization.
 
+## Hotfix ledger management
+
+For Tideclaw and other release-owning sessions, use the
+[hotfix ledger](references/hotfix-ledger-management.md) as the recommended
+shared record for backport discovery, selection, and outcomes. Start with its
+existing candidates, add discoveries from main and other releases, and keep
+release-specific assessments current as fixes are selected and shipped.
+If access or the service is unavailable, continue with the existing local
+backport evidence and reconcile later. This is a working convention, not a new
+release gate; adapt the mechanics to the task without changing release authority.
+
 ## Shared release boundaries
 
 FRV must conclude **success** under pinned P's
