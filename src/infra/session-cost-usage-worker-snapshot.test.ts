@@ -108,6 +108,27 @@ function reportEntry(file: UsageCostTranscriptFile, tokens: number): UsageCostRo
   });
 }
 
+/** Write a rollup with its month partitions and quarter rows, as the refresh owner does. */
+function writeReport(db: DatabaseSync, file: UsageCostTranscriptFile, entry: UsageCostRollupEntry) {
+  const upsert = db.prepare(`INSERT INTO cache_entries (scope, key, value_json, blob, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (scope, key) DO UPDATE SET
+      value_json = excluded.value_json, blob = excluded.blob, updated_at = excluded.updated_at`);
+  const { valueJson, blob, partitions } = partitionUsageCostRollup(entry);
+  upsert.run(USAGE_COST_ROLLUP_SCOPE, file.filePath, valueJson, blob, timestamp);
+  for (const partition of partitions) {
+    const key = usageCostPartitionKey(file.filePath, partition.date);
+    upsert.run(USAGE_COST_PARTITION_SCOPE, key, partition.valueJson, partition.blob, timestamp);
+    upsert.run(
+      USAGE_COST_QUARTER_SCOPE,
+      key,
+      partition.quarters!.valueJson,
+      partition.quarters!.blob,
+      timestamp,
+    );
+  }
+}
+
 function borrowDatabase(db: DatabaseSync) {
   fixture.withRead.mockImplementation((read: (opened: { db: DatabaseSync }) => unknown) => ({
     found: true,
@@ -282,25 +303,7 @@ it("reads the report snapshot after discovery and keeps it closed across awaits"
 }) => {
   const db = cacheDatabase();
   const file = reportFile("/synthetic/report.jsonl", 2);
-  const upsert = db.prepare(`INSERT INTO cache_entries (scope, key, value_json, blob, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT (scope, key) DO UPDATE SET
-      value_json = excluded.value_json, blob = excluded.blob, updated_at = excluded.updated_at`);
-  const write = (tokens: number) => {
-    const { valueJson, blob, partitions } = partitionUsageCostRollup(reportEntry(file, tokens));
-    upsert.run(USAGE_COST_ROLLUP_SCOPE, file.filePath, valueJson, blob, timestamp);
-    for (const partition of partitions) {
-      const key = usageCostPartitionKey(file.filePath, partition.date);
-      upsert.run(USAGE_COST_PARTITION_SCOPE, key, partition.valueJson, partition.blob, timestamp);
-      upsert.run(
-        USAGE_COST_QUARTER_SCOPE,
-        key,
-        partition.quarters!.valueJson,
-        partition.quarters!.blob,
-        timestamp,
-      );
-    }
-  };
+  const write = (tokens: number) => writeReport(db, file, reportEntry(file, tokens));
   write(3);
   // Borrow one native connection so an independent job can use it while discovery waits.
   borrowDatabase(db);
@@ -337,6 +340,54 @@ it("reads the report snapshot after discovery and keeps it closed across awaits"
   } finally {
     resume.resolve();
     await pending.catch(() => {});
+    db.close();
+  }
+});
+
+it("refreshes a usage.cost cache written before a shorter SQLite transcript rewrite", async () => {
+  const db = cacheDatabase();
+  const filePath = "sqlite:main:usage-rewritten:/synthetic/openclaw-agent.sqlite";
+  // The rewrite rotated the generation and left fewer events than the cached checkpoint.
+  const file: UsageCostTranscriptFile = {
+    kind: "sqlite",
+    filePath,
+    sourcePath: filePath,
+    sessionId: "usage-rewritten",
+    size: 100,
+    mtimeMs: timestamp,
+    eventCount: 10,
+    maxSeq: 10,
+    generation: "generation-b",
+  };
+  writeReport(db, file, {
+    ...reportEntry(file, 7),
+    checkpoint: {
+      kind: "sqlite",
+      generation: "generation-a",
+      maxSeq: 100,
+      eventCount: 100,
+      size: 1_000,
+      mtimeMs: timestamp,
+      anchorHash: "synthetic-anchor",
+    },
+  });
+  borrowDatabase(db);
+  fixture.inventory.mockResolvedValue([file]);
+  try {
+    expect(
+      await execute({
+        kind: "summary",
+        pricingFingerprint,
+        startMs: timestamp,
+        endMs: timestamp + 15 * 60 * 1000 - 1,
+        dayBucket: { mode: "utc-offset", utcOffsetMinutes: 0 },
+      }),
+    ).toMatchObject({
+      kind: "summary",
+      summary: { totals: { totalTokens: 0 }, cacheStatus: { staleFiles: 1 } },
+      staleSessionFiles: [filePath],
+    });
+  } finally {
     db.close();
   }
 });

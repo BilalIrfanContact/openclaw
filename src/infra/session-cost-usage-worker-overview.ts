@@ -103,11 +103,8 @@ function evaluateInstance(params: {
     // Transcript writes advance the mutation time; a later append keeps the prefix usable.
     fresh = checkpoint.mtimeMs >= file.mtimeMs;
   } else if (checkpoint.kind === "sqlite" && file.kind === "sqlite") {
-    if (
-      operation.kind === "overview" &&
-      (checkpoint.generation ?? null) !== (file.generation ?? null)
-    ) {
-      // Discovery and the cache crossed a rewrite; the refresh owner rebuilds it.
+    if ((checkpoint.generation ?? null) !== (file.generation ?? null)) {
+      // A rewrite can shorten the transcript; only the refresh owner can rebuild it.
       return { state: "pending" };
     }
     // A same-generation append can commit after discovery; newer cache stays usable.
