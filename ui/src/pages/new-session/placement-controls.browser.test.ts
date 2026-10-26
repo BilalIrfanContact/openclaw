@@ -1,7 +1,7 @@
 import { createComponent } from "solid-js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page } from "vitest/browser";
-import { mountSolid, cleanupSolid } from "../../test-helpers/mount-solid.ts";
+import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { resolveProjectChip } from "./project-chip.ts";
 import { ProjectChip } from "./project-chip.tsx";
 import { pickerParams } from "./where-chip.test-support.ts";
@@ -25,7 +25,6 @@ beforeEach(() => {
   document.body.append(controls);
 });
 afterEach(() => {
-  cleanupSolid();
   controls.remove();
   styles.remove();
 });

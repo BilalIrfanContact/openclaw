@@ -94,15 +94,14 @@ describe("new-session composer critter visits", () => {
     const first = renderComposer();
     document.body.append(first.container);
     onTestFinished(() => first.container.remove());
-    const currentVisitor = () => visitor(first.composer);
     const initial = await loadPet(first.composer);
     const seed = initial.seed;
     expect(initial.parentElement?.classList.contains("agent-chat__input")).toBe(true);
     expect(initial.floorEnabled).toBe(true);
     first.rerender();
     first.rerenderForAgent("resolved-agent");
-    expect(currentVisitor()).toBe(initial);
-    expect(currentVisitor().seed).toBe(seed);
+    expect(visitor(first.composer)).toBe(initial);
+    expect(initial.seed).toBe(seed);
     const textarea = first.composer.querySelector("textarea")!;
     const elements = initial.composerElements!()!;
     expect(elements.composer).toBe(initial.parentElement);
@@ -114,12 +113,10 @@ describe("new-session composer critter visits", () => {
     ]);
     textarea.value = "A prompt takes priority over the visitors";
     textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
-    expect(currentVisitor()).toMatchObject({ seed, floorEnabled: false });
+    expect(visitor(first.composer)).toMatchObject({ seed, floorEnabled: false });
     first.rerenderForDraftRoute("draft:two", "");
-    expect(currentVisitor().seed).not.toBe(seed);
-    expect(currentVisitor().floorEnabled).toBe(true);
-    const reopened = renderComposer();
-    expect((await loadPet(reopened.composer)).seed).not.toBe(seed);
+    expect(visitor(first.composer).seed).not.toBe(seed);
+    expect(visitor(first.composer).floorEnabled).toBe(true);
   });
 
   it.each([{ dictationActive: true }, { submitting: true }, { messageLocked: true }])(

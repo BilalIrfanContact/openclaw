@@ -21,7 +21,6 @@ const pageHost = (container: Element) =>
 function mountRoute(initial: NewSessionRouteData) {
   const [data, setData] = createSignal<NewSessionRouteData | undefined>(initial);
   const view = mountSolid(() => <Route data={data()} loaderPending={false} presented={true} />);
-  onTestFinished(view.unmount);
   return { container: view.container, setData };
 }
 
@@ -111,18 +110,14 @@ it("initializes the composer and retains it while loader data updates", async ()
   await waitForSolid(() => expect(page?.querySelector("textarea")).not.toBeNull());
   const input = page?.querySelector("textarea");
   await waitForSolid(() => expect(document.activeElement).toBe(input));
-  setData(undefined);
-  await waitForSolid(() => {
-    expect(pageHost(container)).toBe(page);
-    expect(page?.data).toBeUndefined();
-    expect(page?.querySelector("textarea")).toBe(input);
-  });
-  setData(resolved);
-  await waitForSolid(() => {
-    expect(pageHost(container)).toBe(page);
-    expect(page?.data).toBe(resolved);
-    expect(page?.querySelector("textarea")).toBe(input);
-  });
+  for (const data of [undefined, resolved]) {
+    setData(data);
+    await waitForSolid(() => {
+      expect(pageHost(container)).toBe(page);
+      expect(page?.data).toBe(data);
+      expect(page?.querySelector("textarea")).toBe(input);
+    });
+  }
 });
 
 it("rejects retained DOM after its authorization changes", async () => {
