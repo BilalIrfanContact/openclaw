@@ -531,6 +531,7 @@ try {
             page.on("pageerror", (error) => errors.push(String(error)));
             let cdp: CDPSession | undefined;
             let tracing = false;
+            let reconnectProfile: unknown;
             const events: unknown[] = [];
             const listCalls: unknown[] = [];
             let retainedMenu: ElementHandle<HTMLElement | SVGElement> | null = null;
@@ -910,6 +911,11 @@ try {
                 result.retainedPicker = { sameNode: true, mutationRequests: 0 };
               }
               if (scenario === "update" && values["update-reload"]) {
+                if (tracing && cdp) {
+                  // Navigation resets Chrome's profiler; retain the old-document interval first.
+                  const { profile } = await cdp.send("Profiler.stop");
+                  reconnectProfile = profile;
+                }
                 result.stage = "update-reload-click";
                 const click = await page.evaluate(() => {
                   sessionStorage.setItem("reconnectBench.updateReload", "1");
@@ -975,7 +981,7 @@ try {
             } finally {
               try {
                 if (tracing && cdp) {
-                  const { profile } = await cdp.send("Profiler.stop");
+                  const profile = reconnectProfile ?? (await cdp.send("Profiler.stop")).profile;
                   await writeFile(path.join(output, `${id}.cpuprofile`), JSON.stringify(profile));
                   const complete = new Promise<void>((resolve) => {
                     cdp!.once("Tracing.tracingComplete", () => resolve());

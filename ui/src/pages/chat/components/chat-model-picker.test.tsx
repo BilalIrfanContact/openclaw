@@ -60,7 +60,9 @@ function accountSection(onSelect = vi.fn(), open = false) {
 it("defers full catalog reads until first open and uses the latest options", async () => {
   let options = [option("openai", "old")];
   const getModelOptions = vi.fn(() => options);
-  const params = modelPickerParams(pickerProps({ triggerModelLabel: "Current" }));
+  const params = modelPickerParams(
+    pickerProps({ triggerModelLabel: "Current", selectedModelValue: "openai/latest" }),
+  );
   let openPicker!: () => void;
   const { container } = mountSolid(() => {
     const [open, setOpen] = createSignal(false);

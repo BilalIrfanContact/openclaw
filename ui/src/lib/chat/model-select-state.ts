@@ -387,7 +387,7 @@ export function resolveChatFastModeSelectState(input: {
   gatewayAvailable: boolean;
   loading: boolean;
   sessionsResult: {
-    defaults: Pick<SessionsListResult["defaults"], "model" | "modelProvider">;
+    defaults: Partial<Pick<SessionsListResult["defaults"], "model" | "modelProvider">>;
   } | null;
 }): ChatFastModeSelectState {
   const activeRow = input.fastModeTarget;
