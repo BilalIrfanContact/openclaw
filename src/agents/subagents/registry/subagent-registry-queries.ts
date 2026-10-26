@@ -301,8 +301,9 @@ export function buildSubagentRunReadIndexFromRuns<T extends SubagentRunReadRecor
       const excludedRunId = options?.excludeRunId?.trim();
       let count = 0;
       const descendants = getDescendantKeys(rootSessionKey);
-      for (let index = 0; index < descendants.length; index++) {
-        const childSessionKey = descendants[index]!;
+      let index = 0;
+      while (index < descendants.length) {
+        const childSessionKey = descendants[index++]!;
         const entry = latestRunsByChildSessionKey.get(childSessionKey)!;
         if (entry.runId === excludedRunId) {
           continue;
