@@ -23,6 +23,18 @@ function expectBudgets(params: TimeoutParams, idle: number, firstEvent = idle) {
   expect(resolveLlmIdleTimeoutMs(params)).toBe(idle);
   expect(resolveLlmFirstEventTimeoutMs(params)).toBe(firstEvent);
 }
+function configured(keys: Record<string, string>, provider = " GPU "): TimeoutParams {
+  const baseUrl = "http://gpu-box:8000/v1";
+  return {
+    model: { provider, baseUrl },
+    cfg: withProviders(
+      Object.fromEntries(
+        Object.entries(keys).map(([key, marker]) => [key, providerConfig(baseUrl, marker)]),
+      ),
+    ),
+  };
+}
+type LocalityCase = { params: TimeoutParams; expected: number; cron?: number };
 
 describe("LLM watchdog policy", () => {
   it("caps idle and first-event watchdogs at the agent budget", () => {
@@ -47,46 +59,20 @@ describe("LLM watchdog policy", () => {
   });
 
   it.each`
-    name                        | provider          | baseUrl                     | entries                              | expected   | cron
-    ${"local marker"}           | ${"gpu"}          | ${"http://gpu-box:8000/v1"} | ${[["gpu", true]]}                   | ${300_000} | ${600_000}
-    ${"unconfigured proxy"}     | ${"custom-proxy"} | ${"http://gateway:4000/v1"} | ${undefined}                         | ${120_000} | ${60_000}
-    ${"normalized key"}         | ${" GPU "}        | ${"http://gpu-box:8000/v1"} | ${[[" GPU ", true]]}                 | ${300_000} | ${undefined}
-    ${"canonical key priority"} | ${" GPU "}        | ${"http://gpu-box:8000/v1"} | ${[[" GPU ", true], ["gpu", false]]} | ${120_000} | ${undefined}
-    ${"first normalized key"}   | ${" GPU "}        | ${"http://gpu-box:8000/v1"} | ${[[" GPU ", false], ["GPU", true]]} | ${120_000} | ${undefined}
-  `(
-    "uses $name for configured provider locality",
-    ({
-      provider,
-      baseUrl,
-      entries,
-      expected,
-      cron,
-    }: {
-      provider: string;
-      baseUrl: string;
-      entries?: Array<[string, boolean]>;
-      expected: number;
-      cron?: number;
-    }) => {
-      const cfg =
-        entries &&
-        withProviders(
-          Object.fromEntries(
-            entries.map(([key, isLocal]) => [
-              key,
-              providerConfig(baseUrl, isLocal ? "custom-local" : "synthetic-remote"),
-            ]),
-          ),
-        );
-      const model = { provider, baseUrl };
-      expectBudgets({ cfg, model }, expected);
-      if (cron !== undefined) {
-        expect(
-          resolveLlmIdleTimeoutMs({ cfg, model, trigger: "cron", runTimeoutMs: 600_000 }),
-        ).toBe(cron);
-      }
-    },
-  );
+    name                        | params                                                                        | expected   | cron
+    ${"local marker"}           | ${configured({ gpu: "custom-local" }, "gpu")}                                 | ${300_000} | ${600_000}
+    ${"unconfigured proxy"}     | ${{ model: { provider: "custom-proxy", baseUrl: "http://gateway:4000/v1" } }} | ${120_000} | ${60_000}
+    ${"normalized key"}         | ${configured({ " GPU ": "custom-local" })}                                    | ${300_000} | ${undefined}
+    ${"canonical key priority"} | ${configured({ " GPU ": "custom-local", gpu: "synthetic-remote" })}           | ${120_000} | ${undefined}
+    ${"first normalized key"}   | ${configured({ " GPU ": "synthetic-remote", GPU: "custom-local" })}           | ${120_000} | ${undefined}
+  `("uses $name for configured provider locality", ({ params, expected, cron }: LocalityCase) => {
+    expectBudgets(params, expected);
+    if (cron !== undefined) {
+      expect(resolveLlmIdleTimeoutMs({ ...params, trigger: "cron", runTimeoutMs: 600_000 })).toBe(
+        cron,
+      );
+    }
+  });
 
   it.each([
     ["kimi-k2.5:cloud", "http://127.0.0.1:11434", 0],

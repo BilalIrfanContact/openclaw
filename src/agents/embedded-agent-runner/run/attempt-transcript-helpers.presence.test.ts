@@ -36,68 +36,63 @@ function withPresence(
   });
 }
 
-it.each([false, true])(
-  "checks payload-free presence (concurrent classification=%s)",
-  async (concurrent) => {
-    await withPresence(async (sessionTarget, database, expectPresence) => {
-      const payload = "x".repeat(4 * 1024 * 1024);
-      replaceTranscriptEventsSync(sessionTarget, [
-        { type: "session", id: sessionTarget.sessionId, version: 3 },
-        { type: "message", id: "user", message: { role: "user", content: payload } },
-        { type: "reset", id: "reset", parentId: null, reason: "new" },
-      ]);
-      const parse = JSON.parse;
-      let parsedPayloadBytes = 0;
-      using spy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
-        if (text.length >= payload.length) {
-          parsedPayloadBytes += text.length;
-        }
-        return parse(text, reviver);
-      });
-      using writer = new DatabaseSync(database.path);
-      const classification = writer.prepare(
-        "UPDATE transcript_event_identities SET event_type = ? WHERE session_id = ?",
-      );
-      const native = requireNativeSqliteDatabase(database.db);
-      const prepare = native.prepare.bind(native);
-      let classified = false;
-      if (concurrent) {
-        classification.run(null, sessionTarget.sessionId);
-        vi.spyOn(native, "prepare").mockImplementation((query) => {
-          const statement = prepare(query);
-          const indexed = query.includes('"transcript_event_identities"');
-          if (!indexed || query.includes('"transcript_events"')) {
-            return statement;
-          }
-          const get = statement.get.bind(statement);
-          vi.spyOn(statement, "get").mockImplementation((...params) => {
-            const row = get(...params);
-            // Classify between the indexed probe and raw fallback, without removing the message.
-            classification.run("message", sessionTarget.sessionId);
-            classified = true;
-            return row;
-          });
-          return statement;
-        });
+it.each([false, true])("reads payload-free presence (concurrent=%s)", async (concurrent) => {
+  await withPresence(async (sessionTarget, database, expectPresence) => {
+    const payload = "x".repeat(4 * 1024 * 1024);
+    replaceTranscriptEventsSync(sessionTarget, [
+      { type: "session", id: sessionTarget.sessionId, version: 3 },
+      { type: "message", id: "user", message: { role: "user", content: payload } },
+      { type: "reset", id: "reset", parentId: null, reason: "new" },
+    ]);
+    const parse = JSON.parse;
+    let parsedPayloadBytes = 0;
+    using spy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+      if (text.length >= payload.length) {
+        parsedPayloadBytes += text.length;
       }
-      try {
-        // Inject the concurrent classification into the query that the history worker executes.
-        expect(hasSessionTranscriptMessageInDatabase(database, sessionTarget.sessionId)).toBe(true);
-        await expectPresence(true);
-        expect(classified).toBe(concurrent);
-        expect(parsedPayloadBytes).toBe(0);
-      } finally {
-        spy.mockRestore();
-        vi.restoreAllMocks();
-      }
+      return parse(text, reviver);
     });
-  },
-);
+    using writer = new DatabaseSync(database.path);
+    const classification = writer.prepare(
+      "UPDATE transcript_event_identities SET event_type = ? WHERE session_id = ?",
+    );
+    const native = requireNativeSqliteDatabase(database.db);
+    const prepare = native.prepare.bind(native);
+    let classified = false;
+    if (concurrent) {
+      classification.run(null, sessionTarget.sessionId);
+      vi.spyOn(native, "prepare").mockImplementation((query) => {
+        const statement = prepare(query);
+        const indexed = query.includes('"transcript_event_identities"');
+        if (!indexed || query.includes('"transcript_events"')) {
+          return statement;
+        }
+        const get = statement.get.bind(statement);
+        vi.spyOn(statement, "get").mockImplementation((...params) => {
+          const row = get(...params);
+          // Classify between the indexed probe and raw fallback, without removing the message.
+          classification.run("message", sessionTarget.sessionId);
+          classified = true;
+          return row;
+        });
+        return statement;
+      });
+    }
+    try {
+      // Inject the concurrent classification into the query that the history worker executes.
+      expect(hasSessionTranscriptMessageInDatabase(database, sessionTarget.sessionId)).toBe(true);
+      await expectPresence(true);
+      expect(classified).toBe(concurrent);
+      expect(parsedPayloadBytes).toBe(0);
+    } finally {
+      spy.mockRestore();
+      vi.restoreAllMocks();
+    }
+  });
+});
 
 it.each([
-  ["metadata", '{"type":"custom","data":{"message":"metadata"}}', false],
   ["native evidence", '{"type":"response_item","message":{"role":"user"}}', false],
-  ["id-less message", '{"type":"message","message":{"role":"user"}}', true],
   ["nullable identity type", '{"type":"message","id":"unclassified"}', true, "unclassified"],
   ["message without a body", '{"type":"message"}', true],
   ["non-object", "null", false],

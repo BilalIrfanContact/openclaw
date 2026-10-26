@@ -72,48 +72,43 @@ it("lets another session run during recovery and reacquires in queue order", asy
   }
 });
 
-it.each([false, true])(
-  "joins cleanup after recovery fails (readmission refused=%s)",
-  async (refused) => {
-    const failure = new Error(refused ? "readmission refused" : "projection recovery failed");
-    const cleanupStarted = createDeferredCore();
-    const finishCleanup = createDeferredCore();
-    const cleanupCapacity: number[] = [];
-    let tickets = 0;
-    let cleanupDone = false;
-    const settled = vi.fn();
-    const enqueue: CommandQueueEnqueueFn = (task, options) =>
-      ++tickets > 1 && refused
-        ? Promise.reject(failure)
-        : enqueueCommandInLane(lane, task, options);
-    const work = withReleasableExecutionCapacity(enqueue, async () => {
-      try {
-        await outsideExecutionCapacity(async () => {
-          expect(getCommandLaneSnapshot(lane).activeCount).toBe(0);
-          if (!refused) {
-            throw failure;
-          }
-          return "recovered";
-        });
-      } finally {
-        cleanupCapacity.push(getCommandLaneSnapshot(lane).activeCount);
-        cleanupStarted.resolve();
-        await finishCleanup.promise;
-        cleanupDone = true;
-      }
-    });
-    const outcome = work.catch((error: unknown) => error).finally(settled);
+it.each([false, true])("joins failed recovery (readmission refused=%s)", async (refused) => {
+  const failure = new Error(refused ? "readmission refused" : "projection recovery failed");
+  const cleanupStarted = createDeferredCore();
+  const finishCleanup = createDeferredCore();
+  const cleanupCapacity: number[] = [];
+  let tickets = 0;
+  let cleanupDone = false;
+  const settled = vi.fn();
+  const enqueue: CommandQueueEnqueueFn = (task, options) =>
+    ++tickets > 1 && refused ? Promise.reject(failure) : enqueueCommandInLane(lane, task, options);
+  const work = withReleasableExecutionCapacity(enqueue, async () => {
     try {
-      await cleanupStarted.promise;
-      expect(settled).not.toHaveBeenCalled();
-      finishCleanup.resolve();
-      expect(await outcome).toBe(failure);
-      expect(cleanupCapacity).toEqual([refused ? 0 : 1]);
-      expect(cleanupDone).toBe(true);
-      expect(getCommandLaneSnapshot(lane).activeCount).toBe(0);
+      await outsideExecutionCapacity(async () => {
+        expect(getCommandLaneSnapshot(lane).activeCount).toBe(0);
+        if (!refused) {
+          throw failure;
+        }
+        return "recovered";
+      });
     } finally {
-      finishCleanup.resolve();
-      await outcome;
+      cleanupCapacity.push(getCommandLaneSnapshot(lane).activeCount);
+      cleanupStarted.resolve();
+      await finishCleanup.promise;
+      cleanupDone = true;
     }
-  },
-);
+  });
+  const outcome = work.catch((error: unknown) => error).finally(settled);
+  try {
+    await cleanupStarted.promise;
+    expect(settled).not.toHaveBeenCalled();
+    finishCleanup.resolve();
+    expect(await outcome).toBe(failure);
+    expect(cleanupCapacity).toEqual([refused ? 0 : 1]);
+    expect(cleanupDone).toBe(true);
+    expect(getCommandLaneSnapshot(lane).activeCount).toBe(0);
+  } finally {
+    finishCleanup.resolve();
+    await outcome;
+  }
+});

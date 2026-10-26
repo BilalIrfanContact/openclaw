@@ -21,7 +21,7 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
       entered.resolve();
       await release.promise;
       await second.withTranscriptWrite(async () => {
-        await first.withTranscriptWrite(() => order.push("nested first"));
+        await first.withTranscriptWrite(() => order.push("nested"));
         await expect(first.dispose()).rejects.toThrow("inside a transcript write callback");
         await expect(first.beginCleanup()).rejects.toThrow(
           "cannot start attempt cleanup inside a transcript write callback",
@@ -29,14 +29,18 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
       });
       await second.dispose();
       await expect(second.withTranscriptWrite(() => undefined)).rejects.toThrow("attempt disposed");
-      await first.withTranscriptWrite(() => order.push("first after second disposed"));
+      await first.withTranscriptWrite(() => order.push("after second"));
+      void first.withTranscriptWrite(async () => {
+        await Promise.resolve();
+        order.push("unawaited");
+      });
     });
     await entered.promise;
-    const queued = first.withTranscriptWrite(() => order.push("queued first"));
+    const queued = first.withTranscriptWrite(() => order.push("queued"));
     release.resolve();
     await Promise.all([write, queued]);
     await first.dispose();
-    expect(order).toEqual(["nested first", "first after second disposed", "queued first"]);
+    expect(order).toEqual(["nested", "after second", "unawaited", "queued"]);
   });
 
   it("drains admitted transcript writes before cleanup continues", async () => {
@@ -59,20 +63,6 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
     await expect(lifecycle.withTranscriptWrite(() => undefined)).rejects.toThrow(cleanupError);
   });
 
-  it("drains fire-and-forget nested writes before admitting the next writer", async () => {
-    const lifecycle = createEmbeddedAttemptTranscriptLifecycle({});
-    const order: string[] = [];
-    await lifecycle.withTranscriptWrite(() => {
-      order.push("outer");
-      void lifecycle.withTranscriptWrite(async () => {
-        await Promise.resolve();
-        order.push("nested");
-      });
-    });
-    await lifecycle.withTranscriptWrite(() => order.push("next"));
-    expect(order).toEqual(["outer", "nested", "next"]);
-  });
-
   it("still admits a nested write from a callback that outlives the teardown budget", async () => {
     vi.useFakeTimers();
     const releaseOwner = vi.fn();
@@ -80,13 +70,11 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
     const releaseCallbacks = vi.fn(() => callbacksReleased.resolve());
     const lifecycle = createEmbeddedAttemptTranscriptLifecycle({ onDrained: releaseOwner });
     const writeGate = createDeferredCore();
-    let nestedWrite: Promise<undefined> | undefined;
+    let nestedWrite: Promise<void> | undefined;
     const admitted = lifecycle.withTranscriptWrite(async () => {
       await writeGate.promise; // Outlives the teardown budget; descendants remain admitted.
       nestedWrite = lifecycle.withTranscriptWrite(() => {
-        expect(releaseOwner).not.toHaveBeenCalled();
-        expect(releaseCallbacks).not.toHaveBeenCalled();
-        return undefined;
+        expect([releaseOwner.mock.calls, releaseCallbacks.mock.calls]).toEqual([[], []]);
       });
     });
     const cleanupDone = lifecycle.beginCleanup(releaseCallbacks);
@@ -94,15 +82,12 @@ describe("createEmbeddedAttemptTranscriptLifecycle", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await cleanupDone;
     await disposeDone;
-    expect(releaseOwner).not.toHaveBeenCalled();
-    expect(releaseCallbacks).not.toHaveBeenCalled();
+    expect([releaseOwner.mock.calls, releaseCallbacks.mock.calls]).toEqual([[], []]);
     writeGate.resolve();
     await admitted;
     await expect(nestedWrite).resolves.toBeUndefined();
-    await lifecycle.dispose();
     await callbacksReleased.promise;
-    expect(releaseOwner).toHaveBeenCalledOnce();
-    expect(releaseCallbacks).toHaveBeenCalledOnce();
+    expect([releaseOwner.mock.calls.length, releaseCallbacks.mock.calls.length]).toEqual([1, 1]);
   });
 
   it("releases disposed attempts with a shared context carrier (retention child)", async () => {

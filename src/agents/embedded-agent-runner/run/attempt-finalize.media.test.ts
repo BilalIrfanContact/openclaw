@@ -39,7 +39,6 @@ describe("finalizeEmbeddedAttempt trajectory capture", () => {
   };
 
   type TerminalCase = {
-    name: string;
     input: Partial<EmbeddedRunAttemptResult>;
     stop: string | undefined;
     status: "success" | "error" | "interrupted";
