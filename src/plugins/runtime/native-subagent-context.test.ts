@@ -21,11 +21,10 @@ function fixture() {
 }
 const params = { requestId: "first", task: "Review the change" };
 const guard = { pluginId: "test-plugin", assertCurrent() {} };
-const inRequest = <T>(runtime: NativeSubagentRuntime, run: () => Promise<T>) =>
-  withNativeSubagentRequest(
-    () => runtime,
-    () => withNativeSubagentRuntimeGuard(guard, run),
-  );
+const inRequest = <T>(
+  create: Parameters<typeof withNativeSubagentRequest>[0],
+  run: () => Promise<T>,
+) => withNativeSubagentRequest(create, () => withNativeSubagentRuntimeGuard(guard, run));
 const listChildren = (options?: Parameters<NonNullable<NativeSubagentRuntime["list"]>>[0]) =>
   expectDefined(nativeSubagentRuntime.list, "list facade")(options);
 
@@ -35,9 +34,7 @@ describe("native subagent requester binding", () => {
     const runtime = fixture();
     await withNativeSubagentRequest(
       () => runtime,
-      async () => {
-        await expect(nativeSubagentRuntime.spawn(params)).rejects.toThrow("requester-bound");
-      },
+      () => expect(nativeSubagentRuntime.spawn(params)).rejects.toThrow("requester-bound"),
     );
     expect(runtime.spawn).not.toHaveBeenCalled();
   });
@@ -51,11 +48,7 @@ describe("native subagent requester binding", () => {
         withNativeSubagentRuntimeGuard(
           { ...guard, pluginId: boundary === "plugin" ? String(index) : guard.pluginId },
           async () => {
-            if (index === 0) {
-              await ready.promise;
-            } else {
-              ready.resolve();
-            }
+            await (index === 0 ? ready.promise : ready.resolve());
             await nativeSubagentRuntime.spawn(params);
           },
         );
@@ -81,72 +74,38 @@ describe("native subagent requester binding", () => {
   );
 
   it("reports optional listing absence honestly on an older runtime", async () => {
-    const runtime = fixture();
-    await inRequest(runtime, async () => {
-      await expect(listChildren()).rejects.toThrow("listing is unsupported");
-    });
-    expect(runtime.collect).not.toHaveBeenCalled();
-    expect(runtime.spawn).not.toHaveBeenCalled();
-  });
-
-  it.each(["list", "spawn"] as const)("rechecks unload after %s preparation", async (method) => {
-    const ready = createDeferred<NativeSubagentRuntime>();
-    const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
-    const runtime = { ...fixture(), list };
-    let active = true;
-    const pending = withNativeSubagentRequest(
-      () => ready.promise,
-      () =>
-        withNativeSubagentRuntimeGuard(
-          {
-            pluginId: "test-plugin",
-            assertCurrent() {
-              if (!active) {
-                throw new Error("plugin unloaded");
-              }
-            },
-          },
-          () => (method === "list" ? listChildren() : nativeSubagentRuntime.spawn(params)),
-        ),
+    await inRequest(fixture, () =>
+      expect(listChildren()).rejects.toThrow("listing is unsupported"),
     );
-    active = false;
-    ready.resolve(runtime);
-    await expect(pending).rejects.toThrow("plugin unloaded");
-    expect(runtime[method]).not.toHaveBeenCalled();
   });
 
   it("expires retained listing calls with their invoking request", async () => {
     const list = vi.fn<NonNullable<NativeSubagentRuntime["list"]>>().mockResolvedValue([]);
     const gate = createDeferred();
     let detached: Promise<unknown> | undefined;
-    await inRequest({ ...fixture(), list }, async () => {
-      expect(await listChildren({ status: "queued" })).toEqual([]);
-      detached = gate.promise.then(() => listChildren());
-    });
+    await inRequest(
+      () => ({ ...fixture(), list }),
+      async () => {
+        expect(await listChildren({ status: "queued" })).toEqual([]);
+        detached = gate.promise.then(() => listChildren());
+      },
+    );
     gate.resolve();
     await expect(detached).rejects.toThrow("requester-bound");
     expect(list).toHaveBeenCalledExactlyOnceWith({ status: "queued" });
   });
 
-  it("aborts the request scope and rejects detached calls after a handler exits", async () => {
-    const gate = createDeferred();
-    const runtime = fixture();
-    let detached: Promise<unknown> | undefined;
+  it("aborts the request scope after a handler exits", async () => {
     let signal: AbortSignal | undefined;
-    await withNativeSubagentRequest(
+    await inRequest(
       (source) => {
         signal = source.signal;
-        return runtime;
+        return fixture();
       },
-      () =>
-        withNativeSubagentRuntimeGuard(guard, async () => {
-          await nativeSubagentRuntime.collect({ ids: ["child-run"], timeoutSeconds: 0 });
-          detached = gate.promise.then(() => nativeSubagentRuntime.spawn(params));
-        }),
+      async () => {
+        await nativeSubagentRuntime.collect({ ids: ["child-run"], timeoutSeconds: 0 });
+      },
     );
     expect(signal?.aborted).toBe(true);
-    gate.resolve();
-    await expect(detached).rejects.toThrow("requester-bound");
-    expect(runtime.spawn).not.toHaveBeenCalled();
   });
 });

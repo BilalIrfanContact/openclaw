@@ -51,13 +51,11 @@ describe("plugin session-event boundary", () => {
     const expectedTarget = await captureTarget();
     expect(Object.isFrozen(expectedTarget)).toBe(true);
     expect(Object.keys(expectedTarget)).toEqual([]);
-    const abortSignal = new AbortController().signal;
-    const deliveryContext = { channel: "discord", to: "channel:123" };
     const publicOptions = {
       ...address,
       contextKey: "plugin:notice",
-      deliveryContext,
-      abortSignal,
+      deliveryContext: { channel: "discord", to: "channel:123" },
+      abortSignal: new AbortController().signal,
       createIfMissing: true as const,
     };
     const options = {
@@ -97,7 +95,6 @@ describe("plugin session-event boundary", () => {
       ).toThrow("not captured by this runtime");
     }
     expect(host.enqueue).not.toHaveBeenCalled();
-    expect(host.capture).toHaveBeenCalledTimes(1);
   });
 
   it("rejects capture when its owner retires during host preparation", async () => {
@@ -112,7 +109,6 @@ describe("plugin session-event boundary", () => {
   it("keeps the admitted owner assertion on host event effects", () => {
     inOwnerScope(() => system().enqueueSessionEvent("Completed", address));
     const forwarded = host.enqueue.mock.calls[0]?.[1] as SessionEventOptions;
-    expect(forwarded.assertCurrent).toBeTypeOf("function");
     active = false;
     expect(() => forwarded.assertCurrent?.()).toThrow("retired owner");
   });

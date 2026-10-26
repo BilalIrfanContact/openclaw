@@ -12,12 +12,11 @@ type CreateOptions<T = Create> = T extends Create
   : never;
 function acpFixture() {
   const key = "agent:main:plugin:acpx:catalog-adopt:pi:source";
-  const pluginOwnerId = "acpx";
   const session = createRuntimeAgent().session;
   const cwd = "/workspace/pi";
   const initialEntry = {
     acpBackendId: "acpx",
-    pluginOwnerId,
+    pluginOwnerId: "acpx",
     acpSessionBinding: { acpAgentId: "pi", agentSessionId: "pi-source" },
   };
   return {
@@ -35,7 +34,7 @@ function acpFixture() {
           updatedAt: Date.now(),
           delivery: { kind: "none" },
           initializationPending: true,
-          pluginOwnerId,
+          pluginOwnerId: "acpx",
           spawnedCwd: cwd,
           pluginExtensions,
           acpSessionBinding: { acpBackendId: "acpx", ...initialEntry.acpSessionBinding },
@@ -49,7 +48,14 @@ function withAcpFixture(run: (fixture: ReturnType<typeof acpFixture>) => Promise
 }
 const readMeta = (sessionKey: string) =>
   acpSessionMeta.readAcpSessionEntry({ cfg: {}, sessionKey })?.acp;
-const piBinding = { backend: "acpx", agent: "pi", identity: { agentSessionId: "pi-source" } };
+const piBinding = {
+  backend: "acpx",
+  agent: "pi",
+  identity: { agentSessionId: "pi-source", state: "resolved" as const, source: "ensure" as const },
+  mode: "persistent" as const,
+  cwd: "/workspace/pi",
+  state: "idle" as const,
+};
 
 it("does not initialize or remove a successor observed after ACP preparation", async () => {
   await withAcpFixture(async ({ key, read, create }) => {
@@ -73,10 +79,6 @@ it("does not initialize or remove a successor observed after ACP preparation", a
     });
     await expect(create({ afterCreate })).rejects.toThrow();
     expect(prepare).toHaveBeenCalledOnce();
-    expect(successor).toMatchObject({
-      sessionId: "successor",
-      lifecycleRevision: "successor-generation",
-    });
     expect(afterCreate).not.toHaveBeenCalled();
     expect(read()).toEqual(successor);
   });
@@ -100,10 +102,6 @@ it("persists a plugin-owned native resume binding", async () => {
     expect(readMeta(created.key)).toMatchObject({
       ...piBinding,
       runtimeSessionName: created.key,
-      identity: { ...piBinding.identity, state: "resolved", source: "ensure" },
-      mode: "persistent",
-      cwd: "/workspace/pi",
-      state: "idle",
     });
   });
 });
@@ -115,18 +113,14 @@ it("rejects recovery when the native resume binding differs", async () => {
       cfg: {},
       sessionKey: key,
       mutate: () => ({
-        backend: "acpx",
-        agent: "pi",
+        ...piBinding,
         runtimeSessionName: key,
         identity: {
-          state: "resolved",
+          ...piBinding.identity,
           agentSessionId: "different-source",
-          source: "ensure",
           lastUpdatedAt: Date.now(),
         },
-        mode: "persistent",
         cwd,
-        state: "idle",
         lastActivityAt: Date.now(),
       }),
     });

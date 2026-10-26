@@ -97,7 +97,6 @@ describe("runtimeContexts", () => {
     const contexts = createRuntimeChannel().runtimeContexts;
     const controller = new AbortController();
     return {
-      contexts,
       controller,
       register: (context: object) =>
         contexts.register({ ...scope, context, abortSignal: controller.signal }),
@@ -115,25 +114,34 @@ describe("runtimeContexts", () => {
 
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(initialListenerCount + 2);
 
-    // Plugins dispose the old lease only after its replacement is registered.
     staleLease.dispose();
 
     expect(getEventListeners(controller.signal, "abort")).toHaveLength(initialListenerCount + 1);
     expect(read()).toEqual({ token: "replacement" });
   });
 
-  it("does not register contexts when the abort signal is already aborted", () => {
-    const { controller, register, watch, read } = fixture();
-    const onEvent = vi.fn();
-    controller.abort();
-    watch(onEvent);
-
-    const lease = register({ client: "stale" });
-
-    expect(read()).toBeUndefined();
-    expect(onEvent).not.toHaveBeenCalled();
-    lease.dispose();
-  });
+  it.each(["before registration", "during notification"] as const)(
+    "disposes on abort %s",
+    (timing) => {
+      const { controller, register, watch, read } = fixture();
+      const onEvent = vi.fn((event) => {
+        if (timing === "during notification" && event.type === "registered") {
+          controller.abort();
+        }
+      });
+      watch(onEvent);
+      if (timing === "before registration") {
+        controller.abort();
+      }
+      const lease = register({ client: "stale" });
+      expect(read()).toBeUndefined();
+      expectWatcherEvents(
+        onEvent,
+        ...(timing === "before registration" ? [] : ["registered", "unregistered"]),
+      );
+      lease.dispose();
+    },
+  );
 
   it("isolates watcher exceptions so registration and disposal still complete", () => {
     const { register, watch, read } = fixture();
@@ -148,32 +156,11 @@ describe("runtimeContexts", () => {
     const lease = register({ client: "ok" });
 
     expect(read()).toEqual({ client: "ok" });
-    expectWatcherEvents(badWatcher, "registered");
-    expectWatcherEvents(goodWatcher, "registered");
-
     lease.dispose();
 
     expect(read()).toBeUndefined();
     expectWatcherEvents(badWatcher, "registered", "unregistered");
     expectWatcherEvents(goodWatcher, "registered", "unregistered");
     unsubscribe();
-  });
-
-  it("auto-disposes when a watcher aborts during the registered event", () => {
-    const { controller, register, watch, read } = fixture();
-    const onEvent = vi.fn((event) => {
-      if (event.type === "registered") {
-        controller.abort();
-      }
-    });
-
-    watch(onEvent);
-
-    const lease = register({ client: "ok" });
-
-    expect(read()).toBeUndefined();
-    expectWatcherEvents(onEvent, "registered", "unregistered");
-
-    lease.dispose();
   });
 });
