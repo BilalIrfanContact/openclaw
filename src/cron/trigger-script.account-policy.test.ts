@@ -6,7 +6,6 @@ import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/c
 import { bindCronJobAdmittedRun, clearCronJobActive, markCronJobActive } from "./active-jobs.js";
 import { makeCronJob } from "./delivery.test-helpers.js";
 import { TEST_SCHEDULED_OCCURRENCE } from "./scheduled-occurrence.test-support.js";
-import type { CronScheduledToolCallerOrigin } from "./scheduled-tool-policy.js";
 import { withCronStore } from "./store.worker.test-support.js";
 import { createCronScriptRuntime } from "./trigger-script.js";
 import type { CronStoredJob } from "./types.js";
@@ -60,7 +59,7 @@ it.each(["trigger", "payload"] as const)(
         plugins.setActivePluginRegistry(registry);
         const runtime = createCronScriptRuntime({ config, loadPluginRegistry: () => registry });
         const signal = new AbortController().signal;
-        const invoke = async (accountId: string, callerOrigin?: CronScheduledToolCallerOrigin) => {
+        const invoke = async (accountId: string, channel?: string) => {
           const script = `await message({ action: "send", channel: "telegram", accountId: ${JSON.stringify(accountId)}, target: "123", message: "Scheduled report" }); return { fire: false };`;
           const jobId = `account-${entry}-${accountId}`;
           const marker = markCronJobActive(jobId, { isMessageActionAuthorityCurrent: () => true });
@@ -81,11 +80,11 @@ it.each(["trigger", "payload"] as const)(
               ownerAccountId: accountId,
             },
           });
-          if (callerOrigin) {
+          if (channel) {
             job.toolsAllowProvenance = {
               version: 1,
               source: "final-executable-surface",
-              callerOrigin,
+              callerOrigin: { kind: "external", channel },
             };
           }
           const params = {
@@ -118,10 +117,7 @@ it.each(["trigger", "payload"] as const)(
           ["missing", "telegram", 'Scheduled account "missing" is unavailable', 2],
           ["disabled", "telegram", "disabled", 2],
         ] as const) {
-          const result = await invoke(
-            accountId,
-            channel ? { kind: "external", channel } : undefined,
-          );
+          const result = await invoke(accountId, channel);
           expect(result, JSON.stringify(result)).toMatchObject(
             error ? { kind: "error", error: expect.stringContaining(error) } : expected,
           );

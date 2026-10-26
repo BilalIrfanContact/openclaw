@@ -17,7 +17,6 @@ function checkMaintenance(
     id: "maintenance",
     schedule: { kind: "cron", expr: "0 0 21 * * *", tz: "Asia/Shanghai", staggerMs: 0 },
     sessionTarget: "main",
-    wakeMode: "now",
     payload: { kind: "systemEvent", text: "tick" },
     ...overrides,
   });
@@ -34,7 +33,6 @@ it("schedules loaded every jobs without backfilling anchorMs", () => {
   const { job } = checkMaintenance(
     {
       createdAtMs: startedAt - 120_000,
-      updatedAtMs: startedAt - 120_000,
       schedule: { kind: "every", everyMs: 60_000 },
     },
     startedAt + 60_000,
@@ -59,17 +57,15 @@ it.each([
 });
 
 it.each([
-  ["without duration", 120, 60, 70, 600, undefined],
-  ["from run end", 600, 90, 330, 1230, 240_000],
+  ["without duration", 120, 60, 600, undefined],
+  ["from run end", 600, 90, 1230, 240_000],
 ] as const)(
   "preserves retry backoff %s",
-  (_name, nowSeconds, runSeconds, updatedSeconds, retrySeconds, lastDurationMs) => {
+  (_name, nowSeconds, runSeconds, retrySeconds, lastDurationMs) => {
     const at = (seconds: number) => Date.parse("2025-12-13T04:00:00Z") + seconds * 1000;
     checkMaintenance(
       {
-        updatedAtMs: at(updatedSeconds),
         schedule: { kind: "cron", expr: "* * * * *", tz: "UTC" },
-        wakeMode: "next-heartbeat",
         state: {
           nextRunAtMs: at(retrySeconds),
           lastRunAtMs: at(runSeconds),

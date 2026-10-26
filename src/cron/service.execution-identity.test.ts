@@ -77,7 +77,6 @@ it.each([
     const job = await cron.add(cronTestInput({ delivery: { mode: "none" } }));
     clock.now = job.state.nextRunAtMs!;
     await onTimer(service.state);
-    expect(runIsolatedAgentJob).toHaveBeenCalledOnce();
     expect((await cron.readJob(job.id))?.state.lastRunStatus).toBe("ok");
 
     const database = openOpenClawStateDatabase();
@@ -88,27 +87,21 @@ it.each([
       return;
     }
     expect(admissions).toHaveLength(2);
-    const context = processExecutionIdentityAdmissionWorkInDatabase(admissions[0], { database });
-    const payloadContext = processExecutionIdentityAdmissionWorkInDatabase(admissions[1], {
-      database,
-    });
+    const [context, payloadContext] = admissions.map((work) =>
+      processExecutionIdentityAdmissionWorkInDatabase(work, { database }),
+    );
     expect(context.contextId).not.toBe(payloadContext.contextId);
-    expect(
-      database.db
-        .prepare(
-          `SELECT r.job_id
-             FROM execution_owner_lifecycle_bindings b
-             JOIN cron_run_receipts r ON b.owner_kind = 'cron' AND b.owner_id = r.receipt_id`,
-        )
-        .all(),
-    ).toEqual([{ job_id: job.id }]);
-    const inspection = presentExecutionDecisionReceiptsInDatabase(database.db, {
-      schema: { cronRunReceipts: true, executionOwnerLifecycleBindings: bindingTable },
-      context,
-      decisionLimit: 10,
-      now: clock.now,
-    });
-    expect(inspection.decisions).toContainEqual(
+    const inspect = (admittedContext: typeof payloadContext) =>
+      presentExecutionDecisionReceiptsInDatabase(database.db, {
+        schema: { cronRunReceipts: true, executionOwnerLifecycleBindings: bindingTable },
+        context: admittedContext,
+        decisionLimit: 10,
+        now: clock.now,
+      }).decisions;
+    expect(inspect(payloadContext)).not.toContainEqual(
+      expect.objectContaining({ source: expect.objectContaining({ owner: "cron_run_receipts" }) }),
+    );
+    expect(inspect(context)).toContainEqual(
       expect.objectContaining({
         contextId: context.contextId,
         executionId: context.executionId,

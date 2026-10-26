@@ -1,28 +1,37 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import type { ChannelPlugin } from "../channels/plugins/types.public.js";
 import type { CronFailureDestinationConfig } from "../config/types.cron.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { resolveCronDeliveryPlan, resolveFailureDestination } from "./delivery-plan.js";
-import { makeCronJob } from "./delivery.test-helpers.js";
 import type { CronDelivery } from "./types.js";
 
-function channelPlugin(id: string, targetPrefixes: string[], aliases?: string[]): ChannelPlugin {
-  const plugin = createChannelTestPluginBase({ id });
-  return {
-    ...plugin,
-    ...(aliases ? { meta: { ...plugin.meta, aliases } } : {}),
-    messaging: { targetPrefixes },
-  };
-}
-
-function register(plugins: ChannelPlugin[]) {
+beforeEach(() => {
   setActivePluginRegistry(
     createTestRegistry(
-      plugins.map((plugin) => ({ pluginId: plugin.id, plugin, source: `test:${plugin.id}` })),
+      (
+        [
+          ["telegram", "tg"],
+          ["slack"],
+          ["googlechat", "gchat", "google-chat"],
+          ["msteams", "teams"],
+          ["synology-chat", "synology_chat", "synology"],
+        ] as const
+      ).map(([id, ...aliases]) => {
+        const base = createChannelTestPluginBase({ id });
+        return {
+          pluginId: id,
+          source: `test:${id}`,
+          plugin: {
+            ...base,
+            meta: { ...base.meta, aliases },
+            messaging: { targetPrefixes: [id, ...aliases] },
+          },
+        };
+      }),
     ),
   );
-}
+});
+afterEach(() => resetPluginRuntimeStateForTest());
 
 function failure(
   failureDestination: CronDelivery["failureDestination"],
@@ -37,19 +46,9 @@ function announce(channel: string, to?: string, accountId?: string) {
 }
 const webhook = { mode: "webhook", to: "https://example.invalid/cron" } as const;
 
-const baseChannels = () => [
-  channelPlugin("telegram", ["telegram", "tg"]),
-  channelPlugin("slack", ["slack"]),
-  channelPlugin("googlechat", ["googlechat", "gchat", "google-chat"], ["gchat", "google-chat"]),
-];
-const registerTeams = () =>
-  register([...baseChannels(), channelPlugin("msteams", ["msteams", "teams"], ["teams"])]);
-beforeEach(() => register(baseChannels()));
-afterEach(() => resetPluginRuntimeStateForTest());
-
 it("rejects an unrepaired primary route while retaining an explicit failure destination", () => {
-  const job = makeCronJob({ delivery: { mode: "announce", channel: "telegram", to: "123" } });
-  Reflect.deleteProperty(job.delivery!, "mode");
+  const job = { delivery: announce("telegram", "123") };
+  Reflect.deleteProperty(job.delivery, "mode");
   expect(() => resolveCronDeliveryPlan(job)).toThrow("openclaw doctor --fix");
   expect(resolveFailureDestination(job, { channel: "telegram", to: "123" })).toEqual(
     announce("telegram", "123"),
@@ -65,7 +64,6 @@ it("resolves webhook mode without channel routing", () => {
 });
 
 it("uses Synology Chat provider prefixes with underscores and short spelling", () => {
-  register([channelPlugin("synology-chat", ["synology-chat", "synology_chat", "synology"])]);
   for (const to of ["synology-chat:123", "synology_chat:123", "synology:123"]) {
     expect(
       resolveCronDeliveryPlan({ delivery: { mode: "announce", channel: "last", to } }),
@@ -74,7 +72,6 @@ it("uses Synology Chat provider prefixes with underscores and short spelling", (
 });
 
 it("preserves msteams failure routing from its global alias through a job alert", () => {
-  registerTeams();
   expect(
     resolveFailureDestination(
       { delivery: { mode: "none" } },
@@ -116,10 +113,7 @@ it.each([
   ],
 ] as const)(
   "merges %s override without crossing routing ownership",
-  (name, override, inherited, expected) => {
-    if (name === "foreign channel") {
-      registerTeams();
-    }
+  (_name, override, inherited, expected) => {
     expect(failure(override, inherited, announce("telegram", "111"))).toEqual(expected);
   },
 );

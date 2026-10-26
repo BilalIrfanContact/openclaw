@@ -23,14 +23,10 @@ const saveQuarantine = (storePath: string, entry: ReturnType<typeof recoveryEntr
   saveCronQuarantinedJobs({ storePath, nowMs, entries: [entry] });
 
 it.each([
-  [
-    "unrecognized shape",
-    Buffer.from(JSON.stringify({ version: 2, jobs: [{ reason: "old-shape", raw: "keep-me" }] })),
-    "Unsupported cron quarantine file shape",
-  ],
+  ["unrecognized shape", Buffer.from('{"version":2}'), "Unsupported cron quarantine file shape"],
   [
     "malformed UTF-8",
-    Buffer.from('{"version":1,"jobs":[{"reason":"\x80","raw":"keep-me"}]}', "latin1"),
+    Buffer.from('{"version":1,"jobs":[{"reason":"\x80"}]}', "latin1"),
     "must be valid UTF-8",
   ],
 ] as const)(
@@ -101,10 +97,9 @@ it.each([false, true])(
   "rolls back quarantine changes on failed row update (recovery=%s)",
   async (recovery) => {
     const { storePath } = await makeStorePath();
-    const jobId = recovery ? "atomic-recovery-job" : "atomic-quarantine-job";
-    const store = makeStore(jobId, true);
+    const store = makeStore("job", true);
     await saveCronJobsStore(storePath, store);
-    const entry = recoveryEntry(recovery ? jobId : "bad-row", "invalid-schedule");
+    const entry = recoveryEntry(recovery ? "job" : "bad-row", "invalid-schedule");
     if (recovery) {
       await saveQuarantine(storePath, entry, 123);
     }
@@ -122,7 +117,7 @@ it.each([false, true])(
       expect(await loadCronQuarantinedJobs(storePath)).toEqual(
         recovery ? [{ ...entry, quarantinedAtMs: 123 }] : [],
       );
-      expect((await loadCronStore(storePath)).jobs.map((job) => job.id)).toEqual([jobId]);
+      expect((await loadCronStore(storePath)).jobs.map((job) => job.id)).toEqual(["job"]);
     } finally {
       database.exec("DROP TRIGGER fail_cron_recovery_update");
     }

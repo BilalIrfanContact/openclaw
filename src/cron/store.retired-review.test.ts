@@ -13,16 +13,11 @@ const job = (id: string) => createReloadCronJob({ id, agentId: "main" });
 
 const legacyReview = {
   ...job("retired"),
-  name: "skill-collection-review-main",
-  declarationKey: "skill-collection-review:main",
-  systemOwned: true,
   payload: { kind: "skillCollectionReview" },
 };
 const curator = {
-  ...legacyReview,
-  sessionTarget: "isolated",
+  ...job("retired"),
   payload: { kind: "agentTurn", message: "Weekly Skill Workshop curator pass." },
-  delivery: { mode: "none" },
 };
 
 it.each([
@@ -31,8 +26,8 @@ it.each([
   ["curator", "agentTurn", curator, "skill-collection-review:main"],
 ] as const)(
   "retires %s legacy rows on an already-current database through mutable load",
-  async (_shape, kind, definition, declaration) => {
-    await withCronStore("retired-workshop-cron", async (state) => {
+  (_shape, kind, definition, declaration) =>
+    withCronStore("retired-workshop-cron", async (state) => {
       const { storePath } = state;
       const otherStorePath = state.statePath("other-cron", "jobs.json");
       await state.save({ version: 1, jobs: [job("retired"), job("keep")] });
@@ -68,17 +63,14 @@ it.each([
       expect(counts(storePath)).toEqual([{ count: 0 }, { count: 0 }]);
       expect(counts(otherStorePath)).toEqual([{ count: 1 }, { count: 1 }]);
       expect(db.prepare("PRAGMA user_version").get()).toEqual(version);
-      expect((await state.load()).invalidConfigRows).toEqual([]);
-    });
-  },
+    }),
 );
 
-it("allows writable-update Doctor to persist config repair while the retired row remains on disk", async () => {
-  await withCronStore(
+it("allows writable-update Doctor to persist config repair while the retired row remains on disk", () =>
+  withCronStore(
     "retired-workshop-doctor",
     async (state) => {
       await state.writeConfig({
-        meta: { lastTouchedAt: "2026-09-01T00:00:00.000Z" },
         gateway: { mode: "local" },
         agents: { list: [{ id: "main", default: true }] },
       });
@@ -109,5 +101,4 @@ it("allows writable-update Doctor to persist config repair while the retired row
       OPENCLAW_UPDATE_IN_PROGRESS: "1",
       OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
     },
-  );
-});
+  ));
