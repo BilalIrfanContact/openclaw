@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { createChannelRunQueue } from "./channel-lifecycle.core.js";
+beforeEach(() => vi.useFakeTimers({ now: 1_000 }));
+afterEach(() => vi.useRealTimers());
 
 async function flushAsyncWork() {
   for (let i = 0; i < 20; i += 1) {
@@ -19,7 +21,6 @@ async function startConcurrentRuns() {
   const second = createDeferred();
   const setStatus = vi.fn();
   const queue = createChannelRunQueue({ setStatus });
-  vi.setSystemTime(1_000);
   queue.enqueue("first", async () => first.promise);
   await flushAsyncWork();
   vi.setSystemTime(2_000);
@@ -76,20 +77,17 @@ describe("createChannelRunQueue", () => {
 
       await flushAsyncWork();
 
-      expect(setStatus.mock.calls.map(([status]) => status)).toEqual([
-        { activeRuns: 0, busy: false, activeRunStartedAt: null },
-        expect.objectContaining({
-          activeRuns: 1,
-          busy: true,
-          lastRunActivityAt: expect.any(Number),
-          activeRunStartedAt: expect.any(Number),
-        }),
-        expect.objectContaining({
-          activeRuns: 0,
-          busy: false,
-          lastRunActivityAt: expect.any(Number),
-          activeRunStartedAt: null,
-        }),
+      expect(
+        setStatus.mock.calls.map(([s]) => [
+          s.activeRuns,
+          s.busy,
+          s.activeRunStartedAt,
+          s.lastRunActivityAt,
+        ]),
+      ).toEqual([
+        [0, false, null, undefined],
+        [1, true, expect.any(Number), expect.any(Number)],
+        [0, false, null, expect.any(Number)],
       ]);
       expect(onError).toHaveBeenCalledWith(taskError);
     },
@@ -101,21 +99,16 @@ describe("createChannelRunQueue", () => {
   ] as const)(
     "tracks the oldest active run after $done completes",
     async ({ done, remaining, startedAt }) => {
-      vi.useFakeTimers();
-      try {
-        const runs = await startConcurrentRuns();
-        await finish(runs[done]);
-        expect(runs.setStatus.mock.calls.at(-1)?.[0]).toMatchObject({
-          activeRuns: 1,
-          busy: true,
-          activeRunStartedAt: startedAt,
-        });
-        runs.queue.deactivate();
-        runs[remaining].resolve();
-        await runs[remaining].promise;
-      } finally {
-        vi.useRealTimers();
-      }
+      const runs = await startConcurrentRuns();
+      await finish(runs[done]);
+      expect(runs.setStatus.mock.calls.at(-1)?.[0]).toMatchObject({
+        activeRuns: 1,
+        busy: true,
+        activeRunStartedAt: startedAt,
+      });
+      runs.queue.deactivate();
+      runs[remaining].resolve();
+      await runs[remaining].promise;
     },
   );
 

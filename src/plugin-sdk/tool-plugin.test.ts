@@ -11,11 +11,7 @@ const echoTool = {
 };
 const pluginDetails = { id: "test-tools", name: "Test Tools", description: "Tool plugin fixture." };
 function register(entry: ReturnType<typeof defineToolPlugin>, config?: Record<string, unknown>) {
-  const id = entry.id;
-  const captured = createCapturedPluginRegistration({
-    id,
-    ...(config ? { config: { plugins: { entries: { [id]: { config } } } } } : {}),
-  });
+  const captured = createCapturedPluginRegistration({ id: entry.id });
   if (config) {
     captured.api.pluginConfig = config;
   }
@@ -29,10 +25,7 @@ function firstTool(captured: ReturnType<typeof register>) {
 
 describe("defineToolPlugin", () => {
   it("registers declared tools and wraps plain object results", async () => {
-    const outputSchema = Type.Object(
-      { input: Type.String(), configured: Type.Boolean() },
-      { additionalProperties: false },
-    );
+    const outputSchema = Type.Object({ input: Type.String(), configured: Type.Boolean() });
     const entry = defineToolPlugin({
       ...pluginDetails,
       configSchema: Type.Object({ apiKey: Type.String() }),
@@ -88,19 +81,16 @@ describe("defineToolPlugin", () => {
       tools: (tool) => [
         tool({
           ...echoTool,
-          label: "Factory Echo",
           optional: true,
           workspaceAccess: "execute",
-          factory({ toolContext }) {
-            if (toolContext.sandboxed) {
-              return null;
-            }
-            return {
-              ...echoTool,
-              label: "Factory Echo",
-              execute: async () => ({ content: [], details: undefined }),
-            };
-          },
+          factory: ({ toolContext }) =>
+            toolContext.sandboxed
+              ? null
+              : {
+                  ...echoTool,
+                  label: "Factory Echo",
+                  execute: async () => ({ content: [], details: undefined }),
+                },
         }),
       ],
     });
