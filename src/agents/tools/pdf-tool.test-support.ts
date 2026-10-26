@@ -121,6 +121,7 @@ export function createPdfToolInfraStub(completeMock: Mock) {
             pluginRegistry,
             createStores,
           }),
+          run: <T>(run: () => T): T => run(),
           [Symbol.asyncDispose]: release,
         }) as never,
     );
