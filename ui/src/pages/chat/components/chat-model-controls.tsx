@@ -530,6 +530,60 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
   });
   // The retained panel starts observing this only after its first open.
   const modelOptions = createMemo(() => selection().buildModelOptions(), { lazy: true });
+  // Capture fields so refreshed wrappers and unrelated frames do not rescan the catalog.
+  const fastModeInputs = createMemo(
+    () => {
+      const target = props.fastModeTarget ?? props.selectedSession;
+      const defaults = props.sessionsResult?.defaults;
+      return [
+        catalogEntries(),
+        selection().currentOverride,
+        target?.model,
+        target?.modelProvider,
+        target?.agentRuntime?.id,
+        target?.fastMode,
+        target?.effectiveFastMode,
+        defaults?.model,
+        defaults?.modelProvider,
+        props.connected,
+        props.gatewayAvailable,
+        props.loading,
+      ] as const;
+    },
+    { equals: (before, after) => before.every((value, index) => value === after[index]) },
+  );
+  const resolvedFastMode = createMemo(() => {
+    i18nRevision();
+    const [
+      catalog,
+      currentModelOverride,
+      model,
+      modelProvider,
+      runtimeId,
+      fastMode,
+      effectiveFastMode,
+      defaultModel,
+      defaultProvider,
+      connected,
+      gatewayAvailable,
+      loading,
+    ] = fastModeInputs();
+    return resolveChatFastModeSelectState({
+      catalog,
+      connected,
+      currentModelOverride,
+      fastModeTarget: {
+        model,
+        modelProvider,
+        agentRuntime: runtimeId === undefined ? undefined : { id: runtimeId },
+        fastMode,
+        effectiveFastMode,
+      },
+      gatewayAvailable,
+      loading,
+      sessionsResult: { defaults: { model: defaultModel, modelProvider: defaultProvider } },
+    });
+  });
   return createMemo(() => {
     const {
       catalog,
@@ -560,20 +614,11 @@ function createChatModelControls(props: ChatModelControlsProps): Accessor<{
       sessionKey: props.sessionKey,
       sessionsResult: props.sessionsResult,
     });
-    const resolvedFastMode = resolveChatFastModeSelectState({
-      catalog: props.modelCatalog,
-      connected: props.connected,
-      currentModelOverride: currentOverride,
-      fastModeTarget: props.fastModeTarget ?? props.selectedSession,
-      gatewayAvailable: props.gatewayAvailable,
-      loading: props.loading,
-      sessionsResult: props.sessionsResult,
-    });
     // Reasoning/fast state still describes the previous model until the refreshed
     // session row lands. Lock both so stale levels cannot be committed mid-switch.
     const fastMode = props.modelSwitching
-      ? { ...resolvedFastMode, disabled: true }
-      : resolvedFastMode;
+      ? { ...resolvedFastMode(), disabled: true }
+      : resolvedFastMode();
     const catalogLoadingWithoutSnapshot =
       !catalogState.hasSnapshot && ["idle", "loading"].includes(catalogState.status);
     // The session owns the selected model; its account-scoped catalog only owns

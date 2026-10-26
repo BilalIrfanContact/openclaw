@@ -259,6 +259,31 @@ it("refreshes a retained session model when the containing frame changes", async
   });
 });
 
+it("refreshes saved and effective speed on a retained target when the frame changes", async () => {
+  const fastModeTarget: NonNullable<Props["fastModeTarget"]> = {
+    model: "primary",
+    modelProvider: "example",
+    fastMode: false,
+    effectiveFastMode: false,
+  };
+  const view = await controls({ fastModeTarget });
+  expect(view.speed.getAttribute("aria-checked")).toBe("false");
+
+  fastModeTarget.fastMode = true;
+  fastModeTarget.effectiveFastMode = true;
+  view.update({ stream: "Saved speed refreshed" });
+  expect(view.speed.getAttribute("aria-checked")).toBe("true");
+  expectDefined(
+    view.container.querySelector<HTMLButtonElement>("[data-chat-speed-option=off]"),
+    "standard speed option",
+  ).click();
+  expect(view.onFastModeSelect).toHaveBeenCalledWith("off", "main");
+
+  fastModeTarget.effectiveFastMode = false;
+  view.update({ stream: "Effective speed refreshed" });
+  expect(view.speed.getAttribute("aria-checked")).toBe("false");
+});
+
 it("keeps known effort visible but disabled until the same connection returns", async () => {
   const view = await controls({});
   const picker = view.container.querySelector<HTMLDetailsElement>(".chat-controls__effort-picker")!;
