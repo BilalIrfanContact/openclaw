@@ -341,7 +341,8 @@ they do not add text prefixes.
 
 Native Ollama checks the model digest from `/api/tags` when the embedding
 provider opens. A changed digest invalidates the index and embedding cache;
-an already-open provider must reopen to detect an alias's new target. If the
+existing indexes built without a digest may need one reindex after upgrading.
+An already-open provider must reopen to detect an alias's new target. If the
 server does not expose tags or a digest, as with some embedding-only proxies,
 OpenClaw retains the configured model and endpoint identity. Run
 `openclaw memory reset` after retargeting an alias on those servers, then index

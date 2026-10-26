@@ -1,4 +1,7 @@
-import { resolveEmbeddingInputFormatVersion } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
+import {
+  formatEmbeddingModelInput,
+  resolveEmbeddingInputFormatVersion,
+} from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
 import {
   hashText,
   MEMORY_CHUNKING_VERSION,
@@ -41,6 +44,7 @@ export function resolveMemoryIndexProviderIdentities(params: {
   provider: { id: string; model: string } | null;
   cacheKeyData?: Record<string, unknown>;
   aliases?: Array<{ model: string; cacheKeyData: Record<string, unknown> }>;
+  documentPrefix?: string;
 }): MemoryIndexProviderIdentity[] {
   const provider = params.provider ?? { id: "none", model: "fts-only" };
   const candidates = [
@@ -51,12 +55,22 @@ export function resolveMemoryIndexProviderIdentities(params: {
     ...(params.provider ? (params.aliases ?? []) : []),
   ];
   const embeddingInputFormatVersion = resolveEmbeddingInputFormatVersion(provider.model);
+  const documentPrefix =
+    params.provider &&
+    params.documentPrefix !== formatEmbeddingModelInput("", provider.model, "document")
+      ? params.documentPrefix
+      : undefined;
   const seen = new Set<string>();
   const identities: MemoryIndexProviderIdentity[] = [];
   for (const [index, candidate] of candidates.entries()) {
-    const cacheKeyData = embeddingInputFormatVersion
-      ? { provider: candidate.cacheKeyData, embeddingInputFormatVersion }
-      : candidate.cacheKeyData;
+    const cacheKeyData =
+      embeddingInputFormatVersion || documentPrefix !== undefined
+        ? {
+            provider: candidate.cacheKeyData,
+            embeddingInputFormatVersion,
+            ...(documentPrefix !== undefined ? { documentPrefix } : {}),
+          }
+        : candidate.cacheKeyData;
     const providerKey = hashText(JSON.stringify(cacheKeyData));
     const key = `${candidate.model}\u0000${providerKey}`;
     if ((index > 0 && !candidate.model) || seen.has(key)) {

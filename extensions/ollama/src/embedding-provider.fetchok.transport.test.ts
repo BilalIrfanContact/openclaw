@@ -7,6 +7,7 @@ import { buffer as consumeBuffer } from "node:stream/consumers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listenOnLoopback } from "../../test-support/hanging-loopback-server.js";
 import { createOllamaEmbeddingProvider } from "./embedding-provider.js";
+import { ollamaMemoryEmbeddingProviderAdapter } from "./memory-embedding-adapter.js";
 
 type OllamaRequest = {
   method: string | undefined;
@@ -105,6 +106,53 @@ describe("Ollama embedding provider real transport", () => {
     vi.unstubAllEnvs();
     const pending = servers.splice(0);
     await Promise.all(pending.map((server) => server.close()));
+  });
+
+  it("separates alias caches by model digest while preserving embedding-only endpoints", async () => {
+    let digest: string | undefined = "first-model-digest";
+    const server = await startOllamaServer((request) =>
+      request.url === "/api/tags"
+        ? {
+            status: digest ? 200 : 404,
+            body: JSON.stringify({ models: [{ name: "alias:latest", digest }] }),
+          }
+        : { status: 200, body: JSON.stringify({ embeddings: [[1, 0]] }) },
+    );
+    const create = () =>
+      ollamaMemoryEmbeddingProviderAdapter.create({
+        config: {},
+        provider: "ollama",
+        model: "alias",
+        fallback: "none",
+        remote: { baseUrl: server.baseUrl, headers: { "X-Proxy-Auth": "fixture-proxy-key" } },
+      });
+    const first = await create();
+    expect(first.runtime?.cacheKeyData).toMatchObject({
+      model: "alias",
+      modelDigest: "first-model-digest",
+    });
+    digest = "second-model-digest";
+    const second = await create();
+    expect(second.runtime?.cacheKeyData).toEqual({
+      ...first.runtime?.cacheKeyData,
+      modelDigest: "second-model-digest",
+    });
+    digest = undefined;
+    const embeddingOnly = await create();
+    expect(embeddingOnly.runtime?.cacheKeyData).not.toHaveProperty("modelDigest");
+    await expect(embeddingOnly.provider.embed("hello", { inputType: "query" })).resolves.toEqual([
+      1, 0,
+    ]);
+    expect(server.requests.filter((request) => request.url === "/api/tags")).toEqual(
+      Array.from({ length: 3 }, () => ({
+        method: "GET",
+        url: "/api/tags",
+        authorization: undefined,
+        proxyAuthorization: undefined,
+        proxyAuth: "fixture-proxy-key",
+        body: "",
+      })),
+    );
   });
 
   it("redacts bare authorization credentials reflected under unknown fields", async () => {
