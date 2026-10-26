@@ -4,38 +4,27 @@ import { log } from "../logger.js";
 import { createFailoverDecisionLogger } from "./failover-observation.js";
 
 type DecisionBase = Parameters<typeof createFailoverDecisionLogger>[0];
+const base: DecisionBase = {
+  stage: "assistant",
+  runId: "run:base",
+  failoverReason: null,
+  provider: "openai",
+  model: "mock-1",
+  profileId: "openai:p1",
+  fallbackConfigured: false,
+};
 const warn = vi.fn<typeof log.warn>();
 beforeEach(() => {
   warn.mockClear();
   vi.spyOn(log, "warn").mockImplementation(warn);
 });
 
-function createDecisionLogger(overrides: Partial<DecisionBase> = {}) {
-  return createFailoverDecisionLogger({
-    stage: "assistant",
-    runId: "run:base",
-    rawError: "",
-    failoverReason: null,
-    profileFailureReason: null,
-    provider: "openai",
-    model: "mock-1",
-    profileId: "openai:p1",
-    fallbackConfigured: false,
-    timedOut: false,
-    aborted: false,
-    ...overrides,
-  });
-}
-
 function observeDecision(
-  overrides: Partial<DecisionBase>,
-  decision: Parameters<ReturnType<typeof createDecisionLogger>>[0] = "surface_error",
+  overrides: Partial<DecisionBase> = {},
+  decision: Parameters<ReturnType<typeof createFailoverDecisionLogger>>[0] = "surface_error",
+  extra?: Parameters<ReturnType<typeof createFailoverDecisionLogger>>[1],
 ) {
-  createDecisionLogger(overrides)(decision);
-  return firstWarnDetails();
-}
-
-function firstWarnDetails() {
+  createFailoverDecisionLogger({ ...base, ...overrides })(decision, extra);
   return expectDefined(warn.mock.calls[0]?.[1], "structured failover details");
 }
 
@@ -62,14 +51,12 @@ it.each<[Partial<DecisionBase>, string]>([
 });
 
 it("keeps current retry and carried rotation counts identical in structured and console details", () => {
-  createDecisionLogger({
-    failoverReason: "overloaded",
-    retryCount: 3,
-    profileRotationCount: 2,
-  })("retry_same_model", { retryCount: 1 });
-
+  const details = observeDecision(
+    { failoverReason: "overloaded", retryCount: 3, profileRotationCount: 2 },
+    "retry_same_model",
+    { retryCount: 1 },
+  );
   expect(warn).toHaveBeenCalledTimes(1);
-  const details = firstWarnDetails();
   expect(details).toMatchObject({
     decision: "retry_same_model",
     retryCount: 1,
@@ -81,26 +68,25 @@ it("omits normal continuation logs when debug is disabled", () => {
   vi.spyOn(log, "isEnabled").mockReturnValue(false);
   const debugSpy = vi.spyOn(log, "debug").mockImplementation(() => {});
 
-  createDecisionLogger()("continue_normal");
+  createFailoverDecisionLogger(base)("continue_normal");
 
   expect(warn).not.toHaveBeenCalled();
   expect(debugSpy).not.toHaveBeenCalled();
 });
 
 it("includes from and to model refs when the source differs from the selected target", () => {
-  const logDecision = createDecisionLogger({
-    model: "gpt-5.4",
-    sourceProvider: "github-copilot",
-    sourceModel: "gpt-5.4-mini",
-    attemptCount: 4,
-    retryCount: 2,
-    profileRotationCount: 1,
-  });
-
-  logDecision("fallback_model");
-
+  const observation = observeDecision(
+    {
+      model: "gpt-5.4",
+      sourceProvider: "github-copilot",
+      sourceModel: "gpt-5.4-mini",
+      attemptCount: 4,
+      retryCount: 2,
+      profileRotationCount: 1,
+    },
+    "fallback_model",
+  );
   expect(warn.mock.calls[0]?.[0]).toBe("embedded run failover decision");
-  const observation = firstWarnDetails();
   expect(observation).toMatchObject({
     decision: "fallback_model",
     attemptCount: 4,

@@ -38,36 +38,34 @@ describe("finalizeEmbeddedAttempt trajectory capture", () => {
     return Object.fromEntries(recordEvent.mock.calls) as Record<string, Record<string, unknown>>;
   };
 
-  type TerminalCaseOptions = {
-    texts?: string[];
-    last?: AssistantStopReason;
-    completed?: AssistantStopReason;
-    yielded?: boolean;
-  };
   type TerminalCase = {
     name: string;
     terminal: EmbeddedRunAttemptResult["terminal"];
     currentStopReason: AssistantStopReason;
     expectedStopReason: string | undefined;
     expectedFinalStatus: "success" | "error" | "interrupted";
-    options: TerminalCaseOptions;
+    options: Partial<EmbeddedRunAttemptResult>;
   };
   const ok = { kind: "ok" } as const;
   const externalAbort = { kind: "aborted", source: "external" } as const;
   const yieldAbort = { kind: "aborted", source: "yield_cleanup" } as const;
   const failure = { source: "prompt", error: new Error("prompt failed") } as const;
-  const yielded = { last: "aborted", completed: "stop", yielded: true } as const;
+  const yielded = {
+    lastAssistant: assistant("aborted"),
+    currentAttemptCompletedAssistant: assistant("stop"),
+    yieldDetected: true,
+  };
   const timeout = { kind: "timeout", phase: "prompt", source: "runtime" } as const;
 
   it.each`
     name                                     | terminal                         | currentStopReason | expectedStopReason | expectedFinalStatus | options
-    ${"current over stale"}                  | ${ok}                            | ${"stop"}         | ${"stop"}          | ${"success"}        | ${{ last: "aborted" }}
-    ${"normal completion"}                   | ${ok}                            | ${"length"}       | ${"stop"}          | ${"success"}        | ${{ completed: "stop" }}
+    ${"current over stale"}                  | ${ok}                            | ${"stop"}         | ${"stop"}          | ${"success"}        | ${{ lastAssistant: assistant("aborted") }}
+    ${"normal completion"}                   | ${ok}                            | ${"length"}       | ${"stop"}          | ${"success"}        | ${{ currentAttemptCompletedAssistant: assistant("stop") }}
     ${"length truncation with visible text"} | ${ok}                            | ${"length"}       | ${"length"}        | ${"success"}        | ${{}}
     ${"yield plus prompt timeout"}           | ${timeout}                       | ${"stop"}         | ${undefined}       | ${"interrupted"}    | ${yielded}
     ${"yield plus external abort"}           | ${externalAbort}                 | ${"stop"}         | ${"aborted"}       | ${"interrupted"}    | ${yielded}
     ${"external abort over prompt failure"}  | ${{ ...externalAbort, failure }} | ${"stop"}         | ${"aborted"}       | ${"interrupted"}    | ${{}}
-    ${"partial provider error"}              | ${ok}                            | ${"error"}        | ${"error"}         | ${"error"}          | ${{ texts: ["x"] }}
+    ${"partial provider error"}              | ${ok}                            | ${"error"}        | ${"error"}         | ${"error"}          | ${{ assistantTexts: ["x"] }}
     ${"yield cleanup plus prompt failure"}   | ${{ ...yieldAbort, failure }}    | ${"error"}        | ${undefined}       | ${"error"}          | ${yielded}
     ${"yield over completed assistant"}      | ${yieldAbort}                    | ${"length"}       | ${"end_turn"}      | ${"success"}        | ${yielded}
   `(
@@ -81,13 +79,9 @@ describe("finalizeEmbeddedAttempt trajectory capture", () => {
     }: TerminalCase) => {
       const events = captureTrajectory({
         terminal,
-        assistantTexts: options.texts ?? [],
-        lastAssistant: assistant(options.last ?? "toolUse"),
+        lastAssistant: assistant("toolUse"),
         currentAttemptAssistant: assistant(currentStopReason),
-        currentAttemptCompletedAssistant: options.completed
-          ? assistant(options.completed)
-          : undefined,
-        yieldDetected: options.yielded,
+        ...options,
       });
 
       for (const name of ["model.completed", "trace.artifacts", "session.ended"]) {
@@ -122,9 +116,7 @@ describe("finalizeEmbeddedAttempt trajectory capture", () => {
     const media = [{ path: "/media/canonical.png", contentType: "image/png" }];
     const message = castAgentMessage({ role: "user", content: "inspect", __openclaw: { media } });
     const expected = structuredClone(message);
-    const events = captureTrajectory({
-      messagesSnapshot: [message],
-    });
+    const events = captureTrajectory({ messagesSnapshot: [message] });
     expect(events["model.completed"]?.messagesSnapshot).toEqual([expected]);
   });
   it.each([false, true])("does not count an unconsumed tool error as delivery (%s)", (answered) => {

@@ -12,9 +12,7 @@ import { outsideExecutionCapacity, withReleasableExecutionCapacity } from "./exe
 
 const lane = "projection-recovery-capacity";
 
-afterEach(() => {
-  resetCommandQueueStateForTest();
-});
+afterEach(resetCommandQueueStateForTest);
 
 it("lets another session run during recovery and reacquires in queue order", async () => {
   setCommandLaneConcurrency(lane, 1);
@@ -113,16 +111,11 @@ it("joins the suspended task's cleanup when capacity readmission is refused", as
       cleanupDone = true;
     }
   });
-  const outcome = work.then(
-    () => {
+  const outcome = work
+    .catch((error: unknown) => error)
+    .finally(() => {
       settled = true;
-      return undefined;
-    },
-    (error: unknown) => {
-      settled = true;
-      return error;
-    },
-  );
+    });
   try {
     await cleanupStarted.promise;
     expect(settled).toBe(false);
