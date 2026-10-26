@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { expect, it, vi } from "vitest";
 import { withTestDir } from "../test-helpers/temp-dir.js";
+import { withMockedPlatform } from "../test-utils/vitest-spies.js";
 import { createPnpmTarget, writePackageRoot } from "./package-update-steps.test-support.js";
 import { swapStagedPackageInstall } from "./package-update-swap.js";
 import { prepareNativePackageStage } from "./update-native-package-stage.js";
@@ -33,37 +34,29 @@ it.each(["absent", "optional-link", "required-link"] as const)(
       const candidate = path.join(native.projectRoot, "5", "node_modules", "openclaw");
       await writePackageRoot(candidate, "2.0.0");
       const store = path.join(native.projectRoot, "5", ".pnpm");
-      const modules = path.join(store, "@lydell+node-pty@1.2.0-beta.15", "node_modules");
+      const version = "1.2.0-beta.15";
+      const modules = path.join(store, `@lydell+node-pty@${version}`, "node_modules");
       const owner = path.join(modules, "@lydell", "node-pty");
+      const nativeName = "@lydell/node-pty-win32-x64";
       const host = path.join(
         store,
-        "@lydell+node-pty-win32-x64@1.2.0-beta.15",
+        `${nativeName.replace("/", "+")}@${version}`,
         "node_modules",
-        "@lydell",
-        "node-pty-win32-x64",
+        nativeName,
       );
       await fs.mkdir(owner, { recursive: true });
       await fs.mkdir(host, { recursive: true });
-      const variants = [
-        "darwin-arm64",
-        "darwin-x64",
-        "linux-arm64",
-        "linux-x64",
-        "win32-arm64",
-        "win32-x64",
-      ];
+      const optionalName = "@lydell/node-pty-darwin-arm64";
       await fs.writeFile(
         path.join(owner, "package.json"),
         JSON.stringify({
           name: "@lydell/node-pty",
-          optionalDependencies: Object.fromEntries(
-            variants.map((variant) => [`@lydell/node-pty-${variant}`, "1.2.0-beta.15"]),
-          ),
+          optionalDependencies: { [optionalName]: version, [nativeName]: version },
           dependencies: missing === "required-link" ? { "required-runtime": "1.0.0" } : {},
         }),
       );
       await fs.writeFile(path.join(host, "index.mjs"), 'export default "win32-x64";');
-      await fs.symlink(host, path.join(modules, "@lydell", "node-pty-win32-x64"));
+      await fs.symlink(host, path.join(modules, nativeName));
       await fs.writeFile(
         path.join(owner, "index.mjs"),
         'export { default } from "../node-pty-win32-x64/index.mjs";',
@@ -76,32 +69,31 @@ it.each(["absent", "optional-link", "required-link"] as const)(
         'import native from "./node_modules/@lydell/node-pty/index.mjs"; console.log(native);',
       );
       if (missing !== "absent") {
-        const name =
-          missing === "optional-link" ? "@lydell/node-pty-darwin-arm64" : "required-runtime";
+        const name = missing === "optional-link" ? optionalName : "required-runtime";
         const link = path.join(modules, name);
         await fs.symlink(path.join(store, "not-installed", name), link);
       }
-      const platform = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
       const arch = vi.spyOn(process, "arch", "get").mockReturnValue("x64");
       let result;
       try {
-        result = await swapStagedPackageInstall({
-          installTarget,
-          packageName: "openclaw",
-          stage: {
-            prefix: native.projectRoot,
-            layout: {
+        result = await withMockedPlatform("win32", () =>
+          swapStagedPackageInstall({
+            installTarget,
+            packageName: "openclaw",
+            stage: {
               prefix: native.projectRoot,
-              globalRoot: native.globalRoot,
-              binDir: native.binDir,
+              layout: {
+                prefix: native.projectRoot,
+                globalRoot: native.globalRoot,
+                binDir: native.binDir,
+              },
+              packageRoot: candidate,
+              installTarget: createPnpmTarget(native.globalRoot, candidate),
+              native,
             },
-            packageRoot: candidate,
-            installTarget: createPnpmTarget(native.globalRoot, candidate),
-            native,
-          },
-        });
+          }),
+        );
       } finally {
-        platform.mockRestore();
         arch.mockRestore();
       }
       if (missing === "required-link") {
@@ -116,16 +108,10 @@ it.each(["absent", "optional-link", "required-link"] as const)(
           (await runFile(process.execPath, [path.join(packageRoot, "openclaw.mjs")])).stdout.trim(),
         ).toBe("win32-x64");
         if (missing === "optional-link") {
-          await expect(
-            fs.lstat(
-              path.join(
-                project,
-                path.relative(native.projectRoot, modules),
-                "@lydell",
-                "node-pty-darwin-arm64",
-              ),
-            ),
-          ).rejects.toMatchObject({ code: "ENOENT" });
+          const installedModules = path.join(project, path.relative(native.projectRoot, modules));
+          await expect(fs.lstat(path.join(installedModules, optionalName))).rejects.toMatchObject({
+            code: "ENOENT",
+          });
         }
       }
     });
