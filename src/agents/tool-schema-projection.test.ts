@@ -1,4 +1,5 @@
 import { publishRuntimeToolInputSchema } from "@openclaw/ai/internal/tool-schema";
+import { Type } from "typebox";
 import { assert, describe, expect, it } from "vitest";
 import {
   filterProviderNormalizableTools,
@@ -31,9 +32,7 @@ describe("runtime tool input schema projection", () => {
       $dynamicAnchor: "root",
       $dynamicRef: "#root",
       anyOf: [{ $dynamicAnchor: "branch" }, { properties: { "": { $dynamicRef: "#empty" } } }],
-      $defs: { $dynamicAnchor: { type: "string" } },
       properties: {
-        $dynamicRef: { type: "string" },
         target: { $dynamicRef: "#target" },
         "literal.dot[0]": { $dynamicAnchor: "literal" },
       },
@@ -50,7 +49,6 @@ describe("runtime tool input schema projection", () => {
         "parameters.properties.literal.dot[0].$dynamicAnchor",
       ],
     });
-    expect(schema).toEqual(expectedSchema);
   });
 
   it.each<[string, unknown, string]>([
@@ -93,6 +91,32 @@ describe("runtime tool input schema projection", () => {
       value: "finite",
     },
   ])("ignores non-JSON Number tags (%#)", expectFiniteDefault);
+
+  it("does not report schema map field names as dynamic JSON Schema keywords", () => {
+    expect(
+      projectRuntimeToolInputSchema({
+        type: "object",
+        $defs: { $dynamicAnchor: { type: "string" } },
+        properties: { $dynamicRef: { type: "string" } },
+      }).violations,
+    ).toEqual([]);
+  });
+
+  it("keeps tools whose examples contain literal schema documents", () => {
+    const instance = {
+      document: { $dynamicAnchor: "node", properties: { child: { $dynamicRef: "#node" } } },
+    };
+    const parameters = Type.Object(
+      { document: Type.Record(Type.String(), Type.Unknown()) },
+      { examples: [instance] },
+    );
+    const original = structuredClone(parameters);
+    const tool = { name: "store_schema", parameters };
+
+    expect(projectRuntimeToolInputSchema(parameters)).toEqual({ schema: original, violations: [] });
+    expect(filterRuntimeCompatibleTools([tool])).toEqual({ tools: [tool], diagnostics: [] });
+    expect(parameters).toEqual(original);
+  });
 
   it("reuses published inspection facts without copying their empty diagnostics across attempts", () => {
     const projection = publishRuntimeToolInputSchema(objectSchema({ query: { type: "string" } }));
@@ -162,5 +186,31 @@ describe("runtime tool input schema projection", () => {
     );
     unreadableName = false;
     expect(filterRuntimeCompatibleTools([tool])).toEqual({ tools: [tool], diagnostics: [] });
+  });
+
+  it("quarantines unreadable runtime tool fields without dropping healthy siblings", () => {
+    const unreadable = {
+      name: "fuzzplugin_unreadable",
+      get parameters(): Record<string, unknown> {
+        throw new Error("fuzzplugin parameters getter exploded");
+      },
+    };
+    const healthy = { name: "healthy", parameters: objectSchema({}) };
+
+    expect(filterRuntimeCompatibleTools([unreadable, healthy])).toEqual({
+      ...rejected("fuzzplugin_unreadable", "fuzzplugin_unreadable.parameters is unreadable"),
+      tools: [healthy],
+    });
+  });
+
+  it("quarantines non-object schemas before provider normalization", () => {
+    const name = "fuzzplugin_array_root";
+    const arraySchema = {
+      name,
+      parameters: { type: "array", items: { type: "number" } },
+    };
+    expect(filterProviderNormalizableTools([arraySchema])).toEqual(
+      rejected(name, `${name}.parameters.type must be "object"`),
+    );
   });
 });
