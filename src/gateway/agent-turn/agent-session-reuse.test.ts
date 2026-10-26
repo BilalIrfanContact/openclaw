@@ -159,7 +159,7 @@ it.each<[Partial<PatchParams>, string, boolean, boolean?]>([
   [{ freshEntry: undefined, initialEntry: undefined }, "replacement", true],
   [{ freshEntry }, "original", false],
   [{ expectedExistingSessionId: "original" }, "original", false],
-  [{ requestedSessionId: "original" }, "original", false],
+  [{ requestedSessionId: "original" }, "original", true],
   [{ hasRestoredCronContinuation: true }, "original", false],
   [{ freshEntry: failedEntry }, "original", false],
   [{ freshEntry: failedEntry, visibleRequest: false }, "original", true],

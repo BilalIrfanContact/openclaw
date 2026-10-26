@@ -1,5 +1,5 @@
 import { createSessionWorkStartChangedError } from "../../config/sessions/lifecycle.js";
-import { patchSessionEntryCore } from "../../config/sessions/session-accessor.entry.js";
+import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import type { SessionResetBoundaryWrite } from "../../config/sessions/session-accessor.lifecycle-types.js";
 import { resetSessionEntryLifecycle } from "../../config/sessions/session-accessor.lifecycle.js";
 import { buildSessionCreationStamp } from "../../config/sessions/session-entry-provenance.js";

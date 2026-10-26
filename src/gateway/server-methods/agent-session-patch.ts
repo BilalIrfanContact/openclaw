@@ -142,7 +142,7 @@ export async function buildAgentSessionPatch(params: {
     isRecoverableTerminalSessionStatus(params.freshEntry?.status);
   const canReuseSession =
     Boolean(params.freshEntry?.sessionId) &&
-    (requestedSessionMatchesEntry || (freshness?.fresh ?? false) || recoverableTerminalSession) &&
+    ((freshness?.fresh ?? false) || recoverableTerminalSession) &&
     !(failedSession && !metadata?.present) &&
     !terminalMainTranscriptNewerThanRegistry;
   const usableRequestedSessionId =
