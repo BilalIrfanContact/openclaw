@@ -26,6 +26,8 @@ export type EmbeddingProviderCallOptions = {
   inputType?: "query" | "document" | "semantic" | "classification" | "clustering";
   /** The host applied an explicit query instruction; skip provider query templates. */
   queryInstructionApplied?: boolean;
+  /** The host applied an explicit document format; skip provider document templates. */
+  documentFormatApplied?: boolean;
   /** Report each successful upstream request before resolving; undefined means usage unavailable. */
   onUsage?: (usage: EmbeddingUsage | undefined) => void;
 } & MemorySearchDeadlineControlOptions;

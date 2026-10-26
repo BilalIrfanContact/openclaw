@@ -2,7 +2,6 @@ import { createDeferred } from "openclaw/plugin-sdk/concurrency-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { expectDefined } from "openclaw/plugin-sdk/expect-runtime";
 import {
-  formatEmbeddingModelInput,
   isEmbeddingBatchUnavailableError,
   type EmbeddingInput,
   type MemoryEmbeddingProviderRuntime,
@@ -34,6 +33,7 @@ import {
 } from "./manager-embedding-cache-ops.js";
 import { createMemoryEmbeddingOperationError } from "./manager-embedding-errors.js";
 import {
+  embedMemoryDocuments,
   embedMemoryQuery,
   formatMemoryEmbeddingChunks,
   runMemoryEmbeddingBatchTimeoutRetry,
@@ -199,6 +199,7 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerEmbeddingCa
                 provider.model,
                 this.settings.inputFormat,
               ),
+              ...(this.settings.inputFormat ? { documentFormatApplied: true } : {}),
               wait: this.batch.wait,
               concurrency: this.batch.concurrency,
               pollIntervalMs: this.batch.pollIntervalMs,
@@ -286,16 +287,11 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerEmbeddingCa
             timeoutMs,
             message: `memory embeddings batch timed out after ${Math.round(timeoutMs / 1000)}s`,
             run: async (signal) =>
-              await provider.embedBatch(
-                batchItems.map((item) =>
-                  formatEmbeddingModelInput(
-                    item.input,
-                    provider.model,
-                    "document",
-                    this.settings.inputFormat,
-                  ),
-                ),
-                { signal, inputType: "document" },
+              await embedMemoryDocuments(
+                provider,
+                batchItems.map((item) => item.input),
+                this.settings.inputFormat,
+                { signal },
               ),
           });
           if (!structured) {

@@ -34,6 +34,24 @@ export function embedMemoryQuery(
   );
 }
 
+export function embedMemoryDocuments(
+  provider: EmbeddingProvider,
+  inputs: Array<string | EmbeddingInput>,
+  inputFormat: ResolvedMemorySearchConfig["inputFormat"],
+  options: EmbeddingProviderCallOptions,
+): Promise<number[][]> {
+  return provider.embedBatch(
+    inputs.map((input) =>
+      formatEmbeddingModelInput(input, provider.model, "document", inputFormat),
+    ),
+    {
+      ...options,
+      inputType: "document",
+      ...(inputFormat ? { documentFormatApplied: true } : {}),
+    },
+  );
+}
+
 // Retry attempts are host control state. Provider-thrown values stay opaque so
 // they cannot override the counter or break accounting when they are immutable.
 type MemoryBatchRetryResult =

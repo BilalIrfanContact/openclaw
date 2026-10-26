@@ -113,6 +113,9 @@ describe("memory model input formatting", () => {
       expect(embed.mock.calls[0]?.[1]?.queryInstructionApplied).toBe(
         queryInstruction || inputFormat ? true : undefined,
       );
+      expect(embedBatch.mock.calls[0]?.[1]?.documentFormatApplied).toBe(
+        inputFormat ? true : undefined,
+      );
       expect(embedBatch.mock.calls[0]?.[0]).toEqual(
         prefixed
           ? [
