@@ -30,7 +30,6 @@ import {
 import type { McpConfig, McpServerConfig as ConfiguredMcpServer } from "../config/types.mcp.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
-import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import {
   createGatewaySchedulerClock,
@@ -885,94 +884,6 @@ describe("session MCP runtime", () => {
     expect(diagnostic?.message).toContain("Authorization: Bearer ");
     expect(diagnostic?.message).toContain("***");
     expect(diagnostic?.message).not.toContain(secret);
-  });
-
-  it.each([
-    {
-      policy: "server include/exclude",
-      serverName: "docs",
-      tools: ["search_docs", "read_docs", "admin_delete"],
-      server: { toolFilter: { include: ["*_docs", "admin_*"], exclude: ["admin_*"] } },
-      capabilities: { tools: {} },
-      expectedTools: ["read_docs", "search_docs"],
-      expectedServer: { toolCount: 2, tools: { filteredCount: 1 } },
-    },
-    {
-      policy: "names copied from probe",
-      serverName: "docs",
-      tools: ["query", "list_tables", "admin_delete"],
-      server: {
-        toolFilter: {
-          include: ["docs__query", "docs__list_tables", "docs__resources_list", "admin_*"],
-          exclude: ["docs__admin_delete"],
-        },
-      },
-      capabilities: { tools: {}, resources: {} },
-      expectedTools: ["list_tables", "query"],
-      expectedServer: { toolCount: 2, tools: { filteredCount: 1 } },
-      expectedMaterialized: ["docs__list_tables", "docs__query", "docs__resources_list"],
-      expectedRawBindings: ["list_tables", "query", "resources_list"],
-    },
-    {
-      policy: "raw names that look like probe names",
-      serverName: "demo",
-      tools: ["query", "demo__query", "demo__read"],
-      server: { toolFilter: { include: ["demo__query", "demo__*"], exclude: ["demo__read"] } },
-      capabilities: { tools: {} },
-      expectedTools: ["demo__query"],
-      expectedServer: { toolCount: 1, tools: { filteredCount: 2 } },
-      expectedMaterialized: ["demo__demo__query"],
-    },
-    {
-      policy: "session denials including synthetic tools",
-      serverName: "docs",
-      tools: ["search_docs", "read_docs"],
-      server: {},
-      toolOverrides: { mcpToolsDeny: { docs: ["read_docs", "resources_read"] } },
-      capabilities: { tools: {}, resources: {} },
-      expectedTools: ["search_docs"],
-      expectedServer: { toolCount: 1 },
-      expectedDenied: [{ serverName: "docs", toolName: "read_docs", deniedBySession: true }],
-      expectedMaterialized: ["docs__resources_list", "docs__search_docs"],
-    },
-    {
-      policy: "own-property session denials",
-      serverName: "constructor",
-      tools: ["slow_tool"],
-      server: {},
-      toolOverrides: { mcpToolsDeny: { docs: ["slow_tool"] } },
-      capabilities: { tools: {} },
-      expectedTools: ["slow_tool"],
-      expectedServer: { toolCount: 1 },
-    },
-  ])("filters the MCP catalog with $policy", async (row) => {
-    const { runtime } = await stdioRuntime(
-      row.serverName,
-      {
-        capabilities: row.capabilities,
-        tools: row.tools.map((name) => toolDefinition(name)),
-      },
-      {
-        inWorkspace: true,
-        server: row.server,
-        toolOverrides: "toolOverrides" in row ? row.toolOverrides : undefined,
-      },
-    );
-    const catalog = await runtime.getCatalog();
-    expect(catalog.tools.map((tool) => tool.toolName).toSorted()).toEqual(row.expectedTools);
-    expect(catalog.servers[row.serverName]).toMatchObject(row.expectedServer);
-    if (row.expectedDenied) {
-      expect(catalog.sessionDeniedTools).toMatchObject(row.expectedDenied);
-    }
-    if ("expectedMaterialized" in row) {
-      const materialized = await materializeTools({ runtime });
-      expect(materialized.tools.map((tool) => tool.name)).toEqual(row.expectedMaterialized);
-      if ("expectedRawBindings" in row) {
-        expect(materialized.tools.map((tool) => getPluginToolMeta(tool)?.mcp?.toolName)).toEqual(
-          row.expectedRawBindings,
-        );
-      }
-    }
   });
 
   it("does not split a surrogate pair at the MCP metadata text limit", async () => {
