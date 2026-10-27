@@ -56,6 +56,7 @@ export function projectBundleMcpServerCatalog({
     denialMap && Object.hasOwn(denialMap, serverName) ? denialMap[serverName] : [],
   );
   const isToolAllowed = createMcpToolFilter(toolFilter, {
+    ...capabilities,
     safeServerName,
     toolNames: listedTools.map((tool) => tool.name.trim()),
   });
@@ -66,10 +67,8 @@ export function projectBundleMcpServerCatalog({
     return deniedToolNames.has(toolName) ? "denied" : "include";
   });
   const exposedTools = normalizedTools.tools;
-  // An include that matches nothing is usually a mistyped or copied name; an
-  // exclude-only filter that hides everything is a deliberate choice. Selected
-  // resource/prompt utilities (e.g. include: ["resources_list"]) are a valid
-  // selection that materialization exposes separately from tools.
+  // Empty includes often mean a mistyped name. Session denials and selected
+  // resource/prompt utilities are intentional selections, not filter mistakes.
   const selectsUtility = [
     ...(capabilities.resources ? ["resources_list", "resources_read"] : []),
     ...(capabilities.prompts ? ["prompts_list", "prompts_get"] : []),
