@@ -55,7 +55,8 @@ vi.mock("../agents/mcp-codex-tool-approval.js", () => ({
   resolveProjectedMcpCodexToolApprovalMode: () => undefined,
 }));
 vi.mock("../agents/mcp-tool-filter.js", () => ({
-  isMcpToolAllowed: () => true,
+  createMcpToolFilter: () => () => true,
+  mcpCatalogToolFilterScope: () => undefined,
   normalizeMcpToolFilter: () => undefined,
 }));
 vi.mock("../plugins/current-plugin-metadata-state.js", () => ({

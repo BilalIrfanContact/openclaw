@@ -30,6 +30,7 @@ import {
 import type { McpConfig, McpServerConfig as ConfiguredMcpServer } from "../config/types.mcp.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
+import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import {
   createGatewaySchedulerClock,
@@ -897,6 +898,32 @@ describe("session MCP runtime", () => {
       expectedServer: { toolCount: 2, tools: { filteredCount: 1 } },
     },
     {
+      policy: "names copied from probe",
+      serverName: "docs",
+      tools: ["query", "list_tables", "admin_delete"],
+      server: {
+        toolFilter: {
+          include: ["docs__query", "docs__list_tables", "docs__resources_list", "admin_*"],
+          exclude: ["docs__admin_delete"],
+        },
+      },
+      capabilities: { tools: {}, resources: {} },
+      expectedTools: ["list_tables", "query"],
+      expectedServer: { toolCount: 2, tools: { filteredCount: 1 } },
+      expectedMaterialized: ["docs__list_tables", "docs__query", "docs__resources_list"],
+      expectedRawBindings: ["list_tables", "query", "resources_list"],
+    },
+    {
+      policy: "raw names that look like probe names",
+      serverName: "demo",
+      tools: ["query", "demo__query", "demo__read"],
+      server: { toolFilter: { include: ["demo__query", "demo__*"], exclude: ["demo__read"] } },
+      capabilities: { tools: {} },
+      expectedTools: ["demo__query"],
+      expectedServer: { toolCount: 1, tools: { filteredCount: 2 } },
+      expectedMaterialized: ["demo__demo__query"],
+    },
+    {
       policy: "session denials including synthetic tools",
       serverName: "docs",
       tools: ["search_docs", "read_docs"],
@@ -940,6 +967,11 @@ describe("session MCP runtime", () => {
     if ("expectedMaterialized" in row) {
       const materialized = await materializeTools({ runtime });
       expect(materialized.tools.map((tool) => tool.name)).toEqual(row.expectedMaterialized);
+      if ("expectedRawBindings" in row) {
+        expect(materialized.tools.map((tool) => getPluginToolMeta(tool)?.mcp?.toolName)).toEqual(
+          row.expectedRawBindings,
+        );
+      }
     }
   });
 
