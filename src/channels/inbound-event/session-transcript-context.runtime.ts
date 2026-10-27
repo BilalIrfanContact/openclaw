@@ -53,10 +53,8 @@ function mergeableChatWindowEntries(ctx: FinalizedMsgContext) {
  * A platform-selected recent window keeps its own rows, except rows the model
  * already answered as user turns of this session: the conversation (and a
  * native runtime thread fed by it) holds them, so quoting them again on every
- * later turn only duplicates context. Model output after the admitted row is
- * the delivery proof; a turn that failed before reaching the model keeps its
- * row. Unaddressed discussion stays. Edits made after an answered turn are not
- * resurfaced; the original turn stands.
+ * later turn only duplicates context. Only completed answers cover the preceding
+ * request. Changed platform text and requests with incomplete output stay eligible.
  */
 async function omitAnsweredRecentHistory(params: {
   agentId: string;
@@ -79,21 +77,25 @@ async function omitAnsweredRecentHistory(params: {
   });
   // A reply proves only the user row right before it; earlier rows in the same gap
   // (a failed turn, or collected extras) stay, since a duplicate beats lost context.
-  const answered = new Set<string>();
+  const answered = new Map<string, string>();
   let replied = false;
   for (const turn of turns.toReversed()) {
     if (turn.role === "assistant") {
-      replied = true;
+      replied ||= turn.isCompletedAnswer === true;
       continue;
     }
-    if (replied && turn.messageId) {
-      answered.add(turn.messageId);
+    if (replied && turn.messageId && !answered.has(turn.messageId)) {
+      answered.set(turn.messageId, turn.text);
     }
     replied = false;
   }
   if (answered.size > 0) {
     params.ctx.InboundHistory = history.filter(
-      (entry) => !entry.messageId || !answered.has(entry.messageId),
+      // Text equality cannot prove that historical attachments are unchanged.
+      (entry) =>
+        !entry.messageId ||
+        Boolean(entry.media?.length) ||
+        answered.get(entry.messageId) !== entry.body.trim(),
     );
   }
 }

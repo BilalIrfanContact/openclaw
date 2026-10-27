@@ -7,6 +7,7 @@ import {
   extractAssistantPhaseText,
   extractFirstTextBlock,
   readTerminalSourceReplyDeliveryMirror,
+  resolveAssistantMessagePhase,
 } from "../../shared/chat-message-content.js";
 import {
   CRON_DIRECT_DELIVERY_CONTEXT_KIND,
@@ -32,6 +33,8 @@ export type SessionRecentConversationText = {
   id?: string;
   /** Platform message id recorded when a channel message was admitted as this user turn. */
   messageId?: string;
+  /** Positive completion evidence; readable assistant text alone is not a finished answer. */
+  isCompletedAnswer?: true;
   role: "user" | "assistant";
   text: string;
   timestamp?: number;
@@ -93,15 +96,26 @@ function extractRecentConversationText(
   }
   const provenance = asOptionalRecord(message.provenance);
   const timestamp = asFiniteNumber(message.timestamp);
+  const metadata = asOptionalRecord(message["__openclaw"]);
   const transportMessageId =
-    message.role === "user"
-      ? asOptionalRecord(asOptionalRecord(message["__openclaw"])?.transport)?.messageId
-      : undefined;
+    message.role === "user" ? asOptionalRecord(metadata?.transport)?.messageId : undefined;
+  // Native narration can have stopReason="stop" too; only the recorded terminal
+  // mirror (or a confirmed final source reply) proves that the request was answered.
+  const isCompletedAnswer =
+    message.role === "assistant" &&
+    (readTerminalSourceReplyDeliveryMirror(message) ||
+      (message.stopReason === "stop" &&
+        !message.errorMessage &&
+        resolveAssistantMessagePhase(message) !== "commentary" &&
+        message.openclawStreamFallback === undefined &&
+        message.openclawAsyncDelivery === undefined &&
+        (metadata?.mirrorOrigin === undefined || metadata.runTerminal === true)));
   return {
     ...(typeof parsed?.id === "string" && parsed.id ? { id: parsed.id } : {}),
     ...(typeof transportMessageId === "string" && transportMessageId
       ? { messageId: transportMessageId }
       : {}),
+    ...(isCompletedAnswer ? { isCompletedAnswer: true as const } : {}),
     role: message.role,
     text,
     ...(timestamp !== undefined ? { timestamp } : {}),

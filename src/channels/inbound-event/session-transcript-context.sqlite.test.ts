@@ -122,7 +122,7 @@ it.each([false, true])(
   },
 );
 
-it("omits recent platform rows the session already answered", async () => {
+it("omits unchanged answered rows while preserving edits and unseen discussion", async () => {
   const scope = {
     agentId: "main",
     sessionId: "discord-room",
@@ -137,6 +137,7 @@ it("omits recent platform rows the session already answered", async () => {
     // Admitted, but the run failed before any model output.
     ["31", 2_000, false],
     ["32", 3_000, true],
+    ["34", 4_000, true],
   ] as const) {
     await persistUserTurnTranscript({
       ...scope,
@@ -155,6 +156,8 @@ it("omits recent platform rows the session already answered", async () => {
             message: {
               role: "assistant",
               content: [{ type: "text", text: messageId }],
+              stopReason: "stop",
+              __openclaw: { mirrorOrigin: "codex-app-server", runTerminal: true },
               timestamp: timestamp + 500,
             },
           },
@@ -172,10 +175,10 @@ it("omits recent platform rows the session already answered", async () => {
     CommandAuthorized: false,
     SessionTranscriptContext: { historyLimit: 20, historyKind: "recent" },
     InboundHistory: [
-      ...["30", "31", "32"].map((id, index) => ({
+      ...["30", "31", "32", "34"].map((id, index) => ({
         messageId: id,
         sender: "Alice",
-        body: `reply only "${id}"`,
+        body: id === "34" ? 'reply only "34 edited"' : `reply only "${id}"`,
         timestamp: (index + 1) * 1_000,
       })),
       // Unaddressed discussion never became a turn, so the model has not seen it.
@@ -195,9 +198,101 @@ it("omits recent platform rows the session already answered", async () => {
     },
   });
 
-  expect(prompt).toContain('"history_count":2');
+  expect(prompt).toContain('"history_count":3');
   expect(prompt).toContain('reply only "31"');
+  expect(prompt).toContain('reply only "34 edited"');
   expect(prompt).toContain("unseen side discussion");
   expect(prompt).not.toContain('reply only "30"');
   expect(prompt).not.toContain('reply only "32"');
+});
+
+it("keeps recent requests followed only by incomplete assistant output", async () => {
+  const scope = {
+    agentId: "main",
+    sessionId: "discord-incomplete",
+    sessionKey: "agent:main:discord:channel:incomplete",
+    storePath: path.join(sessionDirs.make(), "sessions.json"),
+  };
+  const sessionEntry = { sessionId: scope.sessionId, chatType: "channel" as const, updatedAt: 1 };
+  await replaceSessionEntry(scope, sessionEntry);
+  const incomplete = [
+    {
+      id: "commentary",
+      message: {
+        stopReason: "stop",
+        openclawStreamFallback: { replacementText: "Checking", source: "segment", itemId: "item" },
+        __openclaw: { mirrorOrigin: "codex-app-server", runId: "commentary-run" },
+      },
+    },
+    { id: "failed", message: { stopReason: "error", errorMessage: "provider failed" } },
+    { id: "interrupted", message: { stopReason: "aborted" } },
+    { id: "truncated", message: { stopReason: "length" } },
+    { id: "tool-progress", message: { stopReason: "toolUse" } },
+    { id: "phased-commentary", message: { stopReason: "stop", phase: "commentary" } },
+    {
+      id: "unsettled-native",
+      message: { stopReason: "stop", __openclaw: { mirrorOrigin: "codex-app-server" } },
+    },
+  ];
+  for (const [index, { id, message }] of incomplete.entries()) {
+    await persistUserTurnTranscript({
+      ...scope,
+      sessionEntry,
+      input: {
+        text: `request ${id}`,
+        timestamp: index * 1_000,
+        transport: { channel: "discord", messageId: id },
+      },
+    });
+    await persistTurn(scope, {
+      updateMode: "none",
+      messages: [
+        {
+          message: {
+            role: "assistant",
+            content: "Checking",
+            ...message,
+            timestamp: index * 1_000 + 1,
+          },
+        },
+      ],
+    });
+  }
+  const ctx: FinalizedMsgContext = {
+    Body: "What happened?",
+    Provider: "discord",
+    SessionKey: scope.sessionKey,
+    AgentId: scope.agentId,
+    CommandAuthorized: false,
+    SessionTranscriptContext: { historyLimit: 20, historyKind: "recent" },
+    InboundHistory: incomplete.map(({ id }) => ({
+      messageId: id,
+      sender: "Alice",
+      body: `request ${id}`,
+    })),
+  };
+  let prompt = "";
+  await runPreparedChannelTurn({
+    channel: "discord",
+    routeSessionKey: scope.sessionKey,
+    storePath: scope.storePath,
+    ctxPayload: ctx,
+    recordInboundSession: async () => undefined,
+    runDispatch: async () => {
+      prompt = buildInboundUserContextPrefix(ctx);
+      return { queuedFinal: false };
+    },
+  });
+  expect(ctx.InboundHistory?.map((entry) => entry.messageId)).toEqual([
+    "commentary",
+    "failed",
+    "interrupted",
+    "truncated",
+    "tool-progress",
+    "phased-commentary",
+    "unsettled-native",
+  ]);
+  expect(prompt).toContain('"history_count":7');
+  expect(prompt).toContain("request commentary");
+  expect(prompt).toContain("request interrupted");
 });
