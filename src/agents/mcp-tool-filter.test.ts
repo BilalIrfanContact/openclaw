@@ -45,24 +45,20 @@ describe("createMcpToolFilter", () => {
     expect(allowed("read_file")).toBe(false);
   });
 
+  // Probe lists read.page and read-page both under demo__read-page, and lists
+  // a, A, A-2 as demo__a, demo__A-2, demo__A-2-2.
   it.each([
-    ["exact probe name", { include: ["demo__list_tables"] }, ["list_tables"]],
-    ["raw name before an equal probe name", { include: ["demo__query"] }, ["demo__query"]],
-    ["probe name of a prefixed raw name", { include: ["demo__demo__query"] }, ["demo__query"]],
-    ["raw-only wildcard", { include: ["demo__*"] }, ["demo__query"]],
+    [{ include: ["demo__list_tables"] }, ["list_tables"]],
+    [{ include: ["demo__query"] }, ["demo__query"]],
+    [{ include: ["demo__demo__query"] }, ["demo__query"]],
+    [{ include: ["demo__*"] }, ["demo__query"]],
+    [{ include: ["demo__read-page", "demo__A-2"] }, []],
     [
-      "probe-name exclude",
-      { exclude: ["demo__list_tables"] },
-      ["query", "demo__query", "read.page", "read-page"],
+      { exclude: ["demo__list_tables", "demo__read-page", "demo__A-2"] },
+      ["query", "demo__query", "a"],
     ],
-    ["ambiguous probe-name include", { include: ["demo__read-page"] }, []],
-    [
-      "ambiguous probe-name exclude",
-      { exclude: ["demo__read-page"] },
-      ["query", "list_tables", "demo__query"],
-    ],
-  ])("selects advertised tools by %s", (_case, filter, expected) => {
-    const toolNames = ["query", "list_tables", "demo__query", "read.page", "read-page"];
+  ])("resolves probe names in %j to their raw tools", (filter, expected) => {
+    const toolNames = "query list_tables demo__query read.page read-page a A A-2".split(" ");
     const allowed = createMcpToolFilter(filter, { safeServerName: "demo", toolNames });
     expect(toolNames.filter(allowed)).toEqual(expected);
   });

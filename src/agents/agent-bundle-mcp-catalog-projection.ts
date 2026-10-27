@@ -66,6 +66,8 @@ export function projectBundleMcpServerCatalog({
     return deniedToolNames.has(toolName) ? "denied" : "include";
   });
   const exposedTools = normalizedTools.tools;
+  // An include that matches nothing is usually a mistyped or copied name; an
+  // exclude-only filter that hides everything is a deliberate choice.
   if (
     toolFilter?.include &&
     listedTools.length > 0 &&

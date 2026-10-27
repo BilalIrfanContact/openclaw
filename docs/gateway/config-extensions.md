@@ -86,11 +86,13 @@ requires [`uv`/`uvx`](https://docs.astral.sh/uv/getting-started/installation/).
   that names no advertised raw tool can also be an unambiguous unsuffixed name
   shown by `openclaw mcp probe` (for example `docs__search`). Exact raw names
   take precedence, and globs match raw names only. Use raw names for colliding
-  probe names, including names with a collision suffix such as `-2`.
-  If an include/exclude selection exposes no advertised tool, OpenClaw logs a
-  warning. Servers with resources or prompts also generate utility tool names (`resources_list`,
-  `resources_read`, `prompts_list`, `prompts_get`), and those names use the
-  same filter.
+  probe names, including names with a collision suffix such as `-2`: in
+  `include` such a name selects nothing, and in `exclude` it hides every tool
+  that could carry it. If `include` is set and the filter leaves none of the
+  advertised tools, OpenClaw logs a warning; an exclude-only filter that hides
+  every tool is treated as intentional. Servers with resources or prompts also
+  generate utility tool names (`resources_list`, `resources_read`,
+  `prompts_list`, `prompts_get`), and those names use the same filter.
 - `mcp.servers.<name>.codex`: optional Codex app-server projection controls.
   This block is OpenClaw metadata for Codex app-server threads only; it does not
   affect ACP sessions, generic Codex harness config, or other runtime adapters.
