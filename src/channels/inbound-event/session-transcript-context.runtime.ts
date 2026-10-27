@@ -49,6 +49,55 @@ function mergeableChatWindowEntries(ctx: FinalizedMsgContext) {
   );
 }
 
+/**
+ * A platform-selected recent window keeps its own rows, except rows the model
+ * already answered as user turns of this session: the conversation (and a
+ * native runtime thread fed by it) holds them, so quoting them again on every
+ * later turn only duplicates context. Model output after the admitted row is
+ * the delivery proof; a turn that failed before reaching the model keeps its
+ * row. Unaddressed discussion stays. Edits made after an answered turn are not
+ * resurfaced; the original turn stands.
+ */
+async function omitAnsweredRecentHistory(params: {
+  agentId: string;
+  ctx: FinalizedMsgContext;
+  sessionKey: string;
+  storePath: string;
+}): Promise<void> {
+  const history = params.ctx.InboundHistory ?? [];
+  const candidates = history.filter((entry) => entry.messageId).length;
+  if (candidates === 0) {
+    return;
+  }
+  // Roughly one user row and one reply per answered turn; a shorter read only keeps rows.
+  const turns = await readRecentUserAssistantTextForSession({
+    agentId: params.agentId,
+    sessionKey: params.sessionKey,
+    storePath: params.storePath,
+    limit: candidates * 2,
+    includeMessageToolSourceReplies: true,
+  });
+  // A reply proves only the user row right before it; earlier rows in the same gap
+  // (a failed turn, or collected extras) stay, since a duplicate beats lost context.
+  const answered = new Set<string>();
+  let replied = false;
+  for (const turn of turns.toReversed()) {
+    if (turn.role === "assistant") {
+      replied = true;
+      continue;
+    }
+    if (replied && turn.messageId) {
+      answered.add(turn.messageId);
+    }
+    replied = false;
+  }
+  if (answered.size > 0) {
+    params.ctx.InboundHistory = history.filter(
+      (entry) => !entry.messageId || !answered.has(entry.messageId),
+    );
+  }
+}
+
 /** Merges active canonical transcript turns into the prepared channel history in place. */
 export async function mergeSessionTranscriptContext(params: {
   agentId?: string;
@@ -59,7 +108,6 @@ export async function mergeSessionTranscriptContext(params: {
   const options = params.ctx.SessionTranscriptContext;
   const limit = Math.max(0, Math.floor(options?.historyLimit ?? 0));
   if (
-    options?.historyKind === "recent" ||
     limit === 0 ||
     isSessionBoundaryCommandText(params.ctx.CommandBody ?? params.ctx.RawBody, {
       botUsername: params.ctx.BotUsername,
@@ -70,6 +118,12 @@ export async function mergeSessionTranscriptContext(params: {
   // Routed channel turns provide agentId; direct callers may derive only an
   // explicitly scoped owner. Unscoped keys without routing context fail closed.
   const agentId = params.agentId?.trim() || parseAgentSessionKey(params.sessionKey)?.agentId;
+  if (options?.historyKind === "recent") {
+    if (agentId) {
+      await omitAnsweredRecentHistory({ ...params, agentId });
+    }
+    return;
+  }
   if (!agentId) {
     throw new Error("Session transcript context requires an agent owner.");
   }

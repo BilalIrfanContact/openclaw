@@ -8,6 +8,7 @@ import {
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
 import { appendAssistantMessageToSessionTranscript as mirrorReply } from "../../config/sessions/transcript.js";
+import { persistUserTurnTranscript } from "../../sessions/user-turn-transcript.persistence.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { runPreparedChannelTurn } from "../turn/execution.js";
 import { mergeSessionTranscriptContext } from "./session-transcript-context.runtime.js";
@@ -120,3 +121,83 @@ it.each([false, true])(
     expect(await loadTranscriptEvents(scope)).toEqual(stored);
   },
 );
+
+it("omits recent platform rows the session already answered", async () => {
+  const scope = {
+    agentId: "main",
+    sessionId: "discord-room",
+    sessionKey: "agent:main:discord:channel:c1",
+    storePath: path.join(sessionDirs.make(), "sessions.json"),
+  };
+  const sessionEntry = { sessionId: scope.sessionId, chatType: "channel" as const, updatedAt: 1 };
+  await replaceSessionEntry(scope, sessionEntry);
+  // Production write path: each admitted Discord request records its platform message id.
+  for (const [messageId, timestamp, answered] of [
+    ["30", 1_000, true],
+    // Admitted, but the run failed before any model output.
+    ["31", 2_000, false],
+    ["32", 3_000, true],
+  ] as const) {
+    await persistUserTurnTranscript({
+      ...scope,
+      sessionEntry,
+      input: {
+        text: `reply only "${messageId}"`,
+        timestamp,
+        transport: { channel: "discord", messageId },
+      },
+    });
+    if (answered) {
+      await persistTurn(scope, {
+        updateMode: "none",
+        messages: [
+          {
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: messageId }],
+              timestamp: timestamp + 500,
+            },
+          },
+        ],
+      });
+    }
+  }
+  const ctx: FinalizedMsgContext = {
+    Body: 'reply only "33"',
+    SessionKey: scope.sessionKey,
+    AgentId: scope.agentId,
+    Provider: "discord",
+    ChatType: "channel",
+    Timestamp: 5_000,
+    CommandAuthorized: false,
+    SessionTranscriptContext: { historyLimit: 20, historyKind: "recent" },
+    InboundHistory: [
+      ...["30", "31", "32"].map((id, index) => ({
+        messageId: id,
+        sender: "Alice",
+        body: `reply only "${id}"`,
+        timestamp: (index + 1) * 1_000,
+      })),
+      // Unaddressed discussion never became a turn, so the model has not seen it.
+      { messageId: "325", sender: "Bob", body: "unseen side discussion", timestamp: 3_500 },
+    ],
+  };
+  let prompt = "";
+  await runPreparedChannelTurn({
+    channel: "discord",
+    routeSessionKey: scope.sessionKey,
+    storePath: scope.storePath,
+    ctxPayload: ctx,
+    recordInboundSession: async () => undefined,
+    runDispatch: async () => {
+      prompt = buildInboundUserContextPrefix(ctx);
+      return { queuedFinal: false };
+    },
+  });
+
+  expect(prompt).toContain('"history_count":2');
+  expect(prompt).toContain('reply only "31"');
+  expect(prompt).toContain("unseen side discussion");
+  expect(prompt).not.toContain('reply only "30"');
+  expect(prompt).not.toContain('reply only "32"');
+});

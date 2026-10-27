@@ -30,6 +30,8 @@ function readPreferredUpstreamUserText(message: {
 
 export type SessionRecentConversationText = {
   id?: string;
+  /** Platform message id recorded when a channel message was admitted as this user turn. */
+  messageId?: string;
   role: "user" | "assistant";
   text: string;
   timestamp?: number;
@@ -91,8 +93,15 @@ function extractRecentConversationText(
   }
   const provenance = asOptionalRecord(message.provenance);
   const timestamp = asFiniteNumber(message.timestamp);
+  const transportMessageId =
+    message.role === "user"
+      ? asOptionalRecord(asOptionalRecord(message["__openclaw"])?.transport)?.messageId
+      : undefined;
   return {
     ...(typeof parsed?.id === "string" && parsed.id ? { id: parsed.id } : {}),
+    ...(typeof transportMessageId === "string" && transportMessageId
+      ? { messageId: transportMessageId }
+      : {}),
     role: message.role,
     text,
     ...(timestamp !== undefined ? { timestamp } : {}),
