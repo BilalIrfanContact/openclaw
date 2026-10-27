@@ -31,14 +31,16 @@ function readPreferredUpstreamUserText(message: {
 
 export type SessionRecentConversationText = {
   id?: string;
-  /** Platform message id recorded when a channel message was admitted as this user turn. */
-  messageId?: string;
-  /** Positive completion evidence; readable assistant text alone is not a finished answer. */
-  isCompletedAnswer?: true;
   role: "user" | "assistant";
   text: string;
   timestamp?: number;
   sourceChannel?: string;
+};
+
+/** Internal channel-history evidence, not part of the Plugin SDK text projection. */
+export type SessionRecentConversationTurn = SessionRecentConversationText & {
+  messageId?: string;
+  isCompletedAnswer?: true;
 };
 
 export type ReadRecentSessionConversationTextOptions = {
@@ -51,10 +53,14 @@ export type ReadRecentSessionConversationTextOptions = {
   preferUpstreamUserText?: boolean;
 };
 
+export type ReadRecentSessionConversationTurnOptions = ReadRecentSessionConversationTextOptions & {
+  includeTurnIdentity?: boolean;
+};
+
 function extractRecentConversationText(
   event: TranscriptEvent,
-  options: ReadRecentSessionConversationTextOptions = {},
-): SessionRecentConversationText | undefined {
+  options: ReadRecentSessionConversationTurnOptions = {},
+): SessionRecentConversationTurn | undefined {
   const parsed = asOptionalRecord(event);
   const message = asOptionalRecord(parsed?.message);
   if (
@@ -96,26 +102,8 @@ function extractRecentConversationText(
   }
   const provenance = asOptionalRecord(message.provenance);
   const timestamp = asFiniteNumber(message.timestamp);
-  const metadata = asOptionalRecord(message["__openclaw"]);
-  const transportMessageId =
-    message.role === "user" ? asOptionalRecord(metadata?.transport)?.messageId : undefined;
-  // Native narration can have stopReason="stop" too; only the recorded terminal
-  // mirror (or a confirmed final source reply) proves that the request was answered.
-  const isCompletedAnswer =
-    message.role === "assistant" &&
-    (readTerminalSourceReplyDeliveryMirror(message) ||
-      (message.stopReason === "stop" &&
-        !message.errorMessage &&
-        resolveAssistantMessagePhase(message) !== "commentary" &&
-        message.openclawStreamFallback === undefined &&
-        message.openclawAsyncDelivery === undefined &&
-        (metadata?.mirrorOrigin === undefined || metadata.runTerminal === true)));
-  return {
+  const entry: SessionRecentConversationTurn = {
     ...(typeof parsed?.id === "string" && parsed.id ? { id: parsed.id } : {}),
-    ...(typeof transportMessageId === "string" && transportMessageId
-      ? { messageId: transportMessageId }
-      : {}),
-    ...(isCompletedAnswer ? { isCompletedAnswer: true as const } : {}),
     role: message.role,
     text,
     ...(timestamp !== undefined ? { timestamp } : {}),
@@ -123,6 +111,28 @@ function extractRecentConversationText(
       ? { sourceChannel: provenance.sourceChannel.trim() }
       : {}),
   };
+  if (options.includeTurnIdentity) {
+    const metadata = asOptionalRecord(message["__openclaw"]);
+    const messageId =
+      message.role === "user" ? asOptionalRecord(metadata?.transport)?.messageId : undefined;
+    if (typeof messageId === "string" && messageId) {
+      entry.messageId = messageId;
+    }
+    // Native narration can stop too; only a terminal mirror or final reply proves completion.
+    if (
+      message.role === "assistant" &&
+      (readTerminalSourceReplyDeliveryMirror(message) ||
+        (message.stopReason === "stop" &&
+          !message.errorMessage &&
+          resolveAssistantMessagePhase(message) !== "commentary" &&
+          message.openclawStreamFallback === undefined &&
+          message.openclawAsyncDelivery === undefined &&
+          (metadata?.mirrorOrigin === undefined || metadata.runTerminal === true)))
+    ) {
+      entry.isCompletedAnswer = true;
+    }
+  }
+  return entry;
 }
 
 /** Select recent text inside the caller's single transcript snapshot. */
@@ -130,11 +140,11 @@ export function readRecentTranscriptConversationText(
   readPage: (
     options: SessionTranscriptBoundedMessageTailOptions,
   ) => SessionTranscriptBoundedMessageTailPage,
-  options: ReadRecentSessionConversationTextOptions = {},
-): SessionRecentConversationText[] {
+  options: ReadRecentSessionConversationTurnOptions = {},
+): SessionRecentConversationTurn[] {
   const limit = Math.max(1, Math.floor(options.limit ?? 10));
   const pageSize = 250;
-  const recent: SessionRecentConversationText[] = [];
+  const recent: SessionRecentConversationTurn[] = [];
   for (let offset = 0; recent.length < limit; offset += pageSize) {
     const page = readPage({ maxMessages: pageSize, maxBytes: Number.MAX_SAFE_INTEGER, offset });
     for (const event of page.events.toReversed()) {

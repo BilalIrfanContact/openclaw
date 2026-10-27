@@ -6,6 +6,7 @@ import { mergeSessionTranscriptContext } from "./session-transcript-context.runt
 
 vi.mock("../../config/sessions/transcript.js", () => ({
   readRecentUserAssistantTextForSession: vi.fn(),
+  readRecentUserAssistantTurnsForSession: vi.fn(),
 }));
 
 const readRecent = vi.mocked(readRecentUserAssistantTextForSession);
@@ -20,10 +21,6 @@ function transcriptPair(question: string, reply: string) {
 function context(overrides: Partial<FinalizedMsgContext> = {}): FinalizedMsgContext {
   return {
     Body: "continue",
-    RawBody: "continue",
-    CommandBody: "continue",
-    From: "slack:channel:C1",
-    To: "channel:C1",
     SessionKey: "agent:main:slack:channel:c1",
     AgentId: "main",
     Provider: "slack",

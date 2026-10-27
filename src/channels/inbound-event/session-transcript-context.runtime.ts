@@ -2,7 +2,10 @@ import { filterStringEntries } from "@openclaw/normalization-core/string-normali
 import { isSessionBoundaryCommandText } from "../../auto-reply/command-detection.js";
 import type { HistoryEntry } from "../../auto-reply/reply/history.types.js";
 import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
-import { readRecentUserAssistantTextForSession } from "../../config/sessions/transcript.js";
+import {
+  readRecentUserAssistantTextForSession,
+  readRecentUserAssistantTurnsForSession,
+} from "../../config/sessions/transcript.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { stripInlineDirectiveTagsForDelivery } from "../../utils/directive-tags.js";
 
@@ -63,12 +66,15 @@ async function omitAnsweredRecentHistory(params: {
   storePath: string;
 }): Promise<void> {
   const history = params.ctx.InboundHistory ?? [];
-  const candidates = history.filter((entry) => entry.messageId).length;
+  let candidates = 0;
+  for (const entry of history) {
+    candidates += entry.messageId ? 1 : 0;
+  }
   if (candidates === 0) {
     return;
   }
   // Roughly one user row and one reply per answered turn; a shorter read only keeps rows.
-  const turns = await readRecentUserAssistantTextForSession({
+  const turns = await readRecentUserAssistantTurnsForSession({
     agentId: params.agentId,
     sessionKey: params.sessionKey,
     storePath: params.storePath,
@@ -79,7 +85,8 @@ async function omitAnsweredRecentHistory(params: {
   // (a failed turn, or collected extras) stay, since a duplicate beats lost context.
   const answered = new Map<string, string>();
   let replied = false;
-  for (const turn of turns.toReversed()) {
+  for (let index = turns.length - 1; index >= 0; index--) {
+    const turn = turns[index]!;
     if (turn.role === "assistant") {
       replied ||= turn.isCompletedAnswer === true;
       continue;
