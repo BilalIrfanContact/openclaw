@@ -82,8 +82,13 @@ requires [`uv`/`uvx`](https://docs.astral.sh/uv/getting-started/installation/).
   for private endpoints and mutual TLS.
 - `mcp.servers.<name>.toolFilter`: optional per-server tool selection. `include`
   limits the discovered MCP tools to matching names; `exclude` hides matching
-  names. Entries are exact MCP tool names or simple `*` globs. Servers with
-  resources or prompts also generate utility tool names (`resources_list`,
+  names. Entries are exact MCP tool names or simple `*` globs. An exact entry
+  that names no advertised raw tool can also be an unambiguous unsuffixed name
+  shown by `openclaw mcp probe` (for example `docs__search`). Exact raw names
+  take precedence, and globs match raw names only. Use raw names for colliding
+  probe names, including names with a collision suffix such as `-2`.
+  If an include/exclude selection exposes no advertised tool, OpenClaw logs a
+  warning. Servers with resources or prompts also generate utility tool names (`resources_list`,
   `resources_read`, `prompts_list`, `prompts_get`), and those names use the
   same filter.
 - `mcp.servers.<name>.codex`: optional Codex app-server projection controls.
