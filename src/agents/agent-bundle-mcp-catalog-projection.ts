@@ -67,11 +67,18 @@ export function projectBundleMcpServerCatalog({
   });
   const exposedTools = normalizedTools.tools;
   // An include that matches nothing is usually a mistyped or copied name; an
-  // exclude-only filter that hides everything is a deliberate choice.
+  // exclude-only filter that hides everything is a deliberate choice. Selected
+  // resource/prompt utilities (e.g. include: ["resources_list"]) are a valid
+  // selection that materialization exposes separately from tools.
+  const selectsUtility = [
+    ...(capabilities.resources ? ["resources_list", "resources_read"] : []),
+    ...(capabilities.prompts ? ["prompts_list", "prompts_get"] : []),
+  ].some((operation) => isToolAllowed(operation) && !deniedToolNames.has(operation));
   if (
     toolFilter?.include &&
     listedTools.length > 0 &&
-    exposedTools.length + normalizedTools.deniedTools.length === 0
+    exposedTools.length + normalizedTools.deniedTools.length === 0 &&
+    !selectsUtility
   ) {
     logWarn(
       `bundle-mcp: server "${serverName}" toolFilter selected none of its ${listedTools.length} advertised tools; check include/exclude entries and use raw MCP tool names or unambiguous names from "openclaw mcp probe".`,

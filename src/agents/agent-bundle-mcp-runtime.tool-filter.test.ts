@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterAll, afterEach, beforeAll, expect, it, onTestFinished } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it, onTestFinished, vi } from "vitest";
 import { openFixtureReceiptChannel } from "../../test/helpers/fixture-receipts.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import * as logger from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 import { createSessionMcpRuntime } from "./agent-bundle-mcp-runtime.js";
 import { writeListToolsMcpServer } from "./agent-bundle-mcp-stdio.test-support.js";
@@ -85,4 +86,32 @@ it.each([
     await materialized.find((tool) => tool.name === "docs__query")?.execute("call", {});
     expect((await fs.readFile(logPath, "utf8")).match(/^call .*$/gm)).toEqual(["call query"]);
   }
+});
+
+it.each([
+  { include: ["resources_list"], warns: false },
+  { include: ["nonexistent"], warns: true },
+])("warns about an empty MCP include only when it selects nothing: $include", async (row) => {
+  const warn = vi.spyOn(logger, "logWarn").mockImplementation(() => {});
+  onTestFinished(() => warn.mockRestore());
+  const tempDir = tempDirs.make("bundle-mcp-tool-filter-warn-");
+  const [filePath, logPath] = [path.join(tempDir, "server.mjs"), path.join(tempDir, "server.log")];
+  const tools = [{ name: "query", inputSchema: { type: "object" } }];
+  const capabilities = { tools: {}, resources: {} };
+  await writeListToolsMcpServer({ filePath, logPath, capabilities, tools }, receipts.endpoint);
+  const server = {
+    command: process.execPath,
+    args: [filePath],
+    toolFilter: { include: row.include },
+  };
+  const runtime = createSessionMcpRuntime({
+    sessionId: "tool-filter-warn",
+    workspaceDir: tempDir,
+    cfg: { plugins: { enabled: false }, mcp: { servers: { docs: server } } },
+  });
+  onTestFinished(() => runtime.dispose());
+
+  await runtime.getCatalog();
+  const warned = warn.mock.calls.some(([message]) => String(message).includes("selected none"));
+  expect(warned).toBe(row.warns);
 });
