@@ -4,6 +4,7 @@ import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
 import { readRecentUserAssistantTextForSession } from "../../config/sessions/transcript.js";
 import { mergeSessionTranscriptContext } from "./session-transcript-context.runtime.js";
 
+// mock-isolation: Supply transcript rows without real session state; the adjacent SQLite suite covers persistence.
 vi.mock("../../config/sessions/transcript.js", () => ({
   readRecentUserAssistantTextForSession: vi.fn(),
   readRecentUserAssistantTurnsForSession: vi.fn(),
